@@ -51,7 +51,7 @@
         "check:format": "prettier --check ."
     },
     "dependencies": {
-        "circuitjson-toolkit": "^1.0.0",
+        "circuitjson-toolkit": "^1.0.1",
         "fflate": "^0.8.2",
         "occt-import-js": "^0.0.23",
         "three": "^0.183.2"
