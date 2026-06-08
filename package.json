@@ -1,0 +1,65 @@
+{
+    "name": "pcb-scene3d-viewer",
+    "version": "1.0.1",
+    "description": "Reusable Three.js PCB 3D scene viewer for normalized ECAD and CircuitJSON scene descriptions",
+    "keywords": [
+        "pcb",
+        "ecad",
+        "eda",
+        "circuitjson",
+        "3d",
+        "three",
+        "viewer",
+        "step",
+        "wrl"
+    ],
+    "homepage": "https://github.com/SunboX/pcb-scene3d-viewer#readme",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/SunboX/pcb-scene3d-viewer.git"
+    },
+    "bugs": {
+        "url": "https://github.com/SunboX/pcb-scene3d-viewer/issues"
+    },
+    "license": "AGPL-3.0-or-later",
+    "type": "module",
+    "main": "./src/index.mjs",
+    "exports": {
+        ".": "./src/index.mjs",
+        "./scene3d": "./src/scene3d.mjs",
+        "./styles/scene3d.css": "./src/styles/scene3d.css"
+    },
+    "files": [
+        "src",
+        "docs/api.md",
+        "docs/circuitjson.md",
+        "docs/model-format.md",
+        "docs/testing.md",
+        "spec",
+        "LICENSE",
+        "LICENSES",
+        "COMMERCIAL-LICENSE.md",
+        "CONTRIBUTING.md",
+        "NOTICE.md",
+        "README.md",
+        "AGENTS.md",
+        "REUSE.toml"
+    ],
+    "scripts": {
+        "test": "node --test",
+        "format": "prettier --write .",
+        "check:format": "prettier --check ."
+    },
+    "dependencies": {
+        "circuitjson-toolkit": "^1.0.0",
+        "fflate": "^0.8.2",
+        "occt-import-js": "^0.0.23",
+        "three": "^0.183.2"
+    },
+    "devDependencies": {
+        "prettier": "^3.4.2"
+    },
+    "engines": {
+        "node": ">=20"
+    }
+}
