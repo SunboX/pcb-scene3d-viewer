@@ -1,3 +1,5 @@
+import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector.mjs'
+
 /**
  * Clips filled 2D geometry against drill-cutout polygons.
  */
@@ -79,7 +81,7 @@ export class PcbScene3dCutoutGeometryFilter {
     /**
      * Resolves clipping settings.
      * @param {{ maxDepth?: number, maxEdgeLength?: number }} options
-     * @returns {{ maxDepth: number, maxEdgeLength: number }}
+     * @returns {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number }}
      */
     static #resolveSettings(options) {
         const maxEdgeLength = Math.max(
@@ -94,24 +96,35 @@ export class PcbScene3dCutoutGeometryFilter {
                     PcbScene3dCutoutGeometryFilter.#DEFAULT_MAX_DEPTH,
                 0
             ),
-            maxEdgeLength
+            maxEdgeLength,
+            maxEdgeLengthSquared: maxEdgeLength * maxEdgeLength
         }
     }
 
     /**
      * Prepares cutout polygons with bounds for fast overlap checks.
      * @param {{ x: number, y: number }[][]} cutouts
-     * @returns {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }[]}
+     * @returns {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }[]}
      */
     static #prepareCutouts(cutouts) {
         return cutouts
             .filter((cutout) => Array.isArray(cutout) && cutout.length >= 3)
-            .map((cutout) => ({
-                points: cutout,
-                segments:
-                    PcbScene3dCutoutGeometryFilter.#buildCutoutSegments(cutout),
-                bounds: PcbScene3dCutoutGeometryFilter.#resolveBounds(cutout)
-            }))
+            .map((cutout) => {
+                const circularCutout =
+                    PcbScene3dCutoutCircleDetector.resolve(cutout)
+
+                return {
+                    points: cutout,
+                    segments:
+                        PcbScene3dCutoutGeometryFilter.#buildCutoutSegments(
+                            cutout
+                        ),
+                    bounds: PcbScene3dCutoutGeometryFilter.#resolveBounds(
+                        cutout
+                    ),
+                    ...circularCutout
+                }
+            })
     }
 
     /**
@@ -151,7 +164,7 @@ export class PcbScene3dCutoutGeometryFilter {
      * @param {number[]} positions
      * @param {{ x: number, y: number, z: number }[]} triangle
      * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }[]} cutouts
-     * @param {{ maxDepth: number, maxEdgeLength: number }} settings
+     * @param {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number }} settings
      * @param {number} depth
      * @param {{ changed: boolean }} state
      * @param {object | null} [cutoutIndex]
@@ -199,8 +212,8 @@ export class PcbScene3dCutoutGeometryFilter {
 
         if (
             depth >= settings.maxDepth ||
-            PcbScene3dCutoutGeometryFilter.#maxEdgeLength(triangle) <=
-                settings.maxEdgeLength
+            PcbScene3dCutoutGeometryFilter.#maxEdgeLengthSquared(triangle) <=
+                settings.maxEdgeLengthSquared
         ) {
             return
         }
@@ -443,23 +456,22 @@ export class PcbScene3dCutoutGeometryFilter {
     }
 
     /**
-     * Resolves the longest edge in one triangle.
+     * Resolves the longest squared edge length in one triangle.
      * @param {{ x: number, y: number }[]} triangle
      * @returns {number}
      */
-    static #maxEdgeLength(triangle) {
-        let maxLength = 0
+    static #maxEdgeLengthSquared(triangle) {
+        let maxLengthSquared = 0
 
         for (let index = 0; index < triangle.length; index += 1) {
             const point = triangle[index]
             const next = triangle[(index + 1) % triangle.length]
-            maxLength = Math.max(
-                maxLength,
-                Math.hypot(point.x - next.x, point.y - next.y)
-            )
+            const dx = point.x - next.x
+            const dy = point.y - next.y
+            maxLengthSquared = Math.max(maxLengthSquared, dx * dx + dy * dy)
         }
 
-        return maxLength
+        return maxLengthSquared
     }
 
     /**
@@ -496,10 +508,17 @@ export class PcbScene3dCutoutGeometryFilter {
      */
     static #boundsOverlap(first, second) {
         return (
-            first.minX <= second.maxX &&
-            first.maxX >= second.minX &&
-            first.minY <= second.maxY &&
-            first.maxY >= second.minY
+            first.minX <=
+                second.maxX +
+                    PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON &&
+            first.maxX >=
+                second.minX -
+                    PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON &&
+            first.minY <=
+                second.maxY +
+                    PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON &&
+            first.maxY >=
+                second.minY - PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
         )
     }
 
@@ -543,7 +562,7 @@ export class PcbScene3dCutoutGeometryFilter {
     /**
      * Returns true when one triangle intersects or covers a cutout.
      * @param {{ x: number, y: number }[]} triangle
-     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }} cutout
+     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} cutout
      * @returns {boolean}
      */
     static #doesTriangleOverlapCutout(triangle, cutout) {
@@ -587,10 +606,28 @@ export class PcbScene3dCutoutGeometryFilter {
     /**
      * Returns true when a point is inside or on a cutout.
      * @param {{ x: number, y: number }} point
-     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }} cutout
+     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} cutout
      * @returns {boolean}
      */
     static #isPointInsideOrOnCutout(point, cutout) {
+        if (
+            !PcbScene3dCutoutGeometryFilter.#pointOverlapsBounds(
+                point,
+                cutout.bounds
+            )
+        ) {
+            return false
+        }
+
+        if (cutout.isCircular) {
+            return (
+                PcbScene3dCutoutCircleDetector.distanceSquared(point, cutout) <=
+                (Number(cutout.radius || 0) +
+                    PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON) **
+                    2
+            )
+        }
+
         return (
             PcbScene3dCutoutGeometryFilter.#isPointOnCutoutBoundary(
                 point,
@@ -604,12 +641,46 @@ export class PcbScene3dCutoutGeometryFilter {
     }
 
     /**
+     * Returns true when a point lies within a bounding box tolerance.
+     * @param {{ x: number, y: number }} point
+     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} bounds
+     * @returns {boolean}
+     */
+    static #pointOverlapsBounds(point, bounds) {
+        return (
+            point.x >=
+                bounds.minX -
+                    PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON &&
+            point.x <=
+                bounds.maxX +
+                    PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON &&
+            point.y >=
+                bounds.minY -
+                    PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON &&
+            point.y <=
+                bounds.maxY + PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
+        )
+    }
+
+    /**
      * Returns true when a point lies inside a cutout and away from its border.
      * @param {{ x: number, y: number }} point
-     * @param {{ points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }} cutout
+     * @param {{ points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} cutout
      * @returns {boolean}
      */
     static #isPointStrictlyInsideCutout(point, cutout) {
+        if (cutout.isCircular) {
+            const radius = Math.max(
+                0,
+                Number(cutout.radius || 0) -
+                    PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
+            )
+            return (
+                PcbScene3dCutoutCircleDetector.distanceSquared(point, cutout) <
+                radius * radius
+            )
+        }
+
         const polygon = cutout.points
 
         let inside = false
@@ -638,18 +709,33 @@ export class PcbScene3dCutoutGeometryFilter {
     /**
      * Returns true when a point lies on a cutout edge.
      * @param {{ x: number, y: number }} point
-     * @param {{ points: { x: number, y: number }[] }} cutout
+     * @param {{ segments: { start: { x: number, y: number }, end: { x: number, y: number }, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} cutout
      * @returns {boolean}
      */
     static #isPointOnCutoutBoundary(point, cutout) {
-        const polygon = cutout.points
+        if (cutout.isCircular) {
+            return (
+                Math.abs(
+                    Math.sqrt(
+                        PcbScene3dCutoutCircleDetector.distanceSquared(
+                            point,
+                            cutout
+                        )
+                    ) - Number(cutout.radius || 0)
+                ) <= PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
+            )
+        }
 
-        for (let index = 0; index < polygon.length; index += 1) {
+        for (const segment of cutout.segments) {
             if (
+                PcbScene3dCutoutGeometryFilter.#pointOverlapsBounds(
+                    point,
+                    segment.bounds
+                ) &&
                 PcbScene3dCutoutGeometryFilter.#isPointOnSegment(
                     point,
-                    polygon[index],
-                    polygon[(index + 1) % polygon.length]
+                    segment.start,
+                    segment.end
                 )
             ) {
                 return true
@@ -703,9 +789,18 @@ export class PcbScene3dCutoutGeometryFilter {
         ) {
             const triangleStart = triangle[triangleIndex]
             const triangleEnd = triangle[(triangleIndex + 1) % triangle.length]
+            const triangleSegmentBounds =
+                PcbScene3dCutoutGeometryFilter.#resolveSegmentBounds(
+                    triangleStart,
+                    triangleEnd
+                )
 
             for (const segment of cutout.segments) {
                 if (
+                    PcbScene3dCutoutGeometryFilter.#boundsOverlap(
+                        triangleSegmentBounds,
+                        segment.bounds
+                    ) &&
                     PcbScene3dCutoutGeometryFilter.#segmentsIntersect(
                         triangleStart,
                         triangleEnd,
@@ -719,6 +814,21 @@ export class PcbScene3dCutoutGeometryFilter {
         }
 
         return false
+    }
+
+    /**
+     * Resolves one finite segment bounding box.
+     * @param {{ x: number, y: number }} firstStart
+     * @param {{ x: number, y: number }} firstEnd
+     * @returns {{ minX: number, maxX: number, minY: number, maxY: number }}
+     */
+    static #resolveSegmentBounds(firstStart, firstEnd) {
+        return {
+            minX: Math.min(firstStart.x, firstEnd.x),
+            maxX: Math.max(firstStart.x, firstEnd.x),
+            minY: Math.min(firstStart.y, firstEnd.y),
+            maxY: Math.max(firstStart.y, firstEnd.y)
+        }
     }
 
     /**

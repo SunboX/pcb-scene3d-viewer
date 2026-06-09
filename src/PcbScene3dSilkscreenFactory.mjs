@@ -15,6 +15,7 @@ export class PcbScene3dSilkscreenFactory {
     static #GEOMETRY_EPSILON = 0.001
     static #FULL_CIRCLE_EPSILON = 0.001
     static #MIN_STROKE_WIDTH_MIL = 0.04
+    static #STROKE_MESH_POSITION_CHUNK_SIZE = 24000
     static #STROKE_Z_OFFSET = 0.04
 
     /**
@@ -95,7 +96,7 @@ export class PcbScene3dSilkscreenFactory {
             THREE,
             fillColor
         )
-        const trackMesh = PcbScene3dSilkscreenFactory.#buildTrackMesh(
+        const trackMeshes = PcbScene3dSilkscreenFactory.#buildTrackMeshes(
             THREE,
             silkscreen?.tracks || [],
             strokeZ,
@@ -157,8 +158,8 @@ export class PcbScene3dSilkscreenFactory {
             }
         )
 
-        if (trackMesh) {
-            group.add(trackMesh)
+        if (trackMeshes.length) {
+            group.add(...trackMeshes)
         }
         if (arcMesh) {
             group.add(arcMesh)
@@ -194,7 +195,7 @@ export class PcbScene3dSilkscreenFactory {
     }
 
     /**
-     * Builds one filled mesh for all stroke-style silkscreen tracks.
+     * Builds filled meshes for stroke-style silkscreen tracks.
      * @param {any} THREE
      * @param {{ x1: number, y1: number, x2: number, y2: number, width?: number }[]} tracks
      * @param {number} z
@@ -202,9 +203,9 @@ export class PcbScene3dSilkscreenFactory {
      * @param {boolean} mirrorY
      * @param {any} material
      * @param {{ x: number, y: number }[][]} drillCutouts
-     * @returns {any | null}
+     * @returns {any[]}
      */
-    static #buildTrackMesh(
+    static #buildTrackMeshes(
         THREE,
         tracks,
         z,
@@ -213,7 +214,8 @@ export class PcbScene3dSilkscreenFactory {
         material,
         drillCutouts
     ) {
-        const positions = []
+        const meshes = []
+        let positions = []
         const denseHairline =
             PcbScene3dSilkscreenStrokeWidthResolver.resolveDenseHairline(tracks)
 
@@ -243,14 +245,31 @@ export class PcbScene3dSilkscreenFactory {
                     minWidth: PcbScene3dSilkscreenFactory.#MIN_STROKE_WIDTH_MIL
                 }
             )
+
+            if (
+                positions.length >=
+                PcbScene3dSilkscreenFactory.#STROKE_MESH_POSITION_CHUNK_SIZE
+            ) {
+                PcbScene3dSilkscreenFactory.#appendStrokeMesh(
+                    meshes,
+                    THREE,
+                    positions,
+                    material,
+                    drillCutouts
+                )
+                positions = []
+            }
         }
 
-        return PcbScene3dSilkscreenFactory.#buildStrokeMesh(
+        PcbScene3dSilkscreenFactory.#appendStrokeMesh(
+            meshes,
             THREE,
             positions,
             material,
             drillCutouts
         )
+
+        return meshes
     }
 
     /**
@@ -801,6 +820,28 @@ export class PcbScene3dSilkscreenFactory {
             ),
             material
         )
+    }
+
+    /**
+     * Appends one stroke mesh when a position batch contains geometry.
+     * @param {any[]} meshes Target mesh list.
+     * @param {any} THREE
+     * @param {number[]} positions
+     * @param {any} material
+     * @param {{ x: number, y: number }[][]} drillCutouts
+     * @returns {void}
+     */
+    static #appendStrokeMesh(meshes, THREE, positions, material, drillCutouts) {
+        const mesh = PcbScene3dSilkscreenFactory.#buildStrokeMesh(
+            THREE,
+            positions,
+            material,
+            drillCutouts
+        )
+
+        if (mesh) {
+            meshes.push(mesh)
+        }
     }
 
     /**

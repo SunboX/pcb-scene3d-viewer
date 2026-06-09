@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { PcbScene3dDetailCoordinateNormalizer } from '../src/PcbScene3dDetailCoordinateNormalizer.mjs'
 
-test('PcbScene3dDetailCoordinateNormalizer flips Altium detail Y into viewer space', () => {
+test('PcbScene3dDetailCoordinateNormalizer keeps Altium board assemblies in generated detail coordinates', () => {
     assert.deepEqual(
         PcbScene3dDetailCoordinateNormalizer.normalize(
             {
@@ -18,7 +18,7 @@ test('PcbScene3dDetailCoordinateNormalizer flips Altium detail Y into viewer spa
         ),
         {
             x: 25,
-            y: 40
+            y: -40
         }
     )
 })

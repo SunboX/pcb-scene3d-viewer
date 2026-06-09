@@ -1,3 +1,5 @@
+import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector.mjs'
+
 /**
  * Builds rounded outer-contour notches for drills that intersect board edges.
  */
@@ -5,6 +7,7 @@ export class PcbScene3dBoardEdgeCutoutBuilder {
     static #OUTER_SAMPLE_POINTS = 160
     static #EDGE_CUTOUT_SAMPLE_POINTS = 72
     static #GEOMETRY_EPSILON = 0.001
+    static #CONTOUR_CACHE = new WeakMap()
 
     /**
      * Resolves sampled points from one shape outline.
@@ -98,18 +101,128 @@ export class PcbScene3dBoardEdgeCutoutBuilder {
      * @returns {boolean}
      */
     static isHoleInsideContour(hole, contour) {
-        return (
-            Array.isArray(hole) &&
-            Array.isArray(contour) &&
-            hole.length >= 3 &&
-            contour.length >= 3 &&
-            hole.every((point) =>
-                PcbScene3dBoardEdgeCutoutBuilder.#isPointStrictlyInsidePolygon(
-                    point,
-                    contour
-                )
+        if (
+            !Array.isArray(hole) ||
+            !Array.isArray(contour) ||
+            hole.length < 3 ||
+            contour.length < 3
+        ) {
+            return false
+        }
+
+        const circularHole = PcbScene3dCutoutCircleDetector.resolve(
+            hole,
+            PcbScene3dBoardEdgeCutoutBuilder.#GEOMETRY_EPSILON
+        )
+        if (circularHole) {
+            return PcbScene3dBoardEdgeCutoutBuilder.#isCircularHoleInsideContour(
+                circularHole,
+                contour
+            )
+        }
+
+        return hole.every((point) =>
+            PcbScene3dBoardEdgeCutoutBuilder.#isPointStrictlyInsidePolygon(
+                point,
+                contour
             )
         )
+    }
+
+    /**
+     * Returns true when a circular hole lies fully inside a contour.
+     * @param {{ centerX: number, centerY: number, radius: number }} hole
+     * @param {{ x: number, y: number }[]} contour
+     * @returns {boolean}
+     */
+    static #isCircularHoleInsideContour(hole, contour) {
+        const center = { x: hole.centerX, y: hole.centerY }
+        if (
+            !PcbScene3dBoardEdgeCutoutBuilder.#isPointStrictlyInsidePolygon(
+                center,
+                contour
+            )
+        ) {
+            return false
+        }
+
+        const preparedContour =
+            PcbScene3dBoardEdgeCutoutBuilder.#resolvePreparedContour(contour)
+        const radius =
+            Number(hole.radius || 0) +
+            PcbScene3dBoardEdgeCutoutBuilder.#GEOMETRY_EPSILON
+        const radiusSquared = radius * radius
+
+        return preparedContour.segments.every(
+            (segment) =>
+                PcbScene3dBoardEdgeCutoutBuilder.#distanceSquaredToSegment(
+                    center,
+                    segment
+                ) > radiusSquared
+        )
+    }
+
+    /**
+     * Resolves cached contour segment metadata.
+     * @param {{ x: number, y: number }[]} contour
+     * @returns {{ segments: { start: { x: number, y: number }, dx: number, dy: number, lengthSquared: number }[] }}
+     */
+    static #resolvePreparedContour(contour) {
+        const cached =
+            PcbScene3dBoardEdgeCutoutBuilder.#CONTOUR_CACHE.get(contour)
+        if (cached) {
+            return cached
+        }
+
+        const prepared = {
+            segments: contour.map((start, index) => {
+                const end = contour[(index + 1) % contour.length]
+                const dx = end.x - start.x
+                const dy = end.y - start.y
+
+                return {
+                    start,
+                    dx,
+                    dy,
+                    lengthSquared: dx * dx + dy * dy
+                }
+            })
+        }
+        PcbScene3dBoardEdgeCutoutBuilder.#CONTOUR_CACHE.set(contour, prepared)
+        return prepared
+    }
+
+    /**
+     * Resolves squared distance from a point to a segment.
+     * @param {{ x: number, y: number }} point
+     * @param {{ start: { x: number, y: number }, dx: number, dy: number, lengthSquared: number }} segment
+     * @returns {number}
+     */
+    static #distanceSquaredToSegment(point, segment) {
+        if (
+            segment.lengthSquared <=
+            PcbScene3dBoardEdgeCutoutBuilder.#GEOMETRY_EPSILON
+        ) {
+            const dx = point.x - segment.start.x
+            const dy = point.y - segment.start.y
+            return dx * dx + dy * dy
+        }
+
+        const t = Math.max(
+            0,
+            Math.min(
+                1,
+                ((point.x - segment.start.x) * segment.dx +
+                    (point.y - segment.start.y) * segment.dy) /
+                    segment.lengthSquared
+            )
+        )
+        const closestX = segment.start.x + segment.dx * t
+        const closestY = segment.start.y + segment.dy * t
+        const dx = point.x - closestX
+        const dy = point.y - closestY
+
+        return dx * dx + dy * dy
     }
 
     /**

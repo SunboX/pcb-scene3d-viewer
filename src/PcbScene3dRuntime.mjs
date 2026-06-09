@@ -1,4 +1,5 @@
 import { PcbScene3dBoardSolderMaskFactory } from './PcbScene3dBoardSolderMaskFactory.mjs'
+import { PcbScene3dBodyColor } from './PcbScene3dBodyColor.mjs'
 import { PcbScene3dCameraRig } from './PcbScene3dCameraRig.mjs'
 import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs'
 import { PcbScene3dCopperFactory } from './PcbScene3dCopperFactory.mjs'
@@ -12,7 +13,7 @@ import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 import { PcbScene3dPresetState } from './PcbScene3dPresetState.mjs'
 import { PcbScene3dRenderGroupVisibility } from './PcbScene3dRenderGroupVisibility.mjs'
 import { PcbScene3dRuntimeBoardMeshes } from './PcbScene3dRuntimeBoardMeshes.mjs'
-import { PcbScene3dSilkscreenFactory } from './PcbScene3dSilkscreenFactory.mjs'
+import { PcbScene3dSilkscreenChunkedFactory } from './PcbScene3dSilkscreenChunkedFactory.mjs'
 import { PcbScene3dTrueTypeTextFactory } from './PcbScene3dTrueTypeTextFactory.mjs'
 import { PcbScene3dSelectionStyler } from './PcbScene3dSelectionStyler.mjs'
 import { PcbScene3dViaFactory } from './PcbScene3dViaFactory.mjs'
@@ -340,6 +341,12 @@ export class PcbScene3dRuntime {
             )
         )
         this.#groups.set('board', boardGroup)
+        PcbScene3dRuntimeBoardMeshes.applyBoardFaceSide(
+            this.#three,
+            boardGroup,
+            this.#presetState.get(),
+            this.#sceneDescription
+        )
         this.#rootGroup.add(boardGroup)
         const silkscreenGroup = new THREE.Group()
         this.#groups.set('silkscreen', silkscreenGroup)
@@ -376,14 +383,18 @@ export class PcbScene3dRuntime {
      * @returns {void}
      */
     #applyViewScale(preset) {
-        if (!this.#viewOrientationGroup) {
-            return
-        }
+        if (!this.#viewOrientationGroup) return
         const scale = PcbScene3dRuntime.resolveViewScale(
             preset,
             this.#sceneDescription
         )
         this.#viewOrientationGroup.scale.set(scale.x, scale.y, scale.z)
+        PcbScene3dRuntimeBoardMeshes.applyBoardFaceSide(
+            this.#three,
+            this.#groups.get('board'),
+            preset,
+            this.#sceneDescription
+        )
         PcbScene3dExternalModels.applyViewCompensation(
             this.#groups.get('silkscreen'),
             scale
@@ -448,22 +459,24 @@ export class PcbScene3dRuntime {
      */
     async #loadDeferredSilkscreen() {
         const silkscreenGroup = this.#groups.get('silkscreen')
-        if (!silkscreenGroup || silkscreenGroup.children.length) {
-            return
-        }
+        if (!silkscreenGroup || silkscreenGroup.children.length) return
 
         await PcbScene3dTrueTypeTextFactory.prepareEmbeddedFonts(
             this.#sceneDescription.detail.embeddedFonts || []
         )
-
-        const detailGroup = PcbScene3dSilkscreenFactory.buildGroup(
+        const detailGroup = await PcbScene3dSilkscreenChunkedFactory.buildGroup(
             this.#three,
             this.#sceneDescription.detail.silkscreen || {},
             this.#sceneDescription.board.thicknessMil / 2 + 1.18,
             -(this.#sceneDescription.board.thicknessMil / 2 + 1.18),
-            (x, y) => this.#normalizeDetailPoint(x, y)
+            (x, y) => this.#normalizeDetailPoint(x, y),
+            {
+                shouldContinue: () => !this.#isDisposed,
+                yieldToMain: () => PcbScene3dRuntime.#yieldToNextFrame()
+            }
         )
 
+        if (this.#isDisposed) return
         if (detailGroup.children.length) {
             silkscreenGroup.add(detailGroup)
             this.#applyViewScale(this.#presetState.get())
@@ -526,7 +539,7 @@ export class PcbScene3dRuntime {
         const family = component.body.family
         const size = component.body.sizeMil
         const material = new THREE.MeshStandardMaterial({
-            color: PcbScene3dRuntime.#resolveBodyColor(family),
+            color: PcbScene3dBodyColor.resolve(family),
             roughness: 0.72,
             metalness: family === 'chip' ? 0.12 : 0.08
         })
@@ -970,27 +983,5 @@ export class PcbScene3dRuntime {
         const dx = Number(end?.x || 0) - Number(start?.x || 0)
         const dy = Number(end?.y || 0) - Number(start?.y || 0)
         return Math.hypot(dx, dy)
-    }
-
-    /**
-     * Resolves a simple body color by package family.
-     * @param {string} family
-     * @returns {number}
-     */
-    static #resolveBodyColor(family) {
-        if (family === 'radial-capacitor') {
-            return 0xa60f10
-        }
-        if (family === 'connector-block') {
-            return 0xd5d6da
-        }
-        if (family === 'test-point') {
-            return 0x0ea5a8
-        }
-        if (family === 'chip') {
-            return 0xf5f5ef
-        }
-
-        return 0x232428
     }
 }

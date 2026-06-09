@@ -158,6 +158,63 @@ test('PcbScene3dStepLoader caches parsed STEP payloads by model identity', async
 })
 
 /**
+ * Verifies importer-provided typed arrays and compact face ranges survive
+ * normalization so large STEP models do not get expanded back into plain JS
+ * arrays before rendering.
+ */
+test('PcbScene3dStepLoader preserves typed mesh arrays and compact face runs', async () => {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])
+    const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1])
+    const indices = new Uint32Array([0, 1, 2])
+    const loader = new PcbScene3dStepLoader({
+        importerLoader: async () => ({
+            ReadStepFile() {
+                return {
+                    success: true,
+                    meshes: [
+                        {
+                            name: 'typed-body',
+                            color: [0.5, 0.5, 0.5],
+                            brep_face_runs: [
+                                {
+                                    first: 0,
+                                    last: 0,
+                                    color: [0.9, 0.8, 0.7]
+                                }
+                            ],
+                            attributes: {
+                                position: { array: positions },
+                                normal: { array: normals }
+                            },
+                            index: { array: indices }
+                        }
+                    ]
+                }
+            }
+        })
+    })
+
+    const load = await loader.loadModel({
+        origin: 'session',
+        name: 'typed.step',
+        format: 'step',
+        payloadText: 'ISO-10303-21;',
+        relativePath: 'parts/typed.step'
+    })
+
+    assert.equal(load.meshPayloads[0].positions, positions)
+    assert.equal(load.meshPayloads[0].normals, normals)
+    assert.equal(load.meshPayloads[0].indices, indices)
+    assert.deepEqual(load.meshPayloads[0].faceColors, [
+        {
+            first: 0,
+            last: 0,
+            color: [0.9, 0.8, 0.7]
+        }
+    ])
+})
+
+/**
  * Verifies importer failures reject cleanly with a descriptive STEP error.
  */
 test('PcbScene3dStepLoader rejects invalid STEP payloads cleanly', async () => {
@@ -273,6 +330,58 @@ test('PcbScene3dStepLoader preserves session STEP model origins', async () => {
         load.meshPayloads[0].positions,
         [1000, 10, 0, 1001, 10, 0, 1000, 11, 0]
     )
+})
+
+/**
+ * Verifies browser runtimes use the vendored OCCT worker by default so STEP
+ * imports do not execute WASM on the main thread.
+ */
+test('PcbScene3dStepLoader uses a browser STEP worker by default', async () => {
+    const originalWorker = globalThis.Worker
+    const createdWorkerUrls = []
+    let importerCalls = 0
+
+    globalThis.Worker = class DefaultFakeStepWorker extends FakeStepWorker {
+        /**
+         * @param {string | URL} url
+         */
+        constructor(url) {
+            super()
+            createdWorkerUrls.push(String(url))
+        }
+    }
+
+    const loader = new PcbScene3dStepLoader({
+        importerLoader: async () => {
+            importerCalls += 1
+            return {
+                ReadStepFile() {
+                    return { success: false }
+                }
+            }
+        }
+    })
+
+    try {
+        const load = await loader.loadModel({
+            origin: 'embedded',
+            name: 'default-worker.step',
+            format: 'step',
+            payloadText: 'ISO-10303-21;DEFAULT',
+            sourceStream: 'Models/13'
+        })
+
+        assert.equal(importerCalls, 0)
+        assert.equal(createdWorkerUrls.length, 1)
+        assert.match(
+            createdWorkerUrls[0],
+            /\/vendor\/occt-import-js\/dist\/occt-import-js-worker\.js/
+        )
+        assert.equal(load.meshPayloads.length, 1)
+    } finally {
+        loader.dispose?.()
+        globalThis.Worker = originalWorker
+    }
 })
 
 /**

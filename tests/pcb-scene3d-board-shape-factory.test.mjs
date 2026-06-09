@@ -218,9 +218,14 @@ test('PcbScene3dBoardShapeFactory indexes plated drill contours without scanning
     )
     const elapsed = performance.now() - start
 
-    assert.equal(geometry.getAttribute('position').count, 388836)
+    const positionCount = geometry.getAttribute('position').count
+
     assert.ok(
-        elapsed < 600,
+        positionCount < 300000,
+        `plated board geometry used ${positionCount} positions`
+    )
+    assert.ok(
+        elapsed < 450,
         `plated board geometry took ${elapsed.toFixed(1)}ms`
     )
 })

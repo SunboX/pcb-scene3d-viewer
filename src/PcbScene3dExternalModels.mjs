@@ -1,5 +1,7 @@
 import { PcbScene3dBoardAssemblyPresentation } from './PcbScene3dBoardAssemblyPresentation.mjs'
 import { PcbScene3dBoardAssemblyPlacement } from './PcbScene3dBoardAssemblyPlacement.mjs'
+import { PcbScene3dBoardAssemblyTransform } from './PcbScene3dBoardAssemblyTransform.mjs'
+import { PcbScene3dBufferAttributeFactory } from './PcbScene3dBufferAttributeFactory.mjs'
 import { PcbScene3dExternalModelLoadOrder } from './PcbScene3dExternalModelLoadOrder.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 import { PcbScene3dStepLoader } from './PcbScene3dStepLoader.mjs'
@@ -329,7 +331,7 @@ export class PcbScene3dExternalModels {
     /**
      * Wraps a full board assembly model in board-local scene coordinates.
      * @param {any} THREE
-     * @param {{ positionMil?: { x?: number, y?: number, z?: number }, board?: { widthMil?: number, heightMil?: number, thicknessMil?: number } }} placement
+     * @param {{ positionMil?: { x?: number, y?: number, z?: number }, board?: { widthMil?: number, heightMil?: number, thicknessMil?: number }, sourceFrameScale?: { y?: number } }} placement
      * @param {any} modelGroup
      * @returns {any}
      */
@@ -338,6 +340,7 @@ export class PcbScene3dExternalModels {
         const positionMil = placement?.positionMil || {}
 
         PcbScene3dBoardAssemblyPresentation.apply(modelGroup, placement?.board)
+        PcbScene3dBoardAssemblyTransform.apply(modelGroup, placement)
         wrapperGroup.position.set(
             Number(positionMil.x || 0),
             Number(positionMil.y || 0),
@@ -720,14 +723,28 @@ export class PcbScene3dExternalModels {
             const geometry = new THREE.BufferGeometry()
             geometry.setAttribute(
                 'position',
-                new THREE.Float32BufferAttribute(meshPayload.positions, 3)
+                PcbScene3dBufferAttributeFactory.createFloat32(
+                    THREE,
+                    meshPayload.positions,
+                    3
+                )
             )
-            geometry.setIndex(meshPayload.indices)
+            geometry.setIndex(
+                PcbScene3dBufferAttributeFactory.createUint32(
+                    THREE,
+                    meshPayload.indices,
+                    1
+                )
+            )
 
             if (meshPayload.normals.length) {
                 geometry.setAttribute(
                     'normal',
-                    new THREE.Float32BufferAttribute(meshPayload.normals, 3)
+                    PcbScene3dBufferAttributeFactory.createFloat32(
+                        THREE,
+                        meshPayload.normals,
+                        3
+                    )
                 )
             } else {
                 geometry.computeVertexNormals()
@@ -752,7 +769,7 @@ export class PcbScene3dExternalModels {
     /**
      * Measures raw STEP mesh bounds in mil before the group-level unit scale is
      * applied.
-     * @param {{ positions?: number[] }[]} meshPayloads STEP mesh payloads.
+     * @param {{ positions?: ArrayLike<number> }[]} meshPayloads STEP mesh payloads.
      * @returns {{ minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number, centerX: number, centerY: number, centerZ: number, sizeX: number, sizeY: number, sizeZ: number } | null}
      */
     static #measureSourceBoundsMil(meshPayloads) {
@@ -765,7 +782,9 @@ export class PcbScene3dExternalModels {
 
         ;(Array.isArray(meshPayloads) ? meshPayloads : []).forEach(
             (meshPayload) => {
-                ;(Array.isArray(meshPayload?.positions)
+                ;(PcbScene3dBufferAttributeFactory.isNumberSequence(
+                    meshPayload?.positions
+                )
                     ? meshPayload.positions
                     : []
                 ).forEach((value, index) => {
@@ -817,7 +836,7 @@ export class PcbScene3dExternalModels {
      * when the importer exposes them.
      * @param {any} THREE
      * @param {any} geometry
-     * @param {{ color?: number[] | null, indices?: number[], faceColors?: { first: number, last: number, color: number[] | null }[] }} meshPayload
+     * @param {{ color?: number[] | null, indices?: ArrayLike<number>, faceColors?: { first: number, last: number, color: number[] | null }[] }} meshPayload
      * @returns {any[]}
      */
     static #buildStepMeshMaterials(THREE, geometry, meshPayload) {
@@ -886,14 +905,12 @@ export class PcbScene3dExternalModels {
     /**
      * Applies grouped material ranges for face-colored STEP triangles.
      * @param {any} geometry
-     * @param {number[]} indices
+     * @param {ArrayLike<number>} indices
      * @param {{ first: number, last: number }[]} faceColors
      * @returns {void}
      */
     static #applyFaceColorGroups(geometry, indices, faceColors) {
-        const triangleCount = Math.floor(
-            (Array.isArray(indices) ? indices.length : 0) / 3
-        )
+        const triangleCount = Math.floor(Number(indices?.length || 0) / 3)
         let triangleIndex = 0
         let faceColorIndex = 0
 
@@ -929,15 +946,13 @@ export class PcbScene3dExternalModels {
     /**
      * Returns true when one face-color range overlaps valid triangle indices.
      * @param {{ first?: number, last?: number }} faceColor
-     * @param {number[] | undefined} indices
+     * @param {ArrayLike<number> | undefined} indices
      * @returns {boolean}
      */
     static #isValidFaceColorRange(faceColor, indices) {
         const first = Number(faceColor?.first)
         const last = Number(faceColor?.last)
-        const triangleCount = Math.floor(
-            (Array.isArray(indices) ? indices.length : 0) / 3
-        )
+        const triangleCount = Math.floor(Number(indices?.length || 0) / 3)
 
         return (
             Number.isInteger(first) &&

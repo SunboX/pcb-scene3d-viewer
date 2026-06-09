@@ -6,7 +6,7 @@ import { PcbScene3dOutlineBuilder } from './PcbScene3dOutlineBuilder.mjs'
  * Builds the board solid profile, including drilled holes.
  */
 export class PcbScene3dBoardShapeFactory {
-    static #CURVE_SEGMENTS = 20
+    static #CURVE_SEGMENTS = 12
     static #PAD_HOLE_SHAPE_SLOT = 2
     static #PLATED_WALL_MATERIAL_INDEX = 2
     static #EDGE_WALL_MATERIAL_INDEX = 1
@@ -322,16 +322,32 @@ export class PcbScene3dBoardShapeFactory {
      * @param {any} THREE
      * @param {{ pads?: any[], vias?: any[] }} detail
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
-     * @returns {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }[]}
+     * @returns {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }[]}
      */
     static #resolvePlatedContours(THREE, detail, normalizeBoardPoint) {
         return PcbScene3dBoardShapeFactory.#resolvePlatedDrillSpecs(detail)
             .map((drillSpec) => {
                 const point = normalizeBoardPoint(drillSpec.x, drillSpec.y)
-                const path = PcbScene3dDrillPathFactory.buildDrillPath(THREE, {
+                const normalizedSpec = {
                     ...drillSpec,
                     x: point.x,
                     y: point.y
+                }
+
+                if (
+                    PcbScene3dBoardShapeFactory.#isCircularDrillSpec(
+                        normalizedSpec
+                    )
+                ) {
+                    return PcbScene3dBoardShapeFactory.#buildCircularContour(
+                        Number(normalizedSpec.x || 0),
+                        Number(normalizedSpec.y || 0),
+                        Number(normalizedSpec.diameter || 0) / 2
+                    )
+                }
+
+                const path = PcbScene3dDrillPathFactory.buildDrillPath(THREE, {
+                    ...normalizedSpec
                 })
                 const points =
                     path?.getPoints?.(
@@ -340,6 +356,51 @@ export class PcbScene3dBoardShapeFactory {
                 return PcbScene3dBoardShapeFactory.#buildContour(points)
             })
             .filter(Boolean)
+    }
+
+    /**
+     * Returns true when a drill aperture can be matched as a circle.
+     * @param {{ diameter?: number, slotLength?: number | null }} drillSpec
+     * @returns {boolean}
+     */
+    static #isCircularDrillSpec(drillSpec) {
+        const diameter = Number(drillSpec?.diameter || 0)
+        const slotLength = Number(drillSpec?.slotLength || 0)
+
+        return diameter > 0 && slotLength <= diameter + 0.001
+    }
+
+    /**
+     * Builds a contour descriptor for circular plated holes.
+     * @param {number} centerX
+     * @param {number} centerY
+     * @param {number} radius
+     * @returns {{ points: { x: number, y: number }[], segments: any[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular: boolean, centerX: number, centerY: number, radius: number } | null}
+     */
+    static #buildCircularContour(centerX, centerY, radius) {
+        if (
+            !Number.isFinite(centerX) ||
+            !Number.isFinite(centerY) ||
+            !Number.isFinite(radius) ||
+            radius <= 0
+        ) {
+            return null
+        }
+
+        return {
+            points: [],
+            segments: [],
+            bounds: {
+                minX: centerX - radius,
+                maxX: centerX + radius,
+                minY: centerY - radius,
+                maxY: centerY + radius
+            },
+            isCircular: true,
+            centerX,
+            centerY,
+            radius
+        }
     }
 
     /**
@@ -707,7 +768,7 @@ export class PcbScene3dBoardShapeFactory {
     /**
      * Returns true when all triangle vertices lie on one drill contour.
      * @param {{ x: number, y: number }[]} points
-     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }} contour
+     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} contour
      * @returns {boolean}
      */
     static #matchesContourPoints(points, contour) {
@@ -774,7 +835,7 @@ export class PcbScene3dBoardShapeFactory {
     /**
      * Returns true when a point is close to one contour boundary.
      * @param {{ x: number, y: number }} point
-     * @param {{ segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }} contour
+     * @param {{ segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} contour
      * @returns {boolean}
      */
     static #isPointNearContour(point, contour) {
@@ -788,6 +849,14 @@ export class PcbScene3dBoardShapeFactory {
             point.y > contour.bounds.maxY + tolerance
         ) {
             return false
+        }
+
+        if (contour.isCircular) {
+            return PcbScene3dBoardShapeFactory.#isPointNearCircularContour(
+                point,
+                contour,
+                tolerance
+            )
         }
 
         for (const segment of contour.segments) {
@@ -811,6 +880,27 @@ export class PcbScene3dBoardShapeFactory {
         }
 
         return false
+    }
+
+    /**
+     * Returns true when a point lies within the tolerance ring of a circle.
+     * @param {{ x: number, y: number }} point
+     * @param {{ centerX?: number, centerY?: number, radius?: number }} contour
+     * @param {number} tolerance
+     * @returns {boolean}
+     */
+    static #isPointNearCircularContour(point, contour, tolerance) {
+        const radius = Number(contour.radius || 0)
+        const minRadius = Math.max(0, radius - tolerance)
+        const maxRadius = radius + tolerance
+        const dx = point.x - Number(contour.centerX || 0)
+        const dy = point.y - Number(contour.centerY || 0)
+        const distanceSquared = dx * dx + dy * dy
+
+        return (
+            distanceSquared >= minRadius * minRadius &&
+            distanceSquared <= maxRadius * maxRadius
+        )
     }
 
     /**

@@ -17,7 +17,7 @@ export class PcbScene3dStepLoader {
     /** @type {(() => Worker) | null} */
     #stepWorkerFactory
 
-    /** @type {Map<string, Promise<{ meshPayloads: { name: string, color: number[] | null, positions: number[], normals: number[], indices: number[], faceColors: { first: number, last: number, color: number[] | null }[] }[] }>>} */
+    /** @type {Map<string, Promise<{ meshPayloads: { name: string, color: number[] | null, positions: ArrayLike<number>, normals: ArrayLike<number>, indices: ArrayLike<number>, faceColors: { first: number, last: number, color: number[] | null }[] }[] }>>} */
     #cache
 
     /** @type {Worker | null} */
@@ -45,7 +45,10 @@ export class PcbScene3dStepLoader {
         this.#importerLoader =
             options.importerLoader ||
             (() => PcbScene3dStepLoader.#loadBrowserImporter())
-        this.#stepWorkerFactory = options.stepWorkerFactory || null
+        this.#stepWorkerFactory =
+            options.stepWorkerFactory === undefined
+                ? PcbScene3dStepLoader.#resolveDefaultStepWorkerFactory()
+                : options.stepWorkerFactory
         this.#cache = new Map()
         this.#stepWorker = null
         this.#activeWorkerRequest = null
@@ -74,7 +77,7 @@ export class PcbScene3dStepLoader {
     /**
      * Loads one STEP model and normalizes it into triangle payloads.
      * @param {{ origin?: string, name?: string, sourceStream?: string, relativePath?: string, payloadText?: string, file?: Blob | File | null }} model
-     * @returns {Promise<{ meshPayloads: { name: string, color: number[] | null, positions: number[], normals: number[], indices: number[], faceColors: { first: number, last: number, color: number[] | null }[] }[] }>}
+     * @returns {Promise<{ meshPayloads: { name: string, color: number[] | null, positions: ArrayLike<number>, normals: ArrayLike<number>, indices: ArrayLike<number>, faceColors: { first: number, last: number, color: number[] | null }[] }[] }>}
      */
     async loadModel(model) {
         const cacheKey = PcbScene3dStepLoader.#resolveCacheKey(model)
@@ -97,7 +100,7 @@ export class PcbScene3dStepLoader {
     /**
      * Loads one uncached STEP model.
      * @param {{ origin?: string, name?: string, sourceStream?: string, relativePath?: string, payloadText?: string, file?: Blob | File | null }} model
-     * @returns {Promise<{ meshPayloads: { name: string, color: number[] | null, positions: number[], normals: number[], indices: number[], faceColors: { first: number, last: number, color: number[] | null }[] }[] }>}
+     * @returns {Promise<{ meshPayloads: { name: string, color: number[] | null, positions: ArrayLike<number>, normals: ArrayLike<number>, indices: ArrayLike<number>, faceColors: { first: number, last: number, color: number[] | null }[] }[] }>}
      */
     async #loadModelUncached(model) {
         const modelName = PcbScene3dStepLoader.#resolveModelName(model)
@@ -328,11 +331,18 @@ export class PcbScene3dStepLoader {
     /**
      * Normalizes one importer mesh into serializable numeric arrays.
      * @param {any} mesh
-     * @returns {{ name: string, color: number[] | null, positions: number[], normals: number[], indices: number[], faceColors: { first: number, last: number, color: number[] | null }[] } | null}
+     * @returns {{ name: string, color: number[] | null, positions: ArrayLike<number>, normals: ArrayLike<number>, indices: ArrayLike<number>, faceColors: { first: number, last: number, color: number[] | null }[] } | null}
      */
     static #normalizeMeshPayload(mesh) {
-        const positions = Array.from(mesh?.attributes?.position?.array || [])
-        const indices = Array.from(mesh?.index?.array || [])
+        const positions = PcbScene3dStepLoader.#normalizeNumberSequence(
+            mesh?.attributes?.position?.array
+        )
+        const normals = PcbScene3dStepLoader.#normalizeNumberSequence(
+            mesh?.attributes?.normal?.array
+        )
+        const indices = PcbScene3dStepLoader.#normalizeNumberSequence(
+            mesh?.index?.array
+        )
         if (!positions.length || !indices.length) {
             return null
         }
@@ -341,8 +351,13 @@ export class PcbScene3dStepLoader {
             Array.isArray(mesh?.color) && mesh.color.length >= 3
                 ? mesh.color.slice(0, 3).map((channel) => Number(channel || 0))
                 : null
-        const faceColors = Array.isArray(mesh?.brep_faces)
-            ? mesh.brep_faces
+        const faceColorSource = Array.isArray(mesh?.brep_face_runs)
+            ? mesh.brep_face_runs
+            : Array.isArray(mesh?.brep_faces)
+              ? mesh.brep_faces
+              : []
+        const faceColors = faceColorSource
+            ? faceColorSource
                   .map((faceColor) =>
                       PcbScene3dStepLoader.#normalizeFaceColorRange(faceColor)
                   )
@@ -352,13 +367,33 @@ export class PcbScene3dStepLoader {
         return {
             name: String(mesh?.name || ''),
             color,
-            positions: positions.map((value) => Number(value || 0)),
-            normals: Array.from(mesh?.attributes?.normal?.array || []).map(
-                (value) => Number(value || 0)
-            ),
-            indices: indices.map((value) => Number(value || 0)),
+            positions,
+            normals,
+            indices,
             faceColors
         }
+    }
+
+    /**
+     * Normalizes one numeric sequence while preserving already-typed arrays.
+     * @param {ArrayLike<number> | null | undefined} source Source sequence.
+     * @returns {ArrayLike<number>}
+     */
+    static #normalizeNumberSequence(source) {
+        if (PcbScene3dStepLoader.#isTypedNumberArray(source)) {
+            return source
+        }
+
+        return Array.from(source || []).map((value) => Number(value || 0))
+    }
+
+    /**
+     * Returns true when a sequence is a typed numeric array.
+     * @param {unknown} source Candidate sequence.
+     * @returns {boolean}
+     */
+    static #isTypedNumberArray(source) {
+        return ArrayBuffer.isView(source) && !(source instanceof DataView)
     }
 
     /**
@@ -394,9 +429,9 @@ export class PcbScene3dStepLoader {
      * Re-centers STEP payloads whose XY coordinates are obviously stored far
      * away from the local origin, which happens for some embedded Altium
      * models that retain absolute CAD world offsets.
-     * @param {{ name: string, color: number[] | null, positions: number[], normals: number[], indices: number[], faceColors: { first: number, last: number, color: number[] | null }[] }[]} meshPayloads
+     * @param {{ name: string, color: number[] | null, positions: ArrayLike<number>, normals: ArrayLike<number>, indices: ArrayLike<number>, faceColors: { first: number, last: number, color: number[] | null }[] }[]} meshPayloads
      * @param {{ origin?: string }} model
-     * @returns {{ name: string, color: number[] | null, positions: number[], normals: number[], indices: number[], faceColors: { first: number, last: number, color: number[] | null }[] }[]}
+     * @returns {{ name: string, color: number[] | null, positions: ArrayLike<number>, normals: ArrayLike<number>, indices: ArrayLike<number>, faceColors: { first: number, last: number, color: number[] | null }[] }[]}
      */
     static #normalizeModelOrigin(meshPayloads, model) {
         if (!PcbScene3dStepLoader.#shouldNormalizeModelOrigin(model)) {
@@ -425,18 +460,39 @@ export class PcbScene3dStepLoader {
 
         return meshPayloads.map((meshPayload) => ({
             ...meshPayload,
-            positions: meshPayload.positions.map((value, index) => {
-                if (index % 3 === 0) {
-                    return value - centerX
-                }
-
-                if (index % 3 === 1) {
-                    return value - centerY
-                }
-
-                return value
-            })
+            positions: PcbScene3dStepLoader.#recenterPositions(
+                meshPayload.positions,
+                centerX,
+                centerY
+            )
         }))
+    }
+
+    /**
+     * Recenters one position buffer while keeping the source array family.
+     * @param {ArrayLike<number>} positions Position sequence.
+     * @param {number} centerX X center to subtract.
+     * @param {number} centerY Y center to subtract.
+     * @returns {ArrayLike<number>}
+     */
+    static #recenterPositions(positions, centerX, centerY) {
+        const normalizedPositions = PcbScene3dStepLoader.#isTypedNumberArray(
+            positions
+        )
+            ? new positions.constructor(positions)
+            : Array.from(positions || [])
+
+        for (let index = 0; index < normalizedPositions.length; index += 1) {
+            if (index % 3 === 0) {
+                normalizedPositions[index] =
+                    Number(normalizedPositions[index] || 0) - centerX
+            } else if (index % 3 === 1) {
+                normalizedPositions[index] =
+                    Number(normalizedPositions[index] || 0) - centerY
+            }
+        }
+
+        return normalizedPositions
     }
 
     /**
@@ -452,7 +508,7 @@ export class PcbScene3dStepLoader {
 
     /**
      * Measures the combined bounds across all normalized STEP meshes.
-     * @param {{ positions: number[] }[]} meshPayloads
+     * @param {{ positions: ArrayLike<number> }[]} meshPayloads
      * @returns {{ minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number } | null}
      */
     static #measureModelBounds(meshPayloads) {
@@ -539,6 +595,23 @@ export class PcbScene3dStepLoader {
         }
 
         return await PcbScene3dStepLoader.#browserImporterPromise
+    }
+
+    /**
+     * Creates a default browser worker factory when Web Workers are available.
+     * @returns {(() => Worker) | null}
+     */
+    static #resolveDefaultStepWorkerFactory() {
+        if (typeof globalThis.Worker !== 'function') {
+            return null
+        }
+
+        return () =>
+            new globalThis.Worker(
+                PcbScene3dStepLoader.#resolveVendorAssetUrl(
+                    'occt-import-js-worker.js'
+                )
+            )
     }
 
     /**

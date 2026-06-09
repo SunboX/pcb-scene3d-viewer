@@ -43,20 +43,46 @@ test('PcbScene3dCutoutGeometryFilter clips dense local stroke strips without rep
     )
     const elapsed = performance.now() - start
 
-    assert.equal(filtered.getAttribute('position').count, 197082)
-    assert.ok(elapsed < 380, `dense clipping took ${elapsed.toFixed(1)}ms`)
+    assert.equal(filtered.getAttribute('position').count, 197280)
+    assert.equal(geometryContainsPointTriangle(filtered, { x: 0, y: 0 }), false)
+    assert.ok(elapsed < 140, `dense clipping took ${elapsed.toFixed(1)}ms`)
+})
+
+test('PcbScene3dCutoutGeometryFilter keeps long crossing strokes responsive', () => {
+    const geometry = createDenseStrokeStripGeometry({
+        columns: 40,
+        rows: 240
+    })
+    const start = performance.now()
+    const filtered = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        geometry,
+        [createCircularCutout(0, 0, 8)],
+        { maxDepth: 6, maxEdgeLength: 4 }
+    )
+    const elapsed = performance.now() - start
+
+    assert.equal(filtered.getAttribute('position').count, 797082)
+    assert.equal(geometryContainsPointTriangle(filtered, { x: 0, y: 0 }), false)
+    assert.ok(
+        elapsed < 470,
+        `long crossing stroke clipping took ${elapsed.toFixed(1)}ms`
+    )
 })
 
 /**
  * Builds parallel stroke-strip triangles crossing one local cutout.
+ * @param {{ columns?: number, rows?: number }} [options] Geometry options.
  * @returns {any}
  */
-function createDenseStrokeStripGeometry() {
+function createDenseStrokeStripGeometry(options = {}) {
+    const columns = Number(options?.columns || 20)
+    const rows = Number(options?.rows || 120)
     const positions = []
 
-    for (let row = 0; row < 120; row += 1) {
-        for (let column = 0; column < 20; column += 1) {
-            const y = -20 + row * (40 / 120)
+    for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+            const y = -20 + row * (40 / rows)
             const x = -30 + column * 0.05
             const halfHeight = 0.12
 
@@ -89,6 +115,47 @@ function createDenseStrokeStripGeometry() {
         new THREE.Float32BufferAttribute(positions, 3)
     )
     return geometry
+}
+
+/**
+ * Returns true when one geometry has a triangle covering a local XY point.
+ * @param {any} geometry Geometry to inspect.
+ * @param {{ x: number, y: number }} point Local XY point.
+ * @returns {boolean}
+ */
+function geometryContainsPointTriangle(geometry, point) {
+    const position = geometry.getAttribute('position')
+
+    for (let index = 0; index < position.count; index += 3) {
+        const triangle = [0, 1, 2].map((offset) => ({
+            x: position.getX(index + offset),
+            y: position.getY(index + offset)
+        }))
+
+        if (pointInsideTriangle(point, triangle)) {
+            return true
+        }
+    }
+
+    return false
+}
+
+/**
+ * Returns true when a point is inside one triangle.
+ * @param {{ x: number, y: number }} point Point to test.
+ * @param {{ x: number, y: number }[]} triangle Triangle points.
+ * @returns {boolean}
+ */
+function pointInsideTriangle(point, triangle) {
+    const signs = triangle.map((current, index) => {
+        const next = triangle[(index + 1) % triangle.length]
+        return (
+            (point.x - next.x) * (current.y - next.y) -
+            (current.x - next.x) * (point.y - next.y)
+        )
+    })
+
+    return signs.every((sign) => sign >= 0) || signs.every((sign) => sign <= 0)
 }
 
 /**

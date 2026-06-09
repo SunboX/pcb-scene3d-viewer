@@ -151,3 +151,145 @@ test('PcbScene3dExternalModels renders matching board assembly as the external s
     assert.equal(modelGroup.children[4].material.opacity, 1)
     assert.equal(modelGroup.children[5].material.opacity, 1)
 })
+
+test('PcbScene3dExternalModels mirrors Altium board assembly source Y into detail coordinates', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            board: {
+                widthMil: 1000,
+                heightMil: 500,
+                thicknessMil: 62,
+                surfaceColor: 0x17396b
+            },
+            boardAssemblyModel: {
+                origin: 'board-assembly',
+                name: 'FixtureBoard.step',
+                relativePath: '3D Bodies/FixtureBoard.step',
+                format: 'step'
+            }
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'assembly substrate',
+                            color: [0.0, 0.45, 0.0],
+                            positions: [
+                                0, 0, 0, 1, 0, 0, 0, 0.5, 0, 0, 0, -0.062, 1, 0,
+                                -0.062, 0, 0.5, -0.062
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        },
+                        {
+                            name: 'small neutral component',
+                            color: [0.5, 0.5, 0.5],
+                            positions: [
+                                0.2, 0.1, 0.05, 0.4, 0.1, 0.05, 0.2, 0.2, 0.05
+                            ],
+                            normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+                            indices: [0, 1, 2],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const modelGroup = wrapperGroup.children[0]
+    const componentMesh = modelGroup.children[1]
+    const componentPositions =
+        componentMesh.geometry.getAttribute('position').array
+
+    assert.equal(wrapperGroup.position.x, -500)
+    assert.equal(wrapperGroup.position.y, 250)
+    assert.deepEqual(Array.from(componentMesh.geometry.index.array), [0, 2, 1])
+    assert.deepEqual(
+        Array.from(componentPositions)
+            .filter((_, index) => index % 3 === 1)
+            .map((value) => Math.round(value * 1000) / 1000),
+        [-0.1, -0.1, -0.2]
+    )
+    assert.equal(modelGroup.userData.scene3dBoardAssemblyMirroredY, true)
+})
+
+test('PcbScene3dExternalModels reuses STEP typed arrays for render geometry', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])
+    const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1])
+    const indices = new Uint32Array([0, 1, 2])
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            externalPlacements: [
+                {
+                    designator: 'U1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 0 },
+                    modelTransform: {},
+                    externalModel: {
+                        origin: 'session',
+                        name: 'typed.step',
+                        relativePath: 'parts/typed.step',
+                        format: 'step'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'typed body',
+                            color: [0.5, 0.5, 0.5],
+                            positions,
+                            normals,
+                            indices,
+                            faceColors: [
+                                {
+                                    first: 0,
+                                    last: 0,
+                                    color: [0.9, 0.8, 0.7]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    let importedMesh = null
+    externalModelsGroup.traverse((object) => {
+        if (object?.geometry) {
+            importedMesh = object
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+    assert.ok(importedMesh)
+    assert.equal(
+        importedMesh.geometry.getAttribute('position').array,
+        positions
+    )
+    assert.equal(importedMesh.geometry.getAttribute('normal').array, normals)
+    assert.equal(importedMesh.geometry.index.array, indices)
+    assert.deepEqual(importedMesh.geometry.groups, [
+        { start: 0, count: 3, materialIndex: 1 }
+    ])
+    assert.equal(Array.isArray(importedMesh.material), true)
+    assert.equal(importedMesh.material.length, 2)
+})

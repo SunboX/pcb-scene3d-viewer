@@ -4,7 +4,7 @@
 export class PcbScene3dBoardAssemblyPlacement {
     /**
      * Builds the synthetic placement for a full board assembly model.
-     * @param {{ board?: { widthMil?: number, heightMil?: number, thicknessMil?: number, surfaceColor?: number }, boardAssemblyModel?: any }} sceneDescription
+     * @param {{ board?: { widthMil?: number, heightMil?: number, thicknessMil?: number, surfaceColor?: number }, boardAssemblyModel?: any, sourceFormat?: string }} sceneDescription
      * @returns {any | null}
      */
     static build(sceneDescription) {
@@ -14,6 +14,15 @@ export class PcbScene3dBoardAssemblyPlacement {
         }
 
         const board = sceneDescription?.board || {}
+        const mirrorsSourceY =
+            String(sceneDescription?.sourceFormat || '').toLowerCase() ===
+            'altium'
+        const sourceFrameScale = {
+            x: 1,
+            y: mirrorsSourceY ? -1 : 1,
+            z: 1
+        }
+
         return {
             designator: 'Board assembly',
             sourceType: 'board-assembly',
@@ -21,9 +30,12 @@ export class PcbScene3dBoardAssemblyPlacement {
             rotationDeg: 0,
             positionMil: {
                 x: -Number(board.widthMil || 0) / 2,
-                y: -Number(board.heightMil || 0) / 2,
+                y:
+                    (mirrorsSourceY ? 1 : -1) *
+                    (Number(board.heightMil || 0) / 2),
                 z: 0
             },
+            sourceFrameScale,
             board: {
                 widthMil: Number(board.widthMil || 0),
                 heightMil: Number(board.heightMil || 0),
