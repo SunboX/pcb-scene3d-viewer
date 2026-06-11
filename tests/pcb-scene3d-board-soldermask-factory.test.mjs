@@ -185,6 +185,46 @@ test('PcbScene3dBoardSolderMaskFactory keeps internal circular drills as arc hol
     )
 })
 
+test('PcbScene3dBoardSolderMaskFactory keeps dense drill masks within a bounded vertex budget', () => {
+    const count = 400
+    const cols = Math.ceil(Math.sqrt(count))
+    const spacing = 28
+    const board = {
+        widthMil: cols * spacing + 120,
+        heightMil: cols * spacing + 120,
+        thicknessMil: 12,
+        centerX: (cols * spacing + 120) / 2,
+        centerY: (cols * spacing + 120) / 2,
+        surfaceColor: 0x17396b,
+        segments: []
+    }
+    const vias = Array.from({ length: count }, (_value, index) => ({
+        x: 60 + (index % cols) * spacing,
+        y: 60 + Math.floor(index / cols) * spacing,
+        holeDiameter: 10
+    }))
+    const group = PcbScene3dBoardSolderMaskFactory.buildGroup(
+        THREE,
+        {
+            board,
+            boardAssemblyModel: { name: 'assembly.step' },
+            detail: { pads: [], vias }
+        },
+        (x, y) => ({
+            x: x - board.widthMil / 2,
+            y: y - board.heightMil / 2
+        })
+    )
+    const geometry = group.children[0].geometry
+    const positionCount = geometry.getAttribute('position').count
+
+    assert.equal(geometry.parameters.shapes.holes.length, count)
+    assert.ok(
+        positionCount < 16000,
+        `dense solder-mask geometry used ${positionCount} positions`
+    )
+})
+
 test('PcbScene3dBoardSolderMaskFactory skips non-assembly boards', () => {
     const group = PcbScene3dBoardSolderMaskFactory.buildGroup(
         THREE,

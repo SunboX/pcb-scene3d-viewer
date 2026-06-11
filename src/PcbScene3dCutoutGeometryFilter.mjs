@@ -1,3 +1,4 @@
+import { PcbScene3dCircularCutoutOverlap } from './PcbScene3dCircularCutoutOverlap.mjs'
 import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector.mjs'
 
 /**
@@ -573,6 +574,14 @@ export class PcbScene3dCutoutGeometryFilter {
             cutout.points.length < 3
         ) {
             return false
+        }
+
+        if (cutout.isCircular) {
+            return PcbScene3dCircularCutoutOverlap.overlapsTriangle(
+                triangle,
+                cutout,
+                PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
+            )
         }
 
         for (const point of triangle) {

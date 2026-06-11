@@ -6,7 +6,7 @@ import { PcbScene3dOutlineBuilder } from './PcbScene3dOutlineBuilder.mjs'
  * Builds the board solid profile, including drilled holes.
  */
 export class PcbScene3dBoardShapeFactory {
-    static #CURVE_SEGMENTS = 12
+    static #CURVE_SEGMENTS = 8
     static #PAD_HOLE_SHAPE_SLOT = 2
     static #PLATED_WALL_MATERIAL_INDEX = 2
     static #EDGE_WALL_MATERIAL_INDEX = 1

@@ -221,7 +221,7 @@ test('PcbScene3dBoardShapeFactory indexes plated drill contours without scanning
     const positionCount = geometry.getAttribute('position').count
 
     assert.ok(
-        positionCount < 300000,
+        positionCount < 180000,
         `plated board geometry used ${positionCount} positions`
     )
     assert.ok(

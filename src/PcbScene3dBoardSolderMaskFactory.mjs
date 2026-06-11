@@ -7,7 +7,7 @@ import { PcbScene3dOutlineBuilder } from './PcbScene3dOutlineBuilder.mjs'
  * Builds separate solder-mask face sheets for board-assembly rendering.
  */
 export class PcbScene3dBoardSolderMaskFactory {
-    static #CURVE_SEGMENTS = 20
+    static #CURVE_SEGMENTS = 8
     static #OUTER_SAMPLE_POINTS = 160
     static #DRILL_SAMPLE_POINTS = 72
     static #EDGE_CLEARANCE_MIL = 0

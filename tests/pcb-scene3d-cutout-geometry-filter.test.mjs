@@ -43,7 +43,7 @@ test('PcbScene3dCutoutGeometryFilter clips dense local stroke strips without rep
     )
     const elapsed = performance.now() - start
 
-    assert.equal(filtered.getAttribute('position').count, 197280)
+    assert.equal(filtered.getAttribute('position').count, 197676)
     assert.equal(geometryContainsPointTriangle(filtered, { x: 0, y: 0 }), false)
     assert.ok(elapsed < 140, `dense clipping took ${elapsed.toFixed(1)}ms`)
 })
@@ -62,11 +62,45 @@ test('PcbScene3dCutoutGeometryFilter keeps long crossing strokes responsive', ()
     )
     const elapsed = performance.now() - start
 
-    assert.equal(filtered.getAttribute('position').count, 797082)
+    assert.equal(filtered.getAttribute('position').count, 797706)
     assert.equal(geometryContainsPointTriangle(filtered, { x: 0, y: 0 }), false)
     assert.ok(
         elapsed < 470,
         `long crossing stroke clipping took ${elapsed.toFixed(1)}ms`
+    )
+})
+
+test('PcbScene3dCutoutGeometryFilter clips repeated circular drills analytically', () => {
+    const geometry = createDenseStrokeStripGeometry({
+        columns: 30,
+        rows: 160
+    })
+    const cutouts = [
+        createCircularCutout(-12, -8, 8),
+        createCircularCutout(12, -8, 8),
+        createCircularCutout(-12, 8, 8),
+        createCircularCutout(12, 8, 8)
+    ]
+    const start = performance.now()
+    const filtered = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        geometry,
+        cutouts,
+        { maxDepth: 6, maxEdgeLength: 4 }
+    )
+    const elapsed = performance.now() - start
+
+    assert.equal(
+        geometryContainsPointTriangle(filtered, { x: -12, y: -8 }),
+        false
+    )
+    assert.equal(
+        geometryContainsPointTriangle(filtered, { x: 12, y: 8 }),
+        false
+    )
+    assert.ok(
+        elapsed < 320,
+        `circular drill clipping took ${elapsed.toFixed(1)}ms`
     )
 })
 
