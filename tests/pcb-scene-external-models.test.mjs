@@ -296,6 +296,18 @@ class FakeMesh {
 }
 
 /**
+ * Resolves the model group from a placement face group.
+ * @param {FakeGroup} faceGroup Placement face group.
+ * @returns {FakeGroup}
+ */
+function resolvePlacedModelGroup(faceGroup) {
+    const candidate = faceGroup.children[0]
+    return candidate?.userData?.scene3dAdjustmentTarget
+        ? candidate.children[0]
+        : candidate
+}
+
+/**
  * Verifies STEP face-color ranges are translated into grouped Three materials.
  */
 test('PcbScene3dExternalModels renders STEP face colors as grouped materials', async () => {
@@ -367,7 +379,7 @@ test('PcbScene3dExternalModels renders STEP face colors as grouped materials', a
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
     const mesh = modelGroup.children[0]
 
     assert.equal(modelGroup.scale.value, 1000)
@@ -465,7 +477,7 @@ test('PcbScene3dExternalModels normalizes embedded source frames before view mir
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
 
     assert.equal(wrapperGroup.position.x, 40)
     assert.equal(wrapperGroup.position.y, 70)
@@ -547,7 +559,7 @@ test('PcbScene3dExternalModels normalizes embedded source frames before placemen
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
     const expected = new THREE.Matrix4()
         .makeScale(1, -1, 1)
         .multiply(new THREE.Matrix4().makeTranslation(40, 70, 30))
@@ -618,7 +630,7 @@ test('PcbScene3dExternalModels composes KiCad model rotations in z-y-x order', a
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
     const expected = new THREE.Matrix4()
         .makeRotationZ(Math.PI / 2)
         .multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2))
@@ -691,7 +703,7 @@ test('PcbScene3dExternalModels compensates embedded model source-Z origins after
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
 
     assert.equal(modelGroup.position.x, 0)
     assert.equal(modelGroup.position.y, 360)
@@ -766,7 +778,7 @@ test('PcbScene3dExternalModels flips asymmetric source-Z origins without canceli
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
 
     assert.equal(modelGroup.position.x, 0)
     assert.equal(modelGroup.position.y, 0)
@@ -840,7 +852,7 @@ test('PcbScene3dExternalModels keeps bottom-side dz offsets below the board face
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
 
     assert.equal(wrapperGroup.position.x, -10)
     assert.equal(wrapperGroup.position.y, 25)
@@ -936,11 +948,14 @@ test('PcbScene3dExternalModels reuses one loaded STEP model for repeated placeme
     assert.deepEqual(diagnostics, [])
     assert.equal(loadCount, 1)
     assert.equal(externalModelsGroup.children.length, 2)
-    assert.notEqual(
+    const firstFaceGroup =
         externalModelsGroup.children[0].children[0].children[0].children[0]
-            .children[0],
+    const secondFaceGroup =
         externalModelsGroup.children[1].children[0].children[0].children[0]
-            .children[0]
+
+    assert.notEqual(
+        resolvePlacedModelGroup(firstFaceGroup),
+        resolvePlacedModelGroup(secondFaceGroup)
     )
 })
 

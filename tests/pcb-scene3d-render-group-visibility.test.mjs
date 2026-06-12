@@ -129,3 +129,51 @@ test('PcbScene3dRenderGroupVisibility keeps component depth over board assemblie
     assert.equal(silkscreenMesh.material.depthWrite, true)
     assert.equal(copperMesh.material.depthWrite, true)
 })
+
+test('PcbScene3dRenderGroupVisibility hides only model-search external roots', () => {
+    const groups = new Map(
+        [
+            'board',
+            'silkscreen',
+            'copper',
+            'fallback-bodies',
+            'external-models'
+        ].map((name) => [name, new FakeGroup()])
+    )
+    const modelSearchRoot = new FakeGroup()
+    const regularExternalRoot = new FakeGroup()
+
+    PcbScene3dRenderGroupVisibility.apply({
+        groups,
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': false,
+            'model-search-models': false,
+            copper: true
+        },
+        fallbackBodyRoots: new Map(),
+        loadedExternalModelDesignators: new Set(),
+        modelSearchExternalModelRoots: new Set([modelSearchRoot]),
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(groups.get('external-models').visible, true)
+    assert.equal(modelSearchRoot.visible, false)
+    assert.equal(regularExternalRoot.visible, true)
+
+    PcbScene3dRenderGroupVisibility.apply({
+        groups,
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': false,
+            'model-search-models': true,
+            copper: true
+        },
+        fallbackBodyRoots: new Map(),
+        loadedExternalModelDesignators: new Set(),
+        modelSearchExternalModelRoots: new Set([modelSearchRoot]),
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(modelSearchRoot.visible, true)
+})

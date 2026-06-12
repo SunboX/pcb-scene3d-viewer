@@ -3,6 +3,7 @@ import { PcbScene3dBoardAssemblyPlacement } from './PcbScene3dBoardAssemblyPlace
 import { PcbScene3dBoardAssemblyTransform } from './PcbScene3dBoardAssemblyTransform.mjs'
 import { PcbScene3dBufferAttributeFactory } from './PcbScene3dBufferAttributeFactory.mjs'
 import { PcbScene3dExternalModelLoadOrder } from './PcbScene3dExternalModelLoadOrder.mjs'
+import { PcbScene3dModelBounds } from './PcbScene3dModelBounds.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 import { PcbScene3dStepLoader } from './PcbScene3dStepLoader.mjs'
 import { PcbScene3dViewCompensation } from './PcbScene3dViewCompensation.mjs'
@@ -270,10 +271,18 @@ export class PcbScene3dExternalModels {
         const mountRig = PcbScene3dMountRig.create(THREE, placement)
         const wrapperGroup = mountRig.rootGroup
         const viewCompensationGroup = new THREE.Group()
+        const adjustmentGroup = new THREE.Group()
+        const designator = String(placement?.designator || 'component')
         wrapperGroup.userData.scene3dSelection = {
-            designator: String(placement?.designator || 'component'),
+            designator,
             sourceType: 'external-model'
         }
+        adjustmentGroup.userData.scene3dAdjustmentTarget = true
+        adjustmentGroup.userData.scene3dAdjustmentDesignator = designator
+        adjustmentGroup.userData.scene3dAdjustmentBaseline =
+            PcbScene3dExternalModels.#normalizeModelTransform(
+                placement?.modelTransform || {}
+            )
         viewCompensationGroup.userData.scene3dViewCompensation = true
         viewCompensationGroup.userData.scene3dSourceFrameScale =
             PcbScene3dExternalModels.#resolveSourceFrameScale(placement)
@@ -312,7 +321,7 @@ export class PcbScene3dExternalModels {
         modelGroup.position.set(
             modelOffset.x + sourceOriginAdjustment.offset.x,
             modelOffset.y + sourceOriginAdjustment.offset.y,
-            modelOffset.z + sourceOriginAdjustment.offset.z
+            sourceOriginAdjustment.offset.z
         )
         PcbScene3dExternalModels.#applyModelRotation(
             THREE,
@@ -323,7 +332,10 @@ export class PcbScene3dExternalModels {
             modelGroup,
             PcbScene3dExternalModels.#resolveModelScale(modelTransform)
         )
-        mountRig.faceGroup.add(modelGroup)
+        PcbScene3dModelBounds.seatOnMountPlane(THREE, modelGroup)
+        modelGroup.position.z += modelOffset.z
+        adjustmentGroup.add(modelGroup)
+        mountRig.faceGroup.add(adjustmentGroup)
 
         return wrapperGroup
     }
@@ -478,16 +490,48 @@ export class PcbScene3dExternalModels {
         }
 
         if (Math.abs(centerX) > maxDimension * 0.2) {
+            if (centerX * centerZ <= 0) {
+                return {
+                    offset: { x: centerX * 2, y: -centerZ * 2, z: 0 },
+                    rotationDeg: { x: 0, y: 0, z: 180 }
+                }
+            }
+
             return {
                 offset: { x: 0, y: 0, z: 0 },
                 rotationDeg: { x: 0, y: 0, z: 180 }
             }
         }
 
+        if (PcbScene3dExternalModels.#isDominantSourceZExtension(bounds)) {
+            return PcbScene3dExternalModels.#emptySourceOriginAdjustment()
+        }
+
         return {
             offset: { x: 0, y: centerZ * 2, z: 0 },
             rotationDeg: { x: 0, y: 0, z: 0 }
         }
+    }
+
+    /**
+     * Checks whether source Z is the model's intentional edge-extension axis
+     * instead of a square-package source-origin bias.
+     * @param {{ sizeX?: number, sizeY?: number, sizeZ?: number } | null} bounds Source bounds.
+     * @returns {boolean}
+     */
+    static #isDominantSourceZExtension(bounds) {
+        const sourceZ = Math.abs(Number(bounds?.sizeZ || 0))
+        const lateralSize = Math.max(
+            Math.abs(Number(bounds?.sizeX || 0)),
+            Math.abs(Number(bounds?.sizeY || 0))
+        )
+
+        return (
+            Number.isFinite(sourceZ) &&
+            Number.isFinite(lateralSize) &&
+            lateralSize > 0 &&
+            sourceZ > lateralSize * 2
+        )
     }
 
     /**
@@ -711,7 +755,7 @@ export class PcbScene3dExternalModels {
             ? { meshPayloads: model.preparedMeshPayloads }
             : await stepLoader.loadModel(model)
         const group = new THREE.Group()
-        const sourceBounds = PcbScene3dExternalModels.#measureSourceBoundsMil(
+        const sourceBounds = PcbScene3dModelBounds.measureSourceBoundsMil(
             loadedModel.meshPayloads
         )
         group.scale.setScalar(1000)
@@ -764,71 +808,6 @@ export class PcbScene3dExternalModels {
         })
 
         return group
-    }
-
-    /**
-     * Measures raw STEP mesh bounds in mil before the group-level unit scale is
-     * applied.
-     * @param {{ positions?: ArrayLike<number> }[]} meshPayloads STEP mesh payloads.
-     * @returns {{ minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number, centerX: number, centerY: number, centerZ: number, sizeX: number, sizeY: number, sizeZ: number } | null}
-     */
-    static #measureSourceBoundsMil(meshPayloads) {
-        let minX = Number.POSITIVE_INFINITY
-        let minY = Number.POSITIVE_INFINITY
-        let minZ = Number.POSITIVE_INFINITY
-        let maxX = Number.NEGATIVE_INFINITY
-        let maxY = Number.NEGATIVE_INFINITY
-        let maxZ = Number.NEGATIVE_INFINITY
-
-        ;(Array.isArray(meshPayloads) ? meshPayloads : []).forEach(
-            (meshPayload) => {
-                ;(PcbScene3dBufferAttributeFactory.isNumberSequence(
-                    meshPayload?.positions
-                )
-                    ? meshPayload.positions
-                    : []
-                ).forEach((value, index) => {
-                    const numericValue = Number(value || 0) * 1000
-
-                    if (index % 3 === 0) {
-                        minX = Math.min(minX, numericValue)
-                        maxX = Math.max(maxX, numericValue)
-                    } else if (index % 3 === 1) {
-                        minY = Math.min(minY, numericValue)
-                        maxY = Math.max(maxY, numericValue)
-                    } else {
-                        minZ = Math.min(minZ, numericValue)
-                        maxZ = Math.max(maxZ, numericValue)
-                    }
-                })
-            }
-        )
-
-        if (
-            !Number.isFinite(minX) ||
-            !Number.isFinite(minY) ||
-            !Number.isFinite(minZ) ||
-            !Number.isFinite(maxX) ||
-            !Number.isFinite(maxY) ||
-            !Number.isFinite(maxZ)
-        ) {
-            return null
-        }
-
-        return {
-            minX,
-            minY,
-            minZ,
-            maxX,
-            maxY,
-            maxZ,
-            centerX: (minX + maxX) / 2,
-            centerY: (minY + maxY) / 2,
-            centerZ: (minZ + maxZ) / 2,
-            sizeX: maxX - minX,
-            sizeY: maxY - minY,
-            sizeZ: maxZ - minZ
-        }
     }
 
     /**
@@ -895,11 +874,17 @@ export class PcbScene3dExternalModels {
      * @returns {any}
      */
     static #createStepMaterial(THREE, color) {
-        return new THREE.MeshStandardMaterial({
+        const options = {
             color,
             roughness: 0.56,
             metalness: 0.14
-        })
+        }
+
+        if (THREE.DoubleSide !== undefined) {
+            options.side = THREE.DoubleSide
+        }
+
+        return new THREE.MeshStandardMaterial(options)
     }
 
     /**

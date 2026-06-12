@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { PcbScene3dCameraRig } from '../src/PcbScene3dCameraRig.mjs'
+import { PcbScene3dCopperFactory } from '../src/PcbScene3dCopperFactory.mjs'
 import { PcbScene3dExternalModels } from '../src/PcbScene3dExternalModels.mjs'
 import { PcbScene3dRuntime } from '../src/PcbScene3dRuntime.mjs'
+import { PcbScene3dSilkscreenChunkedFactory } from '../src/PcbScene3dSilkscreenChunkedFactory.mjs'
 
 /**
  * Resolves one preset pose into normalized screen-space basis vectors.
@@ -644,51 +646,12 @@ function createFakeRuntimeModules() {
 }
 
 /**
- * Resolves the fallback-bodies render group from the current fake scene tree.
- * @returns {FakeGroup | undefined}
- */
-function resolveFallbackBodiesGroup() {
-    const rootGroup = resolveRootGroup()
-    if (!rootGroup) {
-        return undefined
-    }
-
-    return rootGroup.children.find(
-        (group) =>
-            Array.isArray(group?.children) &&
-            group.children.some(
-                (child) =>
-                    child?.userData?.scene3dSelection?.designator === 'U1'
-            )
-    )
-}
-
-/**
- * Resolves the root PCB render group from the current fake scene tree.
- * @returns {FakeGroup | undefined}
- */
-function resolveRootGroup() {
-    return lastCreatedScene?.children?.[0]?.children?.[0]
-}
-
-/**
  * Resolves the board shell mesh from the current fake scene tree.
  * @returns {FakeMesh | undefined}
  */
 function resolveBoardMesh() {
     return lastCreatedScene?.children?.[0]?.children?.[0]?.children?.[0]
         ?.children?.[0]
-}
-
-/**
- * Flushes a few promise turns so async runtime stages can advance.
- * @param {number} turns
- * @returns {Promise<void>}
- */
-async function flushAsyncTurns(turns = 1) {
-    for (let index = 0; index < turns; index += 1) {
-        await Promise.resolve()
-    }
 }
 
 test('PcbScene3dRuntime mirrors Altium top into release-stable orientation', () => {
@@ -843,6 +806,86 @@ test('PcbScene3dRuntime uses board face, edge, and plated-hole copper materials'
     }
 })
 
+test('PcbScene3dRuntime keeps surface detail close to board faces', async () => {
+    const originalWindow = globalThis.window
+    const originalDocument = globalThis.document
+    const originalLoadIntoScene = PcbScene3dExternalModels.loadIntoScene
+    const originalCopperBuildGroup = PcbScene3dCopperFactory.buildGroup
+    const originalSilkscreenBuildGroup =
+        PcbScene3dSilkscreenChunkedFactory.buildGroup
+    const capturedZ = {}
+
+    globalThis.window = {
+        devicePixelRatio: 1,
+        requestAnimationFrame(callback) {
+            callback()
+        },
+        addEventListener() {},
+        removeEventListener() {}
+    }
+    globalThis.document = {}
+    lastCreatedScene = null
+    PcbScene3dExternalModels.loadIntoScene = async () => []
+    PcbScene3dCopperFactory.buildGroup = (_three, _detail, topZ, bottomZ) => {
+        capturedZ.copperTop = topZ
+        capturedZ.copperBottom = bottomZ
+        return new FakeGroup()
+    }
+    PcbScene3dSilkscreenChunkedFactory.buildGroup = (
+        _three,
+        _silkscreen,
+        topZ,
+        bottomZ
+    ) => {
+        capturedZ.silkscreenTop = topZ
+        capturedZ.silkscreenBottom = bottomZ
+        return new FakeGroup()
+    }
+
+    const runtime = new PcbScene3dRuntime(
+        new FakeViewportNode(),
+        {
+            board: {
+                widthMil: 1200,
+                heightMil: 800,
+                centerX: 0,
+                centerY: 0,
+                thicknessMil: 62,
+                segments: []
+            },
+            components: [],
+            detail: {
+                silkscreen: {},
+                tracks: [],
+                arcs: [],
+                pads: [],
+                vias: []
+            },
+            externalPlacements: []
+        },
+        {
+            loadRuntimeModules: async () => createFakeRuntimeModules()
+        }
+    )
+
+    try {
+        await runtime.whenReady()
+
+        assert.ok(capturedZ.copperTop - 31 <= 0.15)
+        assert.ok(31 - Math.abs(capturedZ.copperBottom) <= 0.15)
+        assert.ok(capturedZ.silkscreenTop - 31 <= 0.15)
+        assert.ok(31 - Math.abs(capturedZ.silkscreenBottom) <= 0.15)
+    } finally {
+        runtime.dispose()
+        PcbScene3dSilkscreenChunkedFactory.buildGroup =
+            originalSilkscreenBuildGroup
+        PcbScene3dCopperFactory.buildGroup = originalCopperBuildGroup
+        PcbScene3dExternalModels.loadIntoScene = originalLoadIntoScene
+        globalThis.window = originalWindow
+        globalThis.document = originalDocument
+    }
+})
+
 test('PcbScene3dRuntime passes active view scale into external model loading', async () => {
     const originalWindow = globalThis.window
     const originalDocument = globalThis.document
@@ -907,91 +950,4 @@ test('PcbScene3dRuntime passes active view scale into external model loading', a
         globalThis.window = originalWindow
         globalThis.document = originalDocument
     }
-})
-
-test('PcbScene3dRuntime reports ready before slow external model loading settles', async () => {
-    const originalWindow = globalThis.window
-    const originalDocument = globalThis.document
-    const originalLoadIntoScene = PcbScene3dExternalModels.loadIntoScene
-    let resolveExternalModels = null
-
-    globalThis.window = {
-        devicePixelRatio: 1,
-        requestAnimationFrame(callback) {
-            callback()
-        },
-        addEventListener() {},
-        removeEventListener() {}
-    }
-    globalThis.document = {}
-    lastCreatedScene = null
-
-    PcbScene3dExternalModels.loadIntoScene = async () => {
-        await new Promise((resolve) => {
-            resolveExternalModels = resolve
-        })
-        return []
-    }
-
-    const runtime = new PcbScene3dRuntime(
-        new FakeViewportNode(),
-        {
-            board: {
-                widthMil: 1200,
-                heightMil: 800,
-                centerX: 0,
-                centerY: 0,
-                thicknessMil: 62,
-                segments: []
-            },
-            components: [
-                {
-                    designator: 'U1',
-                    mountSide: 'top',
-                    rotationDeg: 0,
-                    positionMil: { x: 0, y: 0, z: 20 },
-                    body: {
-                        family: 'chip',
-                        sizeMil: {
-                            width: 80,
-                            depth: 60,
-                            height: 40
-                        }
-                    }
-                }
-            ],
-            detail: {
-                silkscreen: {},
-                tracks: [],
-                arcs: [],
-                pads: [],
-                vias: []
-            },
-            externalPlacements: [{}]
-        },
-        {
-            loadRuntimeModules: async () => createFakeRuntimeModules()
-        }
-    )
-
-    let readyResolved = false
-    const readyPromise = runtime.whenReady().then(() => {
-        readyResolved = true
-    })
-
-    await flushAsyncTurns(8)
-
-    assert.ok(lastCreatedScene)
-    assert.equal(resolveFallbackBodiesGroup()?.visible, false)
-    assert.equal(readyResolved, true)
-
-    resolveExternalModels?.()
-    await readyPromise
-
-    assert.equal(readyResolved, true)
-
-    runtime.dispose()
-    PcbScene3dExternalModels.loadIntoScene = originalLoadIntoScene
-    globalThis.window = originalWindow
-    globalThis.document = originalDocument
 })

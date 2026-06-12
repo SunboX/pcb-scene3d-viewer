@@ -27,18 +27,28 @@ export class PcbScene3dPadFactory {
         const geometryCache = new Map()
         const side = PcbScene3dPadFactory.#normalizeSide(options?.side)
         const mirrorY = Boolean(options?.mirrorY)
+        const normalizedPads = pads || []
+        const boardDrills = PcbScene3dDrillPathFactory.resolveBoardDrillSpecs({
+            pads: normalizedPads
+        })
 
-        ;(pads || []).forEach((pad) => {
+        ;(normalizedPads || []).forEach((pad) => {
             if (!PcbScene3dPadFactory.#hasVisibleSurface(pad, side)) {
                 return
             }
 
             const spec = PcbScene3dPadFactory.resolvePadSurfaceSpec(pad, side)
+            const drillCutouts = PcbScene3dPadFactory.#resolvePadDrillCutouts(
+                pad,
+                spec,
+                boardDrills,
+                mirrorY
+            )
             const geometry = PcbScene3dPadFactory.#resolveGeometry(
                 THREE,
                 geometryCache,
                 spec,
-                pad
+                drillCutouts
             )
             const point = PcbScene3dPadFactory.#normalizePoint(
                 normalizeBoardPoint,
@@ -391,27 +401,22 @@ export class PcbScene3dPadFactory {
      * Resolves or creates one reusable geometry for the pad spec.
      * @param {any} THREE
      * @param {Map<string, any>} geometryCache
-     * @param {any} pad
      * @param {{ width: number, height: number, kind: 'circle' | 'rect' | 'rounded-rect', radius: number, cornerRadius: number, hasHole: boolean, holeDiameter: number, holeSlotLength: number | null, holeRotation: number }} spec
+     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[]} drillCutouts
      * @returns {any}
      */
-    static #resolveGeometry(THREE, geometryCache, spec, pad) {
-        const cacheKey = [
-            spec.kind,
-            spec.width.toFixed(4),
-            spec.height.toFixed(4),
-            spec.cornerRadius.toFixed(4),
-            spec.holeDiameter.toFixed(4),
-            Number(spec.holeSlotLength || 0).toFixed(4),
-            spec.holeRotation.toFixed(4)
-        ].join(':')
+    static #resolveGeometry(THREE, geometryCache, spec, drillCutouts) {
+        const cacheKey = PcbScene3dPadFactory.#buildGeometryCacheKey(
+            spec,
+            drillCutouts
+        )
         const cached = geometryCache.get(cacheKey)
         if (cached) {
             return cached
         }
 
         let geometry
-        if (spec.kind === 'circle' && !spec.hasHole) {
+        if (spec.kind === 'circle' && !drillCutouts.length) {
             geometry = new THREE.CylinderGeometry(
                 spec.radius,
                 spec.radius,
@@ -420,12 +425,14 @@ export class PcbScene3dPadFactory {
             )
         } else {
             const shape = PcbScene3dPadFactory.#buildOuterShape(THREE, spec)
-            const drillHole = PcbScene3dDrillPathFactory.buildPadHolePath(
-                THREE,
-                pad
-            )
-            if (drillHole) {
-                shape.holes.push(drillHole)
+            for (const drillCutout of drillCutouts) {
+                const drillHole = PcbScene3dDrillPathFactory.buildDrillPath(
+                    THREE,
+                    drillCutout
+                )
+                if (drillHole) {
+                    shape.holes.push(drillHole)
+                }
             }
             geometry = new THREE.ExtrudeGeometry(shape, {
                 depth: PcbScene3dPadFactory.#PAD_THICKNESS_MIL,
@@ -442,6 +449,200 @@ export class PcbScene3dPadFactory {
 
         geometryCache.set(cacheKey, geometry)
         return geometry
+    }
+
+    /**
+     * Resolves drill apertures that intersect one pad's local copper face.
+     * @param {{ x?: number, y?: number, rotation?: number | null }} pad
+     * @param {{ width: number, height: number, kind: 'circle' | 'rect' | 'rounded-rect', radius: number, offsetX: number, offsetY: number }} spec
+     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[]} boardDrills
+     * @param {boolean} mirrorY
+     * @returns {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[]}
+     */
+    static #resolvePadDrillCutouts(pad, spec, boardDrills, mirrorY) {
+        return (boardDrills || [])
+            .map((drillSpec) =>
+                PcbScene3dPadFactory.#toPadLocalDrillCutout(
+                    pad,
+                    spec,
+                    drillSpec,
+                    mirrorY
+                )
+            )
+            .filter((drillSpec) =>
+                PcbScene3dPadFactory.#drillTouchesPadSurface(drillSpec, spec)
+            )
+    }
+
+    /**
+     * Converts one board-space drill aperture into pad-local shape space.
+     * @param {{ x?: number, y?: number, rotation?: number | null }} pad
+     * @param {{ offsetX: number, offsetY: number }} spec
+     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }} drillSpec
+     * @param {boolean} mirrorY
+     * @returns {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }}
+     */
+    static #toPadLocalDrillCutout(pad, spec, drillSpec, mirrorY) {
+        const padRotationDeg = Number(pad?.rotation || 0)
+        const relative = {
+            x: Number(drillSpec?.x || 0) - Number(pad?.x || 0),
+            y: Number(drillSpec?.y || 0) - Number(pad?.y || 0)
+        }
+        if (mirrorY) {
+            relative.y *= -1
+        }
+
+        const local = PcbScene3dPadFactory.#rotatePoint(
+            relative,
+            -padRotationDeg
+        )
+        const localOffsetY = mirrorY ? -spec.offsetY : spec.offsetY
+        const diameter = Number(drillSpec?.diameter || 0)
+        const slotLength =
+            Number(drillSpec?.slotLength || 0) > diameter
+                ? Number(drillSpec.slotLength || 0)
+                : null
+
+        return {
+            x: local.x - spec.offsetX,
+            y: local.y - localOffsetY,
+            diameter,
+            slotLength,
+            rotationDeg: PcbScene3dPadFactory.#normalizeAngle(
+                Number(drillSpec?.rotationDeg || 0) - padRotationDeg
+            )
+        }
+    }
+
+    /**
+     * Checks whether a local drill aperture overlaps the pad's surface bounds.
+     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }} drillSpec
+     * @param {{ width: number, height: number, kind: 'circle' | 'rect' | 'rounded-rect', radius: number }} spec
+     * @returns {boolean}
+     */
+    static #drillTouchesPadSurface(drillSpec, spec) {
+        if (Number(drillSpec?.diameter || 0) <= 0) {
+            return false
+        }
+
+        const bounds = PcbScene3dPadFactory.#resolveDrillBounds(drillSpec)
+        const halfWidth = Number(spec.width || 0) / 2
+        const halfHeight = Number(spec.height || 0) / 2
+        const boundsOverlap =
+            bounds.maxX >= -halfWidth &&
+            bounds.minX <= halfWidth &&
+            bounds.maxY >= -halfHeight &&
+            bounds.minY <= halfHeight
+        if (!boundsOverlap) {
+            return false
+        }
+
+        if (spec.kind !== 'circle') {
+            return true
+        }
+
+        return (
+            Math.hypot(Number(drillSpec.x || 0), Number(drillSpec.y || 0)) <=
+            Number(spec.radius || 0) +
+                PcbScene3dPadFactory.#resolveDrillReach(drillSpec)
+        )
+    }
+
+    /**
+     * Resolves the axis-aligned local bounds of one drill aperture.
+     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }} drillSpec
+     * @returns {{ minX: number, maxX: number, minY: number, maxY: number }}
+     */
+    static #resolveDrillBounds(drillSpec) {
+        const radius = Math.max(Number(drillSpec.diameter || 0) / 2, 0)
+        const halfTrack = Math.max(
+            (Number(drillSpec.slotLength || 0) -
+                Number(drillSpec.diameter || 0)) /
+                2,
+            0
+        )
+        const rotationRad = (Number(drillSpec.rotationDeg || 0) * Math.PI) / 180
+        const extentX = Math.abs(Math.cos(rotationRad)) * halfTrack + radius
+        const extentY = Math.abs(Math.sin(rotationRad)) * halfTrack + radius
+
+        return {
+            minX: Number(drillSpec.x || 0) - extentX,
+            maxX: Number(drillSpec.x || 0) + extentX,
+            minY: Number(drillSpec.y || 0) - extentY,
+            maxY: Number(drillSpec.y || 0) + extentY
+        }
+    }
+
+    /**
+     * Resolves a conservative radial reach for one drill aperture.
+     * @param {{ diameter: number, slotLength?: number | null }} drillSpec
+     * @returns {number}
+     */
+    static #resolveDrillReach(drillSpec) {
+        return (
+            Math.max(
+                Number(drillSpec.diameter || 0),
+                Number(drillSpec.slotLength || 0)
+            ) / 2
+        )
+    }
+
+    /**
+     * Rotates one 2D point around the origin.
+     * @param {{ x: number, y: number }} point
+     * @param {number} angleDeg
+     * @returns {{ x: number, y: number }}
+     */
+    static #rotatePoint(point, angleDeg) {
+        const angleRad = (Number(angleDeg || 0) * Math.PI) / 180
+        const cos = Math.cos(angleRad)
+        const sin = Math.sin(angleRad)
+
+        return {
+            x: point.x * cos - point.y * sin,
+            y: point.x * sin + point.y * cos
+        }
+    }
+
+    /**
+     * Builds a cache key that includes pad geometry and local drill cutouts.
+     * @param {{ width: number, height: number, kind: 'circle' | 'rect' | 'rounded-rect', cornerRadius: number, holeDiameter: number, holeSlotLength: number | null, holeRotation: number }} spec
+     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[]} drillCutouts
+     * @returns {string}
+     */
+    static #buildGeometryCacheKey(spec, drillCutouts) {
+        const drillKey = (drillCutouts || [])
+            .map((drillSpec) =>
+                [
+                    Number(drillSpec.x || 0).toFixed(4),
+                    Number(drillSpec.y || 0).toFixed(4),
+                    Number(drillSpec.diameter || 0).toFixed(4),
+                    Number(drillSpec.slotLength || 0).toFixed(4),
+                    Number(drillSpec.rotationDeg || 0).toFixed(4)
+                ].join(',')
+            )
+            .join('|')
+
+        return [
+            spec.kind,
+            spec.width.toFixed(4),
+            spec.height.toFixed(4),
+            spec.cornerRadius.toFixed(4),
+            spec.holeDiameter.toFixed(4),
+            Number(spec.holeSlotLength || 0).toFixed(4),
+            spec.holeRotation.toFixed(4),
+            drillKey
+        ].join(':')
+    }
+
+    /**
+     * Normalizes one angle into the inclusive `[0, 360)` range.
+     * @param {number} angleDeg
+     * @returns {number}
+     */
+    static #normalizeAngle(angleDeg) {
+        const normalized = Number(angleDeg || 0) % 360
+        return normalized < 0 ? normalized + 360 : normalized
     }
 
     /**

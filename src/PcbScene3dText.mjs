@@ -40,7 +40,10 @@ const FALLBACK_MESSAGES = {
     'scene3d.placements': 'Placements',
     'scene3d.pointerHint':
         'Drag to orbit, right-drag to pan, and use the wheel to zoom.',
+    'scene3d.offset': 'Offset',
+    'scene3d.resetTransform': 'Reset',
     'scene3d.rotation': 'Rotation',
+    'scene3d.scale': 'Scale',
     'scene3d.skipped': 'Skipped',
     'scene3d.source': 'Source',
     'scene3d.startFailed': '3D preview could not start:',

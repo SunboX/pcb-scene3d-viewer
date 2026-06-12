@@ -860,7 +860,10 @@ export class PcbScene3dSilkscreenFactory {
             opacity: 1,
             toneMapped: false,
             fog: false,
-            side: THREE.DoubleSide
+            side: THREE.DoubleSide,
+            polygonOffset: true,
+            polygonOffsetFactor: -3,
+            polygonOffsetUnits: -3
         })
     }
 

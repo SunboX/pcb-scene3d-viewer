@@ -1,7 +1,9 @@
 import { PcbModelArchiveExporter } from './PcbModelArchiveExporter.mjs'
+import { PcbScene3dAdjustmentControlBinder } from './PcbScene3dAdjustmentControlBinder.mjs'
 import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs'
 import { PcbScene3dInteractionHints } from './PcbScene3dInteractionHints.mjs'
 import { PcbScene3dRuntime } from './PcbScene3dRuntime.mjs'
+import { PcbScene3dSelectionInspectorRenderer } from './PcbScene3dSelectionInspectorRenderer.mjs'
 import { PcbScene3dText } from './PcbScene3dText.mjs'
 
 /**
@@ -23,16 +25,25 @@ export class PcbScene3dController {
     /** @type {HTMLElement | null} */
     #selectionNode
 
+    /** @type {HTMLElement | null} */
+    #adjustmentHostNode
+
+    /** @type {PcbScene3dAdjustmentControlBinder | null} */
+    #adjustmentControls
+
     /** @type {Array<{ node: EventTarget, type: string, listener: (event: any) => void }>} */
     #listeners
 
     /** @type {Map<string, { component: any | null, externalPlacement: any | null }>} */
     #selectionIndex
 
+    /** @type {Map<string, { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }>} */
+    #componentAdjustments
+
     /** @type {string} */
     #selectedComponentKey
 
-    /** @type {{ setPreset?: (preset: string) => void, setToggle?: (toggleName: string, enabled: boolean) => void, dispose?: () => void } | null} */
+    /** @type {{ setPreset?: (preset: string) => void, setToggle?: (toggleName: string, enabled: boolean) => void, setSelectedDesignator?: (designator: string) => void, setComponentAdjustment?: (designator: string, adjustment: { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }) => void, dispose?: () => void } | null} */
     #runtime
 
     /** @type {any | null} */
@@ -53,6 +64,12 @@ export class PcbScene3dController {
     /** @type {(key: string) => string} */
     #translate
 
+    /** @type {boolean} */
+    #renderAdjustmentControlsInSelection
+
+    /** @type {boolean} */
+    #autoSearchMissingModels
+
     /** @type {string} */
     #documentId
 
@@ -65,7 +82,7 @@ export class PcbScene3dController {
     /**
      * @param {HTMLElement} viewportNode
      * @param {any} documentModel
-     * @param {{ rootNode?: HTMLElement | null, documentId?: string, onComponentSelectionChange?: ((change: { documentId: string, componentKey: string, source?: string }) => void) | null, sessionAssets?: any[], circuitJson?: object[], sceneDescription?: any, buildScene?: (documentModel: any, options: { modelRegistry: any }) => any, createModelRegistry?: (documentModel: any, sessionAssets: any[]) => any, createRuntime?: (viewportNode: HTMLElement, sceneDescription: any, hooks: { setDiagnostics: (messages: string[]) => void, setSelection: (selection: any | null) => void, translate?: ((key: string) => string) | null }) => { setPreset?: (preset: string) => void, setToggle?: (toggleName: string, enabled: boolean) => void, dispose?: () => void, whenReady?: () => Promise<void> | void }, scenePrepClient?: { prepareScene?: (documentModel: any, sessionAssets?: any[]) => Promise<any>, dispose?: () => void } | null, exportArchive?: (options: { archiveBaseName?: string, sceneDescription?: any }) => Promise<{ archiveName: string, archiveBytes: Uint8Array, exportedEntries: any[], skippedEntries: any[] }>, downloadArchive?: (archiveName: string, archiveBytes: Uint8Array) => Promise<void> | void, setLoadingVisible?: (visible: boolean) => void, translate?: ((key: string) => string) | null }} [options]
+     * @param {{ rootNode?: HTMLElement | null, documentId?: string, onComponentSelectionChange?: ((change: { documentId: string, componentKey: string, source?: string }) => void) | null, sessionAssets?: any[], autoSearchMissingModels?: boolean, circuitJson?: object[], sceneDescription?: any, buildScene?: (documentModel: any, options: { modelRegistry: any }) => any, createModelRegistry?: (documentModel: any, sessionAssets: any[]) => any, createRuntime?: (viewportNode: HTMLElement, sceneDescription: any, hooks: { setDiagnostics: (messages: string[]) => void, setSelection: (selection: any | null) => void, translate?: ((key: string) => string) | null }) => { setPreset?: (preset: string) => void, setToggle?: (toggleName: string, enabled: boolean) => void, dispose?: () => void, whenReady?: () => Promise<void> | void }, scenePrepClient?: { prepareScene?: (documentModel: any, sessionAssets?: any[]) => Promise<any>, dispose?: () => void } | null, exportArchive?: (options: { archiveBaseName?: string, sceneDescription?: any }) => Promise<{ archiveName: string, archiveBytes: Uint8Array, exportedEntries: any[], skippedEntries: any[] }>, downloadArchive?: (archiveName: string, archiveBytes: Uint8Array) => Promise<void> | void, renderAdjustmentControlsInSelection?: boolean, setLoadingVisible?: (visible: boolean) => void, translate?: ((key: string) => string) | null }} [options]
      */
     constructor(viewportNode, documentModel, options = {}) {
         this.#viewportNode = viewportNode
@@ -81,6 +98,7 @@ export class PcbScene3dController {
         this.#selectionNode = this.#rootNode?.querySelector(
             '.scene-3d__selection'
         )
+        this.#adjustmentHostNode = null
         this.#listeners = []
         this.#scenePrepClient = options.scenePrepClient || null
         this.#sceneDescription = null
@@ -99,6 +117,10 @@ export class PcbScene3dController {
         this.#translate = PcbScene3dText.createTranslator(
             options.translate || null
         )
+        this.#renderAdjustmentControlsInSelection =
+            options.renderAdjustmentControlsInSelection !== false
+        this.#autoSearchMissingModels =
+            options.autoSearchMissingModels !== false
         this.#documentId = String(options.documentId || '')
         this.#onComponentSelectionChange =
             typeof options.onComponentSelectionChange === 'function'
@@ -107,12 +129,41 @@ export class PcbScene3dController {
         this.#isDisposed = false
         this.#runtime = null
         this.#selectionIndex = new Map()
+        this.#componentAdjustments = new Map()
         this.#selectedComponentKey = ''
+        this.#adjustmentControls = new PcbScene3dAdjustmentControlBinder({
+            resolveDesignator: () => this.#selectedComponentKey,
+            resolveCurrentAdjustment: (designator) =>
+                this.#resolveCurrentAdjustment(designator),
+            resolveBaselineAdjustment: (designator) =>
+                this.#resolveBaselineAdjustment(designator),
+            setAdjustment: (designator, adjustment) => {
+                this.#componentAdjustments.set(designator, adjustment)
+            },
+            deleteAdjustment: (designator) => {
+                this.#componentAdjustments.delete(designator)
+            },
+            applyRuntimeAdjustment: (designator, adjustment) => {
+                this.#runtime?.setComponentAdjustment?.(designator, adjustment)
+            },
+            setSelectionHighlightSuppressed: (suppressed) => {
+                this.#runtime?.setSelectedDesignator?.(
+                    suppressed ? '' : this.#selectedComponentKey
+                )
+            },
+            refreshSelection: (designator) => {
+                this.#setSelection({
+                    designator,
+                    sourceType: this.#resolveSelectionSourceType(designator)
+                })
+            }
+        })
 
         this.#bindPresets()
         this.#setActivePresetButton('isometric')
         this.#bindToggles()
         this.#bindExportAction()
+        this.#adjustmentControls.bindSelectionNode(this.#selectionNode)
         this.#setSelection(null)
         this.#setLoadingVisible(true)
         const circuitJsonModel = PcbScene3dController.#resolveCircuitJsonModel(
@@ -183,6 +234,46 @@ export class PcbScene3dController {
     }
 
     /**
+     * Updates app-discovered model visibility without remounting the scene.
+     * @param {boolean} enabled Whether app-discovered models should be shown.
+     * @returns {void}
+     */
+    setAutoSearchMissingModels(enabled) {
+        this.#autoSearchMissingModels = enabled === true
+        this.#runtime?.setToggle?.(
+            'model-search-models',
+            this.#autoSearchMissingModels
+        )
+    }
+
+    /**
+     * Sets an external host for selected-component transform controls.
+     * @param {HTMLElement | null} hostNode Sidebar or app-owned controls host.
+     * @returns {void}
+     */
+    setAdjustmentHost(hostNode) {
+        const nextHost =
+            hostNode && typeof hostNode === 'object' ? hostNode : null
+        if (this.#adjustmentHostNode === nextHost) {
+            this.#renderAdjustmentHost()
+            return
+        }
+
+        this.#adjustmentHostNode = nextHost
+        this.#adjustmentControls?.setHost(this.#adjustmentHostNode)
+        this.#setSelection(
+            this.#selectedComponentKey
+                ? {
+                      designator: this.#selectedComponentKey,
+                      sourceType: this.#resolveSelectionSourceType(
+                          this.#selectedComponentKey
+                      )
+                  }
+                : null
+        )
+    }
+
+    /**
      * Releases event listeners and runtime resources.
      * @returns {void}
      */
@@ -194,6 +285,8 @@ export class PcbScene3dController {
         this.#listeners = []
         this.#scenePrepClient?.dispose?.()
         this.#scenePrepClient = null
+        this.#adjustmentControls?.dispose()
+        this.#adjustmentControls = null
         this.#runtime?.dispose?.()
         this.#runtime = null
         this.#sceneDescription = null
@@ -202,6 +295,7 @@ export class PcbScene3dController {
         this.#rootNode = null
         this.#diagnosticsNode = null
         this.#selectionNode = null
+        this.#adjustmentHostNode = null
         this.#selectedComponentKey = ''
         this.#exportArchive = async () => ({
             archiveName: '',
@@ -211,6 +305,7 @@ export class PcbScene3dController {
         })
         this.#downloadArchive = async () => {}
         this.#selectionIndex = new Map()
+        this.#componentAdjustments = new Map()
     }
 
     /**
@@ -350,6 +445,9 @@ export class PcbScene3dController {
                 this.#handleRuntimeSelection(selection),
             translate: this.#translate
         })
+        if (!this.#autoSearchMissingModels) {
+            this.#runtime?.setToggle?.('model-search-models', false)
+        }
         if (this.#selectedComponentKey) {
             this.#applySelectedComponent()
         }
@@ -608,153 +706,133 @@ export class PcbScene3dController {
      * @returns {void}
      */
     #setSelection(selection) {
-        if (!this.#selectionNode) {
-            return
-        }
-
         const designator = String(selection?.designator || '').trim()
         if (!designator) {
-            this.#selectionNode.innerHTML =
-                '<h4 class="scene-3d__selection-title">' +
-                PcbScene3dController.#escapeHtml(
-                    this.#translate('scene3d.componentInspector')
-                ) +
-                '</h4><p class="scene-3d__selection-empty">' +
-                PcbScene3dController.#escapeHtml(
-                    this.#translate('scene3d.inspectPrompt')
-                ) +
-                '</p>'
+            if (this.#selectionNode) {
+                this.#selectionNode.innerHTML =
+                    PcbScene3dSelectionInspectorRenderer.renderEmpty(
+                        this.#translate
+                    )
+            }
+            this.#renderAdjustmentHost(null)
             return
         }
 
         const selectionEntry = this.#selectionIndex.get(designator)
         if (!selectionEntry) {
-            this.#selectionNode.innerHTML =
-                '<h4 class="scene-3d__selection-title">' +
-                PcbScene3dController.#escapeHtml(
-                    this.#translate('scene3d.componentInspector')
-                ) +
-                '</h4><p class="scene-3d__selection-empty">' +
-                PcbScene3dController.#escapeHtml(
-                    this.#translate('scene3d.noMetadataFor')
-                ) +
-                ' ' +
-                PcbScene3dController.#escapeHtml(designator) +
-                '.</p>'
+            if (this.#selectionNode) {
+                this.#selectionNode.innerHTML =
+                    PcbScene3dSelectionInspectorRenderer.renderMissing(
+                        designator,
+                        this.#translate
+                    )
+            }
+            this.#renderAdjustmentHost({
+                designator,
+                selectionEntry: null
+            })
             return
         }
 
-        const component = selectionEntry.component
-        const externalPlacement = selectionEntry.externalPlacement
-        const fields = [
-            [this.#translate('scene3d.designator'), designator],
-            [
-                this.#translate('scene3d.picked'),
-                selection?.sourceType === 'external-model'
-                    ? this.#translate('scene3d.externalModel')
-                    : this.#translate('scene3d.fallbackBody')
-            ],
-            [
-                this.#translate('scene3d.mountSide'),
-                externalPlacement?.mountSide || component?.mountSide || ''
-            ],
-            [
-                this.#translate('scene3d.rotation'),
-                PcbScene3dController.#formatMilValue(
-                    component?.rotationDeg ?? externalPlacement?.rotationDeg,
-                    'deg'
-                )
-            ],
-            [
-                this.#translate('scene3d.boardPosition'),
-                component?.boardPositionMil
-                    ? PcbScene3dController.#formatPoint(
-                          component.boardPositionMil,
-                          true
-                      )
-                    : ''
-            ],
-            [
-                this.#translate('scene3d.pattern'),
-                String(component?.pattern || '')
-            ],
-            [
-                this.#translate('scene3d.source'),
-                String(component?.source || '')
-            ],
-            [
-                this.#translate('scene3d.model'),
-                externalPlacement?.externalModel
-                    ? String(externalPlacement.externalModel.name || '') +
-                      ' (' +
-                      String(externalPlacement.externalModel.format || '') +
-                      ')'
-                    : component?.externalModel
-                      ? String(component.externalModel.name || '') +
-                        ' (' +
-                        String(component.externalModel.format || '') +
-                        ')'
-                      : ''
-            ],
-            [
-                this.#translate('scene3d.bodyPosition'),
-                externalPlacement?.bodyPositionMil
-                    ? PcbScene3dController.#formatPoint(
-                          externalPlacement.bodyPositionMil,
-                          false
-                      )
-                    : ''
-            ],
-            [
-                this.#translate('scene3d.bodyRotation'),
-                PcbScene3dController.#formatMilValue(
-                    externalPlacement?.bodyRotationDeg,
-                    'deg'
-                )
-            ],
-            [
-                this.#translate('scene3d.modelRotation'),
-                externalPlacement?.modelTransform?.rotationDeg
-                    ? 'X ' +
-                      PcbScene3dController.#formatNumber(
-                          externalPlacement.modelTransform.rotationDeg.x
-                      ) +
-                      ', Y ' +
-                      PcbScene3dController.#formatNumber(
-                          externalPlacement.modelTransform.rotationDeg.y
-                      ) +
-                      ', Z ' +
-                      PcbScene3dController.#formatNumber(
-                          externalPlacement.modelTransform.rotationDeg.z
-                      )
-                    : ''
-            ],
-            [
-                'dz',
-                PcbScene3dController.#formatMilValue(
-                    externalPlacement?.modelTransform?.dzMil,
-                    'mil'
-                )
-            ]
-        ].filter(([, value]) => String(value || '').trim())
+        const adjustment = this.#resolveCurrentAdjustment(designator)
+        if (this.#selectionNode) {
+            this.#selectionNode.innerHTML =
+                PcbScene3dSelectionInspectorRenderer.renderSelected({
+                    designator,
+                    selection,
+                    selectionEntry,
+                    adjustment,
+                    includeControls:
+                        this.#renderAdjustmentControlsInSelection &&
+                        !this.#adjustmentHostNode,
+                    translate: this.#translate
+                })
+        }
+        this.#renderAdjustmentHost({
+            designator,
+            selection,
+            selectionEntry,
+            adjustment
+        })
+    }
 
-        this.#selectionNode.innerHTML =
-            '<h4 class="scene-3d__selection-title">' +
-            PcbScene3dController.#escapeHtml(
-                this.#translate('scene3d.componentInspector')
-            ) +
-            '</h4><dl class="scene-3d__selection-list">' +
-            fields
-                .map(
-                    ([label, value]) =>
-                        '<div class="scene-3d__selection-field"><dt>' +
-                        PcbScene3dController.#escapeHtml(label) +
-                        '</dt><dd>' +
-                        PcbScene3dController.#escapeHtml(String(value)) +
-                        '</dd></div>'
+    /**
+     * Renders selected component transform controls into the external host.
+     * @param {{ designator?: string, selection?: { sourceType?: string } | null, selectionEntry?: { component: any | null, externalPlacement: any | null } | null, adjustment?: { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } } } | null} state Selection state.
+     * @returns {void}
+     */
+    #renderAdjustmentHost(state = null) {
+        if (!this.#adjustmentHostNode) {
+            return
+        }
+
+        const designator = String(
+            state?.designator || this.#selectedComponentKey || ''
+        ).trim()
+        if (!designator) {
+            this.#adjustmentHostNode.innerHTML =
+                PcbScene3dSelectionInspectorRenderer.renderControlsEmpty(
+                    this.#translate
                 )
-                .join('') +
-            '</dl>'
+            return
+        }
+
+        const selectionEntry =
+            state?.selectionEntry === undefined
+                ? this.#selectionIndex.get(designator)
+                : state.selectionEntry
+        if (!selectionEntry) {
+            this.#adjustmentHostNode.innerHTML =
+                PcbScene3dSelectionInspectorRenderer.renderControlsMissing(
+                    designator,
+                    this.#translate
+                )
+            return
+        }
+
+        this.#adjustmentHostNode.innerHTML =
+            PcbScene3dSelectionInspectorRenderer.renderControlsPanel({
+                designator,
+                adjustment:
+                    state?.adjustment ||
+                    this.#resolveCurrentAdjustment(designator),
+                translate: this.#translate
+            })
+    }
+
+    /**
+     * Resolves the current in-memory adjustment for one component.
+     * @param {string} designator Component designator.
+     * @returns {{ scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }}
+     */
+    #resolveCurrentAdjustment(designator) {
+        return (
+            this.#componentAdjustments.get(designator) ||
+            this.#resolveBaselineAdjustment(designator)
+        )
+    }
+
+    /**
+     * Resolves the original transform shown before any live edits.
+     * @param {string} designator Component designator.
+     * @returns {{ scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }}
+     */
+    #resolveBaselineAdjustment(designator) {
+        return PcbScene3dSelectionInspectorRenderer.resolveBaseline(
+            this.#selectionIndex,
+            designator
+        )
+    }
+
+    /**
+     * Resolves the current source type label for one selected component.
+     * @param {string} designator Component designator.
+     * @returns {string}
+     */
+    #resolveSelectionSourceType(designator) {
+        return this.#selectionIndex.get(designator)?.externalPlacement
+            ? 'external-model'
+            : 'component'
     }
 
     /**
@@ -835,67 +913,6 @@ export class PcbScene3dController {
         })
 
         return index
-    }
-
-    /**
-     * Formats one point for the inspector.
-     * @param {{ x?: number, y?: number, z?: number }} point
-     * @param {boolean} includeZ
-     * @returns {string}
-     */
-    static #formatPoint(point, includeZ) {
-        const values = [
-            'X ' + PcbScene3dController.#formatNumber(point?.x),
-            'Y ' + PcbScene3dController.#formatNumber(point?.y)
-        ]
-
-        if (includeZ) {
-            values.push('Z ' + PcbScene3dController.#formatNumber(point?.z))
-        }
-
-        return values.join(', ') + ' mil'
-    }
-
-    /**
-     * Formats one numeric inspector value with an optional unit.
-     * @param {number | undefined} value
-     * @param {string} unit
-     * @returns {string}
-     */
-    static #formatMilValue(value, unit) {
-        if (!Number.isFinite(Number(value))) {
-            return ''
-        }
-
-        return PcbScene3dController.#formatNumber(value) + ' ' + unit
-    }
-
-    /**
-     * Formats one number for compact UI display.
-     * @param {number | undefined} value
-     * @returns {string}
-     */
-    static #formatNumber(value) {
-        const numericValue = Number(value)
-        if (!Number.isFinite(numericValue)) {
-            return ''
-        }
-
-        return numericValue.toFixed(2).replace(/\.00$/, '')
-    }
-
-    /**
-     * Escapes user-facing HTML values.
-     * @param {string} value
-     * @returns {string}
-     */
-    static #escapeHtml(value) {
-        return String(value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;')
     }
 
     /**

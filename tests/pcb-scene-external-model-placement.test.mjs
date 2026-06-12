@@ -3,6 +3,18 @@ import test from 'node:test'
 import * as THREE from 'three'
 import { PcbScene3dExternalModels } from '../src/PcbScene3dExternalModels.mjs'
 
+/**
+ * Resolves the model group from a placement face group.
+ * @param {THREE.Group} faceGroup Placement face group.
+ * @returns {THREE.Group}
+ */
+function resolvePlacedModelGroup(faceGroup) {
+    const candidate = faceGroup.children[0]
+    return candidate?.userData?.scene3dAdjustmentTarget
+        ? candidate.children[0]
+        : candidate
+}
+
 test('PcbScene3dExternalModels normalizes embedded model offsets before bottom-view board mirrors', async () => {
     const viewGroup = new THREE.Group()
     const externalModelsGroup = new THREE.Group()
@@ -60,7 +72,7 @@ test('PcbScene3dExternalModels normalizes embedded model offsets before bottom-v
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
 
     viewGroup.updateMatrixWorld(true)
 
@@ -126,11 +138,76 @@ test('PcbScene3dExternalModels keeps embedded source-origin offsets stable in bo
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
 
     assert.equal(modelGroup.position.x, 0)
     assert.equal(modelGroup.position.y, 360)
     assert.equal(modelGroup.position.z, 0)
+    assert.equal(orientationGroup.rotation.z, Math.PI / 2)
+})
+
+test('PcbScene3dExternalModels preserves dominant embedded source-Z edge extension', async () => {
+    const externalModelsGroup = new THREE.Group()
+
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            externalPlacements: [
+                {
+                    designator: 'U1',
+                    mountSide: 'top',
+                    rotationDeg: 90,
+                    positionMil: { x: 0, y: 0, z: 0 },
+                    modelTransform: {
+                        rotationDeg: { x: -90, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'edge-extension-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/74'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        modelViewScale: { x: -1, y: 1, z: 1 },
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [
+                                -0.118, -0.1, -0.157, 0.118, -0.1, -0.157,
+                                0.118, 0.1, 0.378, -0.118, -0.1, -0.157, 0.118,
+                                0.1, 0.378, -0.118, 0.1, 0.378
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assert.equal(modelGroup.position.x, 0)
+    assert.equal(modelGroup.position.y, 0)
     assert.equal(orientationGroup.rotation.z, Math.PI / 2)
 })
 
@@ -191,7 +268,7 @@ test('PcbScene3dExternalModels keeps embedded source-origin offsets while switch
     const orientationGroup = compensationGroup.children[0]
     const sideGroup = orientationGroup.children[0]
     const faceGroup = sideGroup.children[0]
-    const modelGroup = faceGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
 
     assert.equal(modelGroup.position.y, 360)
 

@@ -752,6 +752,31 @@ test('PcbScene3dSilkscreenFactory honors side-specific stroke and fill colors', 
     assert.ok(trackZ > fillMesh.position.z)
 })
 
+test('PcbScene3dSilkscreenFactory uses polygon offset for surface artwork', () => {
+    const THREE = createFakeThree()
+    const group = PcbScene3dSilkscreenFactory.buildGroup(
+        THREE,
+        {
+            top: {
+                strokeColor: 0xf8f6ef,
+                tracks: [{ x1: 10, y1: 20, x2: 80, y2: 20, width: 8 }],
+                fills: [],
+                arcs: []
+            },
+            bottom: { fills: [], tracks: [], arcs: [] }
+        },
+        7,
+        -7,
+        (x, y) => ({ x, y })
+    )
+
+    const trackMesh = group.children[0].children[0]
+
+    assert.equal(trackMesh.material.options.polygonOffset, true)
+    assert.equal(trackMesh.material.options.polygonOffsetFactor < 0, true)
+    assert.equal(trackMesh.material.options.polygonOffsetUnits < 0, true)
+})
+
 test('PcbScene3dSilkscreenFactory renders silkscreen text with the stroke color', () => {
     const THREE = createFakeThree()
     const group = PcbScene3dSilkscreenFactory.buildGroup(

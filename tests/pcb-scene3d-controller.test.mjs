@@ -202,7 +202,7 @@ class FakeDiagnosticsNode {
 /**
  * Minimal inspector node.
  */
-class FakeSelectionNode {
+class FakeSelectionNode extends FakeEventTarget {
     /** @type {string} */
     textContent
 
@@ -210,6 +210,7 @@ class FakeSelectionNode {
     _innerHTML
 
     constructor() {
+        super()
         this.textContent = ''
         this._innerHTML = ''
     }
@@ -404,6 +405,8 @@ test('PcbScene3dController forwards presets, toggles, and diagnostics', () => {
     })
     rootNode.getToggles()[0].checked = false
     rootNode.getToggles()[0].dispatch('change')
+    controller.setAutoSearchMissingModels(false)
+    controller.setAutoSearchMissingModels(true)
 
     assert.deepEqual(runtimeCalls.presets, ['top', 'bottom', 'isometric'])
     assert.equal(rootNode.getButtons()[0].getAttribute('aria-pressed'), 'false')
@@ -413,7 +416,11 @@ test('PcbScene3dController forwards presets, toggles, and diagnostics', () => {
     )
     assert.equal(rootNode.getButtons()[2].getAttribute('aria-pressed'), 'true')
     assert.equal(rootNode.getButtons()[2].classList.contains('is-active'), true)
-    assert.deepEqual(runtimeCalls.toggles, [['external-models', false]])
+    assert.deepEqual(runtimeCalls.toggles, [
+        ['external-models', false],
+        ['model-search-models', false],
+        ['model-search-models', true]
+    ])
     assert.match(
         rootNode.getDiagnosticsNode().textContent,
         /Missing external model/

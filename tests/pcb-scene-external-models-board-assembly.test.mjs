@@ -293,3 +293,61 @@ test('PcbScene3dExternalModels reuses STEP typed arrays for render geometry', as
     assert.equal(Array.isArray(importedMesh.material), true)
     assert.equal(importedMesh.material.length, 2)
 })
+
+test('PcbScene3dExternalModels renders flat STEP face markings double-sided', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            externalPlacements: [
+                {
+                    designator: 'U1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 0 },
+                    modelTransform: {},
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'marked-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/0'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'flat top marking',
+                            color: null,
+                            positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+                            normals: [0, 0, -1, 0, 0, -1, 0, 0, -1],
+                            indices: [0, 1, 2],
+                            faceColors: [
+                                {
+                                    first: 0,
+                                    last: 0,
+                                    color: [1, 1, 1]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    let importedMesh = null
+    externalModelsGroup.traverse((object) => {
+        if (object?.geometry) {
+            importedMesh = object
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+    assert.equal(importedMesh?.material?.[1]?.side, THREE.DoubleSide)
+})

@@ -165,6 +165,27 @@ test('PcbScene3dCopperFactory rounds track endpoints like KiCad copper', () => {
     assert.equal(bounds.maxY, 10)
 })
 
+test('PcbScene3dCopperFactory uses polygon offset for coplanar copper', () => {
+    const group = PcbScene3dCopperFactory.buildGroup(
+        THREE,
+        {
+            tracks: [{ x1: 0, y1: 0, x2: 100, y2: 0, width: 20, layerId: 1 }],
+            arcs: [],
+            pads: [],
+            vias: []
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y })
+    )
+
+    const trackMesh = group.children[0].children[0]
+
+    assert.equal(trackMesh.material.polygonOffset, true)
+    assert.equal(trackMesh.material.polygonOffsetFactor < 0, true)
+    assert.equal(trackMesh.material.polygonOffsetUnits < 0, true)
+})
+
 test('PcbScene3dCopperFactory leaves drilled openings uncovered for real board holes', () => {
     const group = PcbScene3dCopperFactory.buildGroup(
         THREE,

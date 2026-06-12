@@ -394,6 +394,50 @@ test('buildGroup keeps drilled pad barrels without filling the aperture', () => 
     )
 })
 
+test('buildGroup cuts neighboring slotted drills out of overlapping pads', () => {
+    const drilledPad = {
+        x: 0,
+        y: 0,
+        sizeTopX: 58,
+        sizeTopY: 42,
+        shapeTop: 2,
+        hasRoundedRect: true,
+        roundedRectShapeTop: 2,
+        cornerRadiusTop: 25,
+        holeDiameter: 26,
+        holeShape: 2,
+        holeSlotLength: 42,
+        rotation: 90
+    }
+    const overlappingPad = {
+        x: 18,
+        y: 0,
+        sizeTopX: 80,
+        sizeTopY: 56,
+        shapeTop: 2
+    }
+    const group = PcbScene3dPadFactory.buildGroup(
+        THREE,
+        [drilledPad, overlappingPad],
+        0,
+        (x, y) => ({ x, y }),
+        { side: 'top' }
+    )
+    const overlappingMesh = group.children[1].children[0]
+
+    assert.equal(
+        countSlottedDrillFaceCapTriangles(overlappingMesh.geometry, {
+            centerX: -18,
+            centerY: 0,
+            diameter: 26,
+            slotLength: 42,
+            rotationDeg: 90
+        }),
+        0,
+        'Expected overlapping copper to leave the neighboring slotted drill aperture open'
+    )
+})
+
 /**
  * Counts side-wall triangles that lie on a circular drill contour.
  * @param {any} geometry
@@ -447,22 +491,91 @@ function countCircularDrillFaceCapTriangles(geometry, radius) {
 }
 
 /**
+ * Counts face triangles whose centroid sits inside a slotted drill.
+ * @param {any} geometry
+ * @param {{centerX: number, centerY: number, diameter: number, slotLength: number, rotationDeg: number}} slot
+ * @returns {number}
+ */
+function countSlottedDrillFaceCapTriangles(geometry, slot) {
+    const position = geometry.getAttribute('position')
+    let count = 0
+
+    for (const group of geometry.groups) {
+        if (Number(group.materialIndex) !== 0) {
+            continue
+        }
+
+        const end = Number(group.start || 0) + Number(group.count || 0)
+        for (let index = Number(group.start || 0); index < end; index += 3) {
+            if (
+                isPointInsideSlot(
+                    triangleCentroidPoint(position, index),
+                    slot,
+                    0.5
+                )
+            ) {
+                count += 1
+            }
+        }
+    }
+
+    return count
+}
+
+/**
+ * Resolves one triangle centroid point.
+ * @param {any} position
+ * @param {number} vertexIndex
+ * @returns {{x: number, y: number, z: number}}
+ */
+function triangleCentroidPoint(position, vertexIndex) {
+    let x = 0
+    let y = 0
+    let z = 0
+
+    for (let offset = 0; offset < 3; offset += 1) {
+        const index = vertexIndex + offset
+        x += position.getX(index)
+        y += position.getY(index)
+        z += position.getZ(index)
+    }
+
+    return { x: x / 3, y: y / 3, z: z / 3 }
+}
+
+/**
  * Resolves the XY radius of one triangle centroid.
  * @param {any} position
  * @param {number} vertexIndex
  * @returns {number}
  */
 function triangleCentroidRadius(position, vertexIndex) {
-    let x = 0
-    let y = 0
+    const { x, y } = triangleCentroidPoint(position, vertexIndex)
+    return Math.hypot(x, y)
+}
 
-    for (let offset = 0; offset < 3; offset += 1) {
-        const index = vertexIndex + offset
-        x += position.getX(index)
-        y += position.getY(index)
+/**
+ * Checks whether a point falls inside a rotated slotted drill aperture.
+ * @param {{x: number, y: number}} point
+ * @param {{centerX: number, centerY: number, diameter: number, slotLength: number, rotationDeg: number}} slot
+ * @param {number} inset
+ * @returns {boolean}
+ */
+function isPointInsideSlot(point, slot, inset) {
+    const radius = Math.max(0, slot.diameter / 2 - inset)
+    const halfTrack = Math.max(0, (slot.slotLength - slot.diameter) / 2)
+    const angle = (-slot.rotationDeg * Math.PI) / 180
+    const dx = point.x - slot.centerX
+    const dy = point.y - slot.centerY
+    const localX = dx * Math.cos(angle) - dy * Math.sin(angle)
+    const localY = dx * Math.sin(angle) + dy * Math.cos(angle)
+
+    if (Math.abs(localX) <= halfTrack && Math.abs(localY) <= radius) {
+        return true
     }
 
-    return Math.hypot(x / 3, y / 3)
+    const capX = localX < 0 ? -halfTrack : halfTrack
+    return Math.hypot(localX - capX, localY) <= radius
 }
 
 /**

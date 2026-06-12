@@ -263,7 +263,10 @@ export class PcbScene3dCopperFactory {
             color: 0xd9a61d,
             roughness: 0.38,
             metalness: 0.55,
-            side: THREE.DoubleSide
+            side: THREE.DoubleSide,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: -2
         })
     }
 

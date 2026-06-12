@@ -20,16 +20,28 @@ test('PcbScene3dCutoutGeometryFilter indexes sparse cutouts without quadratic sc
         new THREE.Float32BufferAttribute(positions, 3)
     )
 
+    let mapReadCount = 0
+    const originalMapGet = Map.prototype.get
     const start = performance.now()
-    const filtered = PcbScene3dCutoutGeometryFilter.filter(
-        THREE,
-        geometry,
-        cutouts
-    )
-    const elapsed = performance.now() - start
+    let filtered = null
+
+    try {
+        Map.prototype.get = function countMapGet(key) {
+            mapReadCount += 1
+            return originalMapGet.call(this, key)
+        }
+        filtered = PcbScene3dCutoutGeometryFilter.filter(
+            THREE,
+            geometry,
+            cutouts
+        )
+    } finally {
+        Map.prototype.get = originalMapGet
+    }
 
     assert.equal(filtered, geometry)
-    assert.ok(elapsed < 800, `filtering took ${elapsed.toFixed(1)}ms`)
+    assert.equal(mapReadCount, 0)
+    assert.ok(performance.now() - start < 800)
 })
 
 test('PcbScene3dCutoutGeometryFilter clips dense local stroke strips without repeated boundary scans', () => {

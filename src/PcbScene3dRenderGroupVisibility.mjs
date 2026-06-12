@@ -9,7 +9,7 @@ export class PcbScene3dRenderGroupVisibility {
 
     /**
      * Applies the active 3D detail visibility state.
-     * @param {{ groups: Map<string, any>, toggles: { 'external-models': boolean, 'fallback-bodies': boolean, copper: boolean }, fallbackBodyRoots: Map<string, Set<any>>, loadedExternalModelDesignators: Set<string>, hasLoadedBoardAssemblyModel?: boolean }} state Visibility state.
+     * @param {{ groups: Map<string, any>, toggles: { 'external-models': boolean, 'fallback-bodies': boolean, 'model-search-models'?: boolean, copper: boolean }, fallbackBodyRoots: Map<string, Set<any>>, loadedExternalModelDesignators: Set<string>, modelSearchExternalModelRoots?: Set<any>, hasLoadedBoardAssemblyModel?: boolean }} state Visibility state.
      * @returns {void}
      */
     static apply(state) {
@@ -51,6 +51,28 @@ export class PcbScene3dRenderGroupVisibility {
             state?.groups?.get('external-models'),
             Boolean(state?.toggles?.['external-models'])
         )
+        PcbScene3dRenderGroupVisibility.#applyModelSearchExternalVisibility(
+            state
+        )
+    }
+
+    /**
+     * Applies the app-discovered model toggle to individual external roots.
+     * @param {{ toggles?: { 'external-models'?: boolean, 'model-search-models'?: boolean }, modelSearchExternalModelRoots?: Set<any> }} state Visibility state.
+     * @returns {void}
+     */
+    static #applyModelSearchExternalVisibility(state) {
+        const roots = state?.modelSearchExternalModelRoots
+        if (!roots || typeof roots.forEach !== 'function') {
+            return
+        }
+
+        const visible =
+            Boolean(state?.toggles?.['external-models']) &&
+            state?.toggles?.['model-search-models'] !== false
+        roots.forEach((root) => {
+            PcbScene3dRenderGroupVisibility.#setVisible(root, visible)
+        })
     }
 
     /**

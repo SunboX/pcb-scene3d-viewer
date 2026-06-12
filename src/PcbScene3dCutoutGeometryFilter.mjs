@@ -1,5 +1,6 @@
 import { PcbScene3dCircularCutoutOverlap } from './PcbScene3dCircularCutoutOverlap.mjs'
 import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector.mjs'
+import { PcbScene3dGeometryBoundsResolver } from './PcbScene3dGeometryBoundsResolver.mjs'
 
 /**
  * Clips filled 2D geometry against drill-cutout polygons.
@@ -29,7 +30,6 @@ export class PcbScene3dCutoutGeometryFilter {
         ) {
             return geometry
         }
-
         const sourceGeometry =
             geometry.index && geometry.toNonIndexed
                 ? geometry.toNonIndexed()
@@ -38,9 +38,16 @@ export class PcbScene3dCutoutGeometryFilter {
         if (!position?.count) {
             return geometry
         }
-
         const preparedCutouts =
             PcbScene3dCutoutGeometryFilter.#prepareCutouts(cutouts)
+        if (
+            PcbScene3dGeometryBoundsResolver.missesAllPositionBounds(
+                position,
+                preparedCutouts,
+                PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
+            )
+        )
+            return geometry
         const cutoutIndex =
             PcbScene3dCutoutGeometryFilter.#buildCutoutSpatialIndex(
                 preparedCutouts
@@ -69,7 +76,6 @@ export class PcbScene3dCutoutGeometryFilter {
         if (!state.changed) {
             return geometry
         }
-
         const filteredGeometry = new THREE.BufferGeometry()
         filteredGeometry.setAttribute(
             'position',

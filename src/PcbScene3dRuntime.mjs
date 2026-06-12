@@ -2,6 +2,8 @@ import { PcbScene3dBoardSolderMaskFactory } from './PcbScene3dBoardSolderMaskFac
 import { PcbScene3dBodyColor } from './PcbScene3dBodyColor.mjs'
 import { PcbScene3dCameraRig } from './PcbScene3dCameraRig.mjs'
 import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs'
+import { PcbScene3dComponentAdjustment } from './PcbScene3dComponentAdjustment.mjs'
+import { PcbScene3dComponentAdjustmentRegistry } from './PcbScene3dComponentAdjustmentRegistry.mjs'
 import { PcbScene3dCopperFactory } from './PcbScene3dCopperFactory.mjs'
 import { PcbScene3dCopperDetailFilter } from './PcbScene3dCopperDetailFilter.mjs'
 import { PcbScene3dDetailCoordinateNormalizer } from './PcbScene3dDetailCoordinateNormalizer.mjs'
@@ -10,15 +12,18 @@ import { PcbScene3dExternalModels } from './PcbScene3dExternalModels.mjs'
 import { PcbScene3dFallbackVisibility } from './PcbScene3dFallbackVisibility.mjs'
 import { PcbScene3dInteractionHints } from './PcbScene3dInteractionHints.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
+import { PcbScene3dModelSearchPlacement } from './PcbScene3dModelSearchPlacement.mjs'
 import { PcbScene3dPresetState } from './PcbScene3dPresetState.mjs'
 import { PcbScene3dRenderGroupVisibility } from './PcbScene3dRenderGroupVisibility.mjs'
 import { PcbScene3dRuntimeBoardMeshes } from './PcbScene3dRuntimeBoardMeshes.mjs'
 import { PcbScene3dSilkscreenChunkedFactory } from './PcbScene3dSilkscreenChunkedFactory.mjs'
 import { PcbScene3dTrueTypeTextFactory } from './PcbScene3dTrueTypeTextFactory.mjs'
+import { PcbScene3dSelectionResolver } from './PcbScene3dSelectionResolver.mjs'
 import { PcbScene3dSelectionStyler } from './PcbScene3dSelectionStyler.mjs'
 import { PcbScene3dViaFactory } from './PcbScene3dViaFactory.mjs'
 import { PcbScene3dViewportResize } from './PcbScene3dViewportResize.mjs'
 import { PcbScene3dViewScale } from './PcbScene3dViewScale.mjs'
+const Z_MIL = { cu: 0.05, silk: 0.06 }
 /**
  * Browser-side Three.js runtime for the interactive PCB 3D viewport.
  */
@@ -29,7 +34,7 @@ export class PcbScene3dRuntime {
     #sceneDescription
     /** @type {{ setDiagnostics?: (messages: string[]) => void, setSelection?: (selection: any | null) => void, loadRuntimeModules?: () => Promise<{ THREE: any, OrbitControls: any }>, translate?: ((key: string) => string) | null }} */
     #hooks
-    /** @type {{ 'external-models': boolean, 'fallback-bodies': boolean, copper: boolean }} */
+    /** @type {{ 'external-models': boolean, 'fallback-bodies': boolean, 'model-search-models': boolean, copper: boolean }} */
     #toggles
     /** @type {Map<string, any>} */
     #groups
@@ -61,10 +66,14 @@ export class PcbScene3dRuntime {
     #pointerDownPosition
     /** @type {Map<string, Set<any>>} */
     #selectionRoots
+    /** @type {PcbScene3dComponentAdjustmentRegistry} */
+    #componentAdjustmentRegistry
     /** @type {Map<string, Set<any>>} */
     #fallbackBodyRoots
     /** @type {Set<string>} */
     #loadedExternalModelDesignators
+    /** @type {Set<any>} */
+    #modelSearchExternalModelRoots
     /** @type {boolean} */
     #hasLoadedBoardAssemblyModel
     /** @type {string} */
@@ -81,7 +90,6 @@ export class PcbScene3dRuntime {
     #resolveReadyPromise
     /** @type {boolean} */
     #hasSettledReady
-
     /**
      * @param {HTMLElement} viewportNode
      * @param {any} sceneDescription Scene description or CircuitJSON model.
@@ -96,6 +104,7 @@ export class PcbScene3dRuntime {
         this.#toggles = {
             'external-models': true,
             'fallback-bodies': false,
+            'model-search-models': true,
             copper: true
         }
         this.#groups = new Map()
@@ -113,8 +122,11 @@ export class PcbScene3dRuntime {
         this.#pointer = null
         this.#pointerDownPosition = null
         this.#selectionRoots = new Map()
+        this.#componentAdjustmentRegistry =
+            new PcbScene3dComponentAdjustmentRegistry(() => this.#three)
         this.#fallbackBodyRoots = new Map()
         this.#loadedExternalModelDesignators = new Set()
+        this.#modelSearchExternalModelRoots = new Set()
         this.#hasLoadedBoardAssemblyModel = false
         this.#selectedDesignator = ''
         this.#initialRadius =
@@ -134,7 +146,6 @@ export class PcbScene3dRuntime {
         ])
         this.#initialize()
     }
-
     /** @param {string} preset */
     setPreset(preset) {
         const normalizedPreset = this.#presetState.set(preset)
@@ -151,7 +162,6 @@ export class PcbScene3dRuntime {
         )
         this.#render()
     }
-
     /** @param {string} toggleName @param {boolean} enabled */
     setToggle(toggleName, enabled) {
         if (!(toggleName in this.#toggles)) {
@@ -166,6 +176,18 @@ export class PcbScene3dRuntime {
     /** @param {string} designator */
     setSelectedDesignator(designator) {
         this.#setSelectedDesignator(designator)
+    }
+
+    /**
+     * Applies a live model-local adjustment to one component.
+     * @param {string} designator Component designator.
+     * @param {{ scale?: { x?: number, y?: number, z?: number }, rotationDeg?: { x?: number, y?: number, z?: number }, offsetMil?: { x?: number, y?: number, z?: number } }} adjustment Transform adjustment.
+     * @returns {void}
+     */
+    setComponentAdjustment(designator, adjustment) {
+        if (this.#componentAdjustmentRegistry.set(designator, adjustment)) {
+            this.#render()
+        }
     }
 
     /**
@@ -204,8 +226,10 @@ export class PcbScene3dRuntime {
         this.#pointer = null
         this.#pointerDownPosition = null
         this.#selectionRoots.clear()
+        this.#componentAdjustmentRegistry.clear()
         this.#fallbackBodyRoots.clear()
         this.#loadedExternalModelDesignators.clear()
+        this.#modelSearchExternalModelRoots.clear()
         this.#hasLoadedBoardAssemblyModel = false
         this.#selectedDesignator = ''
         this.#groups.clear()
@@ -464,18 +488,18 @@ export class PcbScene3dRuntime {
         await PcbScene3dTrueTypeTextFactory.prepareEmbeddedFonts(
             this.#sceneDescription.detail.embeddedFonts || []
         )
+        const topZ = this.#sceneDescription.board.thicknessMil / 2 + Z_MIL.silk
         const detailGroup = await PcbScene3dSilkscreenChunkedFactory.buildGroup(
             this.#three,
             this.#sceneDescription.detail.silkscreen || {},
-            this.#sceneDescription.board.thicknessMil / 2 + 1.18,
-            -(this.#sceneDescription.board.thicknessMil / 2 + 1.18),
+            topZ,
+            -topZ,
             (x, y) => this.#normalizeDetailPoint(x, y),
             {
                 shouldContinue: () => !this.#isDisposed,
                 yieldToMain: () => PcbScene3dRuntime.#yieldToNextFrame()
             }
         )
-
         if (this.#isDisposed) return
         if (detailGroup.children.length) {
             silkscreenGroup.add(detailGroup)
@@ -492,15 +516,15 @@ export class PcbScene3dRuntime {
         if (!copperGroup || copperGroup.children.length) {
             return
         }
-
         const copperDetail = PcbScene3dCopperDetailFilter.resolve(
             this.#sceneDescription
         )
+        const topZ = this.#sceneDescription.board.thicknessMil / 2 + Z_MIL.cu
         const detailGroup = PcbScene3dCopperFactory.buildGroup(
             this.#three,
             copperDetail,
-            this.#sceneDescription.board.thicknessMil / 2 + 0.9,
-            -(this.#sceneDescription.board.thicknessMil / 2 + 0.9),
+            topZ,
+            -topZ,
             (x, y) => this.#normalizeDetailPoint(x, y),
             { coordinateSystem: this.#sceneDescription.coordinateSystem }
         )
@@ -564,14 +588,25 @@ export class PcbScene3dRuntime {
 
         const mountRig = PcbScene3dMountRig.create(THREE, component)
         const rootGroup = mountRig.rootGroup
+        const adjustmentGroup = new THREE.Group()
 
         rootGroup.userData.scene3dSelection = {
             designator: String(component?.designator || 'component'),
             sourceType: 'component'
         }
+        adjustmentGroup.userData.scene3dAdjustmentTarget = true
+        adjustmentGroup.userData.scene3dAdjustmentDesignator = String(
+            component?.designator || 'component'
+        )
+        adjustmentGroup.userData.scene3dAdjustmentBaseline =
+            PcbScene3dComponentAdjustment.neutral()
         this.#registerSelectionRoot(component?.designator, rootGroup)
-        mountRig.faceGroup.add(mesh)
-
+        this.#componentAdjustmentRegistry.register(
+            component?.designator,
+            adjustmentGroup
+        )
+        adjustmentGroup.add(mesh)
+        mountRig.faceGroup.add(adjustmentGroup)
         return rootGroup
     }
 
@@ -598,6 +633,19 @@ export class PcbScene3dRuntime {
                 this.#registerSelectionRoot(
                     placement?.designator,
                     placementGroup
+                )
+                PcbScene3dComponentAdjustment.findTargets(
+                    placementGroup
+                ).forEach((target) => {
+                    this.#componentAdjustmentRegistry.register(
+                        placement?.designator,
+                        target
+                    )
+                })
+                PcbScene3dModelSearchPlacement.registerRoot(
+                    placement,
+                    placementGroup,
+                    this.#modelSearchExternalModelRoots
                 )
                 if (
                     String(placement?.sourceType || '').toLowerCase() ===
@@ -728,6 +776,7 @@ export class PcbScene3dRuntime {
             fallbackBodyRoots: this.#fallbackBodyRoots,
             loadedExternalModelDesignators:
                 this.#loadedExternalModelDesignators,
+            modelSearchExternalModelRoots: this.#modelSearchExternalModelRoots,
             hasLoadedBoardAssemblyModel: this.#hasLoadedBoardAssemblyModel
         })
     }
@@ -850,7 +899,7 @@ export class PcbScene3dRuntime {
             true
         )
         const selection =
-            PcbScene3dRuntime.#resolveSelectionFromIntersections(intersections)
+            PcbScene3dSelectionResolver.fromIntersections(intersections)
         this.#setSelectedDesignator(selection?.designator)
         this.#hooks.setSelection?.(selection)
     }
@@ -928,44 +977,6 @@ export class PcbScene3dRuntime {
      */
     static resolveViewScale(preset, sceneDescription = null) {
         return PcbScene3dViewScale.resolve(preset, sceneDescription)
-    }
-
-    /**
-     * Resolves the picked selection record from raycast intersections.
-     * @param {{ object?: any }[]} intersections
-     * @returns {{ designator?: string, sourceType?: string } | null}
-     */
-    static #resolveSelectionFromIntersections(intersections) {
-        for (const intersection of intersections) {
-            const selection = PcbScene3dRuntime.#resolveSelectionFromObject(
-                intersection?.object
-            )
-            if (selection) {
-                return selection
-            }
-        }
-
-        return null
-    }
-
-    /**
-     * Resolves one selection payload by walking up a picked object tree.
-     * @param {any} object
-     * @returns {{ designator?: string, sourceType?: string } | null}
-     */
-    static #resolveSelectionFromObject(object) {
-        let current = object
-
-        while (current) {
-            const selection = current?.userData?.scene3dSelection
-            if (selection) {
-                return selection
-            }
-
-            current = current.parent || null
-        }
-
-        return null
     }
 
     /** @returns {number} */

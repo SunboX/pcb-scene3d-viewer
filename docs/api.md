@@ -16,6 +16,8 @@ The markup includes:
 - `[data-scene-3d-preset]` camera preset buttons;
 - `[data-scene-3d-toggle]` visibility toggles;
 - `[data-scene-3d-export="models-zip"]` model export action.
+- `[data-scene-3d-adjustment]` transform inputs rendered after a component is
+  selected.
 
 `translate` is an optional `(key) => string` function. Built-in English
 fallbacks are used when no translator is provided.
@@ -43,6 +45,11 @@ Methods:
 - `getDocumentModel()`: returns the mounted document model.
 - `setSelectedComponent(componentKey)`: highlights and inspects a component.
 - `dispose()`: releases event listeners, worker clients, and runtime resources.
+
+When a component is selected, the controller renders live scale, rotation, and
+offset controls in the inspector. Edits are kept in memory for the mounted
+controller only and are forwarded to the runtime through
+`setComponentAdjustment()`.
 
 ## CircuitJSON Input
 
@@ -82,6 +89,9 @@ Methods:
 - `setToggle(toggleName, enabled)`: updates `external-models`,
   `fallback-bodies`, or `copper`.
 - `setSelectedDesignator(designator)`: updates highlighted component.
+- `setComponentAdjustment(designator, adjustment)`: applies a live,
+  model-local transform adjustment. `adjustment` uses `{ scale, rotationDeg,
+offsetMil }` with X/Y/Z objects in scene units.
 - `whenReady()`: resolves after initial runtime setup.
 - `dispose()`: releases renderer, controls, listeners, and DOM nodes.
 
