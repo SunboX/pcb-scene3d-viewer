@@ -1,4 +1,5 @@
 import { PcbScene3dBoardMaterialPalette } from './PcbScene3dBoardMaterialPalette.mjs'
+import { PcbScene3dMaterialFinish } from './PcbScene3dMaterialFinish.mjs'
 
 /**
  * Applies display-only material adjustments to full-board assembly models.
@@ -155,6 +156,7 @@ export class PcbScene3dBoardAssemblyPresentation {
             object?.material,
             surfaceColor
         )
+        PcbScene3dMaterialFinish.applySemiMatteSolderMask(object?.material)
     }
 
     /**
@@ -192,6 +194,7 @@ export class PcbScene3dBoardAssemblyPresentation {
             surfaceMaterial,
             surfaceColor
         )
+        PcbScene3dMaterialFinish.applySemiMatteSolderMask(surfaceMaterial)
         PcbScene3dBoardAssemblyPresentation.#applyMaterialColor(
             edgeMaterial,
             edgeColor

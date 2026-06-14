@@ -4,8 +4,8 @@ import { PcbScene3dCameraRig } from './PcbScene3dCameraRig.mjs'
 import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs'
 import { PcbScene3dComponentAdjustment } from './PcbScene3dComponentAdjustment.mjs'
 import { PcbScene3dComponentAdjustmentRegistry } from './PcbScene3dComponentAdjustmentRegistry.mjs'
+import { PcbScene3dCopperDetailGroupBuilder } from './PcbScene3dCopperDetailGroupBuilder.mjs'
 import { PcbScene3dCopperFactory } from './PcbScene3dCopperFactory.mjs'
-import { PcbScene3dCopperDetailFilter } from './PcbScene3dCopperDetailFilter.mjs'
 import { PcbScene3dDetailCoordinateNormalizer } from './PcbScene3dDetailCoordinateNormalizer.mjs'
 import { PcbScene3dDrillVoidFactory } from './PcbScene3dDrillVoidFactory.mjs'
 import { PcbScene3dExternalModels } from './PcbScene3dExternalModels.mjs'
@@ -20,75 +20,49 @@ import { PcbScene3dSilkscreenChunkedFactory } from './PcbScene3dSilkscreenChunke
 import { PcbScene3dTrueTypeTextFactory } from './PcbScene3dTrueTypeTextFactory.mjs'
 import { PcbScene3dSelectionResolver } from './PcbScene3dSelectionResolver.mjs'
 import { PcbScene3dSelectionStyler } from './PcbScene3dSelectionStyler.mjs'
-import { PcbScene3dViaFactory } from './PcbScene3dViaFactory.mjs'
 import { PcbScene3dViewportResize } from './PcbScene3dViewportResize.mjs'
 import { PcbScene3dViewScale } from './PcbScene3dViewScale.mjs'
-const Z_MIL = { cu: 0.05, silk: 0.06 }
+const SILKSCREEN_COPPER_CLEARANCE_MIL = 0.12
+const Z_MIL = {
+    cu: 0.05,
+    silk:
+        PcbScene3dCopperFactory.visualHalfThicknessMil() +
+        SILKSCREEN_COPPER_CLEARANCE_MIL
+}
 /**
  * Browser-side Three.js runtime for the interactive PCB 3D viewport.
  */
 export class PcbScene3dRuntime {
-    /** @type {HTMLElement | null} */
     #viewportNode
-    /** @type {any} */
     #sceneDescription
-    /** @type {{ setDiagnostics?: (messages: string[]) => void, setSelection?: (selection: any | null) => void, loadRuntimeModules?: () => Promise<{ THREE: any, OrbitControls: any }>, translate?: ((key: string) => string) | null }} */
     #hooks
-    /** @type {{ 'external-models': boolean, 'fallback-bodies': boolean, 'model-search-models': boolean, copper: boolean }} */
     #toggles
-    /** @type {Map<string, any>} */
     #groups
-    /** @type {Array<{ node: EventTarget, type: string, listener: (event: any) => void }>} */
     #listeners
-    /** @type {any} */
     #three
-    /** @type {any} */
     #renderer
-    /** @type {any} */
     #scene
-    /** @type {any} */
     #camera
-    /** @type {any} */
     #orbitControlsClass
-    /** @type {any} */
     #controls
-    /** @type {{ disconnect?: () => void } | null} */
     #resizeObserver
-    /** @type {any} */
     #rootGroup
-    /** @type {any} */
     #viewOrientationGroup
-    /** @type {any} */
     #raycaster
-    /** @type {any} */
     #pointer
-    /** @type {{ x: number, y: number } | null} */
     #pointerDownPosition
-    /** @type {Map<string, Set<any>>} */
     #selectionRoots
-    /** @type {PcbScene3dComponentAdjustmentRegistry} */
     #componentAdjustmentRegistry
-    /** @type {Map<string, Set<any>>} */
     #fallbackBodyRoots
-    /** @type {Set<string>} */
     #loadedExternalModelDesignators
-    /** @type {Set<any>} */
     #modelSearchExternalModelRoots
-    /** @type {boolean} */
     #hasLoadedBoardAssemblyModel
-    /** @type {string} */
     #selectedDesignator
-    /** @type {number} */
     #initialRadius
-    /** @type {PcbScene3dPresetState} */
     #presetState
-    /** @type {boolean} */
     #isDisposed
-    /** @type {Promise<void>} */
     #readyPromise
-    /** @type {(() => void) | null} */
     #resolveReadyPromise
-    /** @type {boolean} */
     #hasSettledReady
     /**
      * @param {HTMLElement} viewportNode
@@ -172,12 +146,10 @@ export class PcbScene3dRuntime {
         this.#applyToggleVisibility()
         this.#render()
     }
-
     /** @param {string} designator */
     setSelectedDesignator(designator) {
         this.#setSelectedDesignator(designator)
     }
-
     /**
      * Applies a live model-local adjustment to one component.
      * @param {string} designator Component designator.
@@ -189,7 +161,6 @@ export class PcbScene3dRuntime {
             this.#render()
         }
     }
-
     /**
      * Resolves when the runtime has completed its initial async
      * initialization and deferred scene settlement.
@@ -198,7 +169,6 @@ export class PcbScene3dRuntime {
     whenReady() {
         return this.#readyPromise
     }
-
     /** @returns {void} */
     dispose() {
         this.#isDisposed = true
@@ -516,40 +486,17 @@ export class PcbScene3dRuntime {
         if (!copperGroup || copperGroup.children.length) {
             return
         }
-        const copperDetail = PcbScene3dCopperDetailFilter.resolve(
-            this.#sceneDescription
-        )
         const topZ = this.#sceneDescription.board.thicknessMil / 2 + Z_MIL.cu
-        const detailGroup = PcbScene3dCopperFactory.buildGroup(
+        const detailGroup = PcbScene3dCopperDetailGroupBuilder.build(
             this.#three,
-            copperDetail,
+            this.#sceneDescription,
             topZ,
-            -topZ,
-            (x, y) => this.#normalizeDetailPoint(x, y),
-            { coordinateSystem: this.#sceneDescription.coordinateSystem }
+            (x, y) => this.#normalizeDetailPoint(x, y)
         )
-        const standaloneVias =
-            PcbScene3dCopperDetailFilter.resolveStandaloneVias(
-                this.#sceneDescription
-            )
-        const viaGroup =
-            PcbScene3dCopperDetailFilter.shouldRenderStandaloneVias(
-                this.#sceneDescription
-            )
-                ? PcbScene3dViaFactory.buildGroup(
-                      this.#three,
-                      standaloneVias,
-                      this.#sceneDescription.board.thicknessMil,
-                      (x, y) => this.#normalizeDetailPoint(x, y)
-                  )
-                : new this.#three.Group()
 
         if (detailGroup.children.length) {
             copperGroup.add(detailGroup)
             this.#applyViewScale(this.#presetState.get())
-        }
-        if (viaGroup.children.length) {
-            copperGroup.add(viaGroup)
         }
     }
 

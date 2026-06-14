@@ -1,3 +1,5 @@
+import { PcbScene3dMaterialFinish } from './PcbScene3dMaterialFinish.mjs'
+
 /**
  * Builds browser-font-backed text planes for Altium TrueType silkscreen labels.
  */
@@ -95,7 +97,7 @@ export class PcbScene3dTrueTypeTextFactory {
         if (
             !THREE?.CanvasTexture ||
             !THREE?.Mesh ||
-            !THREE?.MeshBasicMaterial ||
+            (!THREE?.MeshStandardMaterial && !THREE?.MeshBasicMaterial) ||
             !THREE?.PlaneGeometry
         ) {
             return null
@@ -800,13 +802,16 @@ export class PcbScene3dTrueTypeTextFactory {
     }
 
     /**
-     * Builds a transparent unlit material for one text texture.
+     * Builds a transparent glossy material for one text texture.
      * @param {any} THREE
      * @param {{ texture: any }} textureInfo
      * @returns {any}
      */
     static #buildMaterial(THREE, textureInfo) {
-        return new THREE.MeshBasicMaterial({
+        const Material = THREE.MeshStandardMaterial || THREE.MeshBasicMaterial
+
+        return new Material({
+            ...PcbScene3dMaterialFinish.glossySilkscreenProperties(),
             map: textureInfo.texture,
             transparent: true,
             opacity: 0.96,

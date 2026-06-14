@@ -97,3 +97,36 @@ test('PcbScene3dSilkscreenFactory offsets same-color strokes above fills', () =>
 
     assert.ok(trackZ > fillMesh.position.z)
 })
+
+test('PcbScene3dSilkscreenFactory samples long arcs densely', () => {
+    const group = PcbScene3dSilkscreenFactory.buildGroup(
+        THREE,
+        {
+            top: {
+                fills: [],
+                tracks: [],
+                arcs: [
+                    {
+                        x: 0,
+                        y: 0,
+                        radius: 427,
+                        width: 8,
+                        startAngle: 290,
+                        endAngle: 249,
+                        sweepAngle: 319
+                    }
+                ]
+            },
+            bottom: { fills: [], tracks: [], arcs: [] }
+        },
+        18,
+        -18,
+        (x, y) => ({ x, y })
+    )
+
+    const topGroup = group.children[0]
+    const arcMesh = topGroup.children[0]
+    const positions = arcMesh.geometry.getAttribute('position').array
+
+    assert.ok(positions.length > 1600)
+})

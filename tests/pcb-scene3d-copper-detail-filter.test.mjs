@@ -9,7 +9,7 @@ test('PcbScene3dCopperDetailFilter hides KiCad copper covered by solder mask', (
             pads: [{ id: 'pad-a' }],
             tracks: [
                 { id: 'covered-track' },
-                { id: 'open-track', hasSolderMask: true }
+                { id: 'open-track', solderMaskOpening: true }
             ],
             arcs: [
                 { id: 'covered-arc' },
@@ -174,7 +174,7 @@ test('PcbScene3dCopperDetailFilter hides Altium copper covered by solder mask', 
         detail: {
             tracks: [
                 { id: 'covered-track' },
-                { id: 'open-track', hasSolderMask: true }
+                { id: 'open-track', solderMaskOpening: true }
             ],
             arcs: [
                 { id: 'covered-arc' },
@@ -239,6 +239,110 @@ test('PcbScene3dCopperDetailFilter hides Altium copper covered by solder mask', 
         }).map((via) => via.id),
         ['open-via']
     )
+})
+
+test('PcbScene3dCopperDetailFilter hides Gerber copper covered by solder mask', () => {
+    const sceneDescription = {
+        sourceFormat: 'gerber',
+        detail: {
+            pads: [
+                {
+                    id: 'plated-pad',
+                    x: 20,
+                    y: 30,
+                    sizeTopX: 70,
+                    sizeTopY: 70,
+                    holeDiameter: 40,
+                    hasSolderMask: true,
+                    hasTopSolderMaskOpening: true,
+                    hasBottomSolderMaskOpening: true
+                },
+                {
+                    id: 'drill-only',
+                    x: 90,
+                    y: 30,
+                    holeDiameter: 40,
+                    hasTopSolderMaskOpening: false,
+                    hasBottomSolderMaskOpening: false
+                }
+            ],
+            tracks: [
+                { id: 'covered-track', hasSolderMask: true },
+                { id: 'open-track', solderMaskOpening: true }
+            ],
+            arcs: [
+                { id: 'covered-arc', hasSolderMask: true },
+                { id: 'open-arc', solderMaskExpansion: 2 }
+            ],
+            copperTexts: [
+                { id: 'covered-text', hasSolderMask: true },
+                { id: 'open-text', solderMaskOpening: true }
+            ],
+            vias: [
+                { id: 'tented-via', isTentingTop: true },
+                { id: 'open-via', isTentingTop: false }
+            ]
+        }
+    }
+    const filtered = PcbScene3dCopperDetailFilter.resolve(sceneDescription)
+
+    assert.deepEqual(
+        filtered.tracks.map((track) => track.id),
+        ['open-track']
+    )
+    assert.deepEqual(
+        filtered.arcs.map((arc) => arc.id),
+        ['open-arc']
+    )
+    assert.deepEqual(
+        filtered.copperTexts.map((text) => text.id),
+        ['open-text']
+    )
+    assert.deepEqual(
+        filtered.vias.map((via) => via.id),
+        ['open-via']
+    )
+    assert.deepEqual(
+        PcbScene3dCopperDetailFilter.resolveStandaloneVias(
+            sceneDescription
+        ).map((via) => via.id || 'pad-barrel'),
+        ['open-via', 'pad-barrel']
+    )
+})
+
+test('PcbScene3dCopperDetailFilter exposes Gerber mask-covered traces separately', () => {
+    const sceneDescription = {
+        sourceFormat: 'gerber',
+        detail: {
+            tracks: [
+                { id: 'covered-track', hasSolderMask: true },
+                { id: 'open-track', solderMaskOpening: true }
+            ],
+            arcs: [
+                { id: 'covered-arc', hasSolderMask: true },
+                { id: 'open-arc', solderMaskExpansion: 2 }
+            ],
+            copperTexts: [
+                { id: 'covered-text', hasSolderMask: true },
+                { id: 'open-text', solderMaskOpening: true }
+            ],
+            vias: [{ id: 'open-via', isTentingTop: false }]
+        }
+    }
+    const covered = PcbScene3dCopperDetailFilter.resolveCoveredByMask?.(
+        sceneDescription
+    ) || { tracks: [], arcs: [], copperTexts: [], vias: [] }
+
+    assert.deepEqual(
+        covered.tracks.map((track) => track.id),
+        ['covered-track']
+    )
+    assert.deepEqual(
+        covered.arcs.map((arc) => arc.id),
+        ['covered-arc']
+    )
+    assert.deepEqual(covered.copperTexts, [])
+    assert.deepEqual(covered.vias, [])
 })
 
 test('PcbScene3dCopperDetailFilter keeps scenes without mask metadata unchanged', () => {

@@ -17,7 +17,7 @@ export class PcbScene3dCopperTextFactory {
      * @param {any[]} texts
      * @param {number} z
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
-     * @param {{ side?: 'top' | 'bottom', mirrorY?: boolean, materialColor?: number, filterSide?: boolean, glyphYUp?: boolean, drillCutouts?: { x: number, y: number }[][] }} [options]
+     * @param {{ side?: 'top' | 'bottom', mirrorY?: boolean, materialColor?: number, materialProperties?: { roughness?: number, metalness?: number }, filterSide?: boolean, glyphYUp?: boolean, drillCutouts?: { x: number, y: number }[][] }} [options]
      * @returns {any}
      */
     static buildGroup(THREE, texts, z, normalizeBoardPoint, options = {}) {
@@ -74,7 +74,8 @@ export class PcbScene3dCopperTextFactory {
                 THREE,
                 PcbScene3dCopperTextFactory.#resolveMaterialColor(
                     options?.materialColor
-                )
+                ),
+                options?.materialProperties
             )
         )
         mesh.name = 'copper-text'
@@ -471,13 +472,15 @@ export class PcbScene3dCopperTextFactory {
      * Builds the shared copper text material.
      * @param {any} THREE
      * @param {number} color
+     * @param {{ roughness?: number, metalness?: number }} [materialProperties]
      * @returns {any}
      */
-    static #buildMaterial(THREE, color) {
+    static #buildMaterial(THREE, color, materialProperties = {}) {
         return new THREE.MeshStandardMaterial({
             color,
             roughness: 0.38,
             metalness: 0.55,
+            ...materialProperties,
             side: THREE.DoubleSide
         })
     }

@@ -40,6 +40,41 @@ export class PcbScene3dCopperDetailFilter {
     }
 
     /**
+     * Resolves trace-like copper that should be visible through solder mask.
+     * @param {object} sceneDescription 3D scene description.
+     * @returns {{ tracks: any[], arcs: any[], copperTexts: any[], vias: any[] }}
+     */
+    static resolveCoveredByMask(sceneDescription) {
+        const detail = sceneDescription?.detail || {}
+
+        if (
+            !PcbScene3dCopperDetailFilter.#usesRealisticMasking(
+                sceneDescription
+            )
+        ) {
+            return { tracks: [], arcs: [], copperTexts: [], vias: [] }
+        }
+
+        const defaultCovered =
+            PcbScene3dCopperDetailFilter.#usesDefaultCoveredCopper(
+                sceneDescription
+            )
+
+        return {
+            tracks: PcbScene3dCopperDetailFilter.#filterMaskCoveredPrimitives(
+                detail.tracks,
+                defaultCovered
+            ),
+            arcs: PcbScene3dCopperDetailFilter.#filterMaskCoveredPrimitives(
+                detail.arcs,
+                defaultCovered
+            ),
+            copperTexts: [],
+            vias: []
+        }
+    }
+
+    /**
      * Checks whether standalone via annuli should be rendered.
      * @param {object} sceneDescription 3D scene description.
      * @returns {boolean}
@@ -102,6 +137,24 @@ export class PcbScene3dCopperDetailFilter {
     }
 
     /**
+     * Checks whether tracks are considered mask-covered without per-primitive
+     * mask metadata.
+     * @param {object} sceneDescription 3D scene description.
+     * @returns {boolean}
+     */
+    static #usesDefaultCoveredCopper(sceneDescription) {
+        const sourceFormat = String(sceneDescription?.sourceFormat || '')
+            .trim()
+            .toLowerCase()
+
+        return (
+            sourceFormat === 'altium' ||
+            sourceFormat === 'kicad' ||
+            sceneDescription?.coordinateSystem === 'kicad-3d-y-up'
+        )
+    }
+
+    /**
      * Checks whether parsed copper detail carries explicit solder-mask data.
      * @param {object | undefined} detail Scene detail.
      * @returns {boolean}
@@ -130,6 +183,25 @@ export class PcbScene3dCopperDetailFilter {
         return (primitives || []).filter((primitive) =>
             PcbScene3dCopperDetailFilter.#hasMaskOpening(primitive, maskMatcher)
         )
+    }
+
+    /**
+     * Keeps trace-like copper primitives that are covered by solder mask.
+     * @param {any[] | undefined} primitives Copper primitive list.
+     * @param {boolean} defaultCovered Whether missing metadata means covered.
+     * @returns {any[]}
+     */
+    static #filterMaskCoveredPrimitives(primitives, defaultCovered) {
+        return (primitives || []).filter((primitive) => {
+            if (PcbScene3dCopperDetailFilter.#hasMaskOpening(primitive)) {
+                return false
+            }
+
+            return (
+                defaultCovered ||
+                PcbScene3dCopperDetailFilter.#hasMaskMetadata(primitive)
+            )
+        })
     }
 
     /**
@@ -243,7 +315,7 @@ export class PcbScene3dCopperDetailFilter {
      * @returns {boolean}
      */
     static #hasMaskOpening(primitive, maskMatcher = null) {
-        if (primitive?.hasSolderMask === true) {
+        if (primitive?.hasSolderMask === false) {
             return true
         }
 

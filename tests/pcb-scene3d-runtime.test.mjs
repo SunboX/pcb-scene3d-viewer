@@ -806,11 +806,13 @@ test('PcbScene3dRuntime uses board face, edge, and plated-hole copper materials'
     }
 })
 
-test('PcbScene3dRuntime keeps surface detail close to board faces', async () => {
+test('PcbScene3dRuntime layers silkscreen above visual copper', async () => {
     const originalWindow = globalThis.window
     const originalDocument = globalThis.document
     const originalLoadIntoScene = PcbScene3dExternalModels.loadIntoScene
     const originalCopperBuildGroup = PcbScene3dCopperFactory.buildGroup
+    const originalMaskCoveredBuildGroup =
+        PcbScene3dCopperFactory.buildMaskCoveredGroup
     const originalSilkscreenBuildGroup =
         PcbScene3dSilkscreenChunkedFactory.buildGroup
     const capturedZ = {}
@@ -830,6 +832,21 @@ test('PcbScene3dRuntime keeps surface detail close to board faces', async () => 
         capturedZ.copperTop = topZ
         capturedZ.copperBottom = bottomZ
         return new FakeGroup()
+    }
+    PcbScene3dCopperFactory.buildMaskCoveredGroup = (
+        _three,
+        detail,
+        topZ,
+        _bottomZ,
+        _normalizeBoardPoint,
+        options
+    ) => {
+        capturedZ.maskCoveredTop = topZ
+        capturedZ.maskCoveredTracks = detail.tracks.length
+        capturedZ.maskCoveredColor = options.solderMaskColor
+        const group = new FakeGroup()
+        group.add(new FakeGroup())
+        return group
     }
     PcbScene3dSilkscreenChunkedFactory.buildGroup = (
         _three,
@@ -851,12 +868,24 @@ test('PcbScene3dRuntime keeps surface detail close to board faces', async () => 
                 centerX: 0,
                 centerY: 0,
                 thicknessMil: 62,
+                surfaceColor: 0x17396b,
                 segments: []
             },
             components: [],
+            sourceFormat: 'gerber',
             detail: {
                 silkscreen: {},
-                tracks: [],
+                tracks: [
+                    {
+                        x1: 0,
+                        y1: 0,
+                        x2: 100,
+                        y2: 0,
+                        width: 10,
+                        layerId: 1,
+                        hasSolderMask: true
+                    }
+                ],
                 arcs: [],
                 pads: [],
                 vias: []
@@ -872,13 +901,22 @@ test('PcbScene3dRuntime keeps surface detail close to board faces', async () => 
         await runtime.whenReady()
 
         assert.ok(capturedZ.copperTop - 31 <= 0.15)
+        assert.equal(capturedZ.maskCoveredTracks, 1)
+        assert.equal(capturedZ.maskCoveredColor, 0x17396b)
+        assert.equal(capturedZ.maskCoveredTop, capturedZ.copperTop)
         assert.ok(31 - Math.abs(capturedZ.copperBottom) <= 0.15)
-        assert.ok(capturedZ.silkscreenTop - 31 <= 0.15)
-        assert.ok(31 - Math.abs(capturedZ.silkscreenBottom) <= 0.15)
+        assert.ok(capturedZ.silkscreenTop - capturedZ.copperTop > 1)
+        assert.ok(
+            Math.abs(capturedZ.silkscreenBottom) -
+                Math.abs(capturedZ.copperBottom) >
+                1
+        )
     } finally {
         runtime.dispose()
         PcbScene3dSilkscreenChunkedFactory.buildGroup =
             originalSilkscreenBuildGroup
+        PcbScene3dCopperFactory.buildMaskCoveredGroup =
+            originalMaskCoveredBuildGroup
         PcbScene3dCopperFactory.buildGroup = originalCopperBuildGroup
         PcbScene3dExternalModels.loadIntoScene = originalLoadIntoScene
         globalThis.window = originalWindow

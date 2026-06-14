@@ -48,7 +48,7 @@ export class PcbScene3dCameraRig {
             return {
                 radius,
                 target,
-                up: { x: 0, y: -1, z: 0 },
+                up: PcbScene3dCameraRig.#bottomUpVector(sceneDescription),
                 position: {
                     x: target.x,
                     y: target.y,
@@ -164,5 +164,20 @@ export class PcbScene3dCameraRig {
             y: Number(controls?.target?.y || 0),
             z: Number(controls?.target?.z || 0)
         }
+    }
+
+    /**
+     * Resolves screen-up for bottom views from the scene coordinate contract.
+     * @param {{ coordinateSystem?: string }} sceneDescription Scene metadata.
+     * @returns {{ x: number, y: number, z: number }}
+     */
+    static #bottomUpVector(sceneDescription) {
+        const coordinateSystem = String(
+            sceneDescription?.coordinateSystem || ''
+        ).toLowerCase()
+
+        return coordinateSystem === 'kicad-3d-y-up'
+            ? { x: 0, y: 1, z: 0 }
+            : { x: 0, y: -1, z: 0 }
     }
 }

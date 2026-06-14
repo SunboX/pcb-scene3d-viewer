@@ -1,6 +1,7 @@
 import { PcbScene3dBoardMaterialPalette } from './PcbScene3dBoardMaterialPalette.mjs'
 import { PcbScene3dCutoutGeometryFilter } from './PcbScene3dCutoutGeometryFilter.mjs'
 import { PcbScene3dDrillPathFactory } from './PcbScene3dDrillPathFactory.mjs'
+import { PcbScene3dMaterialFinish } from './PcbScene3dMaterialFinish.mjs'
 import { PcbScene3dOutlineBuilder } from './PcbScene3dOutlineBuilder.mjs'
 
 /**
@@ -602,8 +603,7 @@ export class PcbScene3dBoardSolderMaskFactory {
             color: PcbScene3dBoardMaterialPalette.resolveSurfaceColor(board, {
                 hasBoardAssemblyModel: true
             }),
-            roughness: 0.68,
-            metalness: 0.08,
+            ...PcbScene3dMaterialFinish.semiMatteSolderMaskProperties(),
             polygonOffset: true,
             polygonOffsetFactor: -1,
             polygonOffsetUnits: -1,

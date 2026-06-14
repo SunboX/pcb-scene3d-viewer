@@ -109,3 +109,36 @@ test('PcbScene3dCameraRig keeps top and bottom presets flat to the board', () =>
     assert.ok(Math.abs(bottomBasis.right.y) < 0.01)
     assert.ok(bottomBasis.up.y < -0.99)
 })
+
+/**
+ * Verifies KiCad's y-up scene descriptions use the same back-side screen
+ * convention as the 2D PCB renderer: bottom view mirrors X while preserving
+ * board-up Y, so labels do not appear upside down.
+ */
+test('PcbScene3dCameraRig keeps KiCad bottom view upright', () => {
+    const sceneDescription = {
+        coordinateSystem: 'kicad-3d-y-up',
+        board: {
+            widthMil: 2200,
+            heightMil: 1400
+        }
+    }
+    const topPreset = PcbScene3dCameraRig.resolvePreset('top', sceneDescription)
+    const bottomPreset = PcbScene3dCameraRig.resolvePreset(
+        'bottom',
+        sceneDescription
+    )
+    const topBasis = resolveScreenBasis(topPreset)
+    const bottomBasis = resolveScreenBasis(bottomPreset)
+    const topScreenPoint = projectPointToScreen({ x: 1, y: 1, z: 0 }, topBasis)
+    const bottomScreenPoint = projectPointToScreen(
+        { x: 1, y: 1, z: 0 },
+        bottomBasis
+    )
+
+    assert.deepEqual(bottomPreset.up, { x: 0, y: 1, z: 0 })
+    assert.ok(topScreenPoint.x > 0)
+    assert.ok(topScreenPoint.y > 0)
+    assert.ok(bottomScreenPoint.x < 0)
+    assert.ok(bottomScreenPoint.y > 0)
+})

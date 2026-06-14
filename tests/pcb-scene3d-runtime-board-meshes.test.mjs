@@ -55,6 +55,29 @@ test('PcbScene3dRuntimeBoardMeshes marks generated board meshes for face-side sw
     assert.equal(boardMesh.userData.scene3dBoardFaceMaterial, true)
 })
 
+test('PcbScene3dRuntimeBoardMeshes renders generated solder mask as semi matte', () => {
+    const boardMesh = PcbScene3dRuntimeBoardMeshes.buildBoardMesh(
+        THREE,
+        {
+            board: {
+                widthMil: 1000,
+                heightMil: 500,
+                thicknessMil: 62,
+                segments: []
+            },
+            detail: {
+                pads: [],
+                vias: []
+            }
+        },
+        (x, y) => ({ x, y })
+    )
+    const faceMaterial = boardMesh.material[0]
+
+    assert.equal(faceMaterial.roughness, 0.56)
+    assert.equal(faceMaterial.metalness, 0)
+})
+
 test('PcbScene3dRuntimeBoardMeshes updates only generated board shell face materials', () => {
     const boardFaceMaterial = {
         side: THREE.FrontSide,

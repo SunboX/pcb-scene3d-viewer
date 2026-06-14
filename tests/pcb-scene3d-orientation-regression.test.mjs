@@ -120,7 +120,7 @@ const toGeneratedSourcePoint = (sceneDescription, point) => ({
 
 /**
  * Projects one already-centered scene point through the active preset.
- * @param {'top' | 'isometric'} presetName Camera preset.
+ * @param {'top' | 'bottom' | 'isometric'} presetName Camera preset.
  * @param {object} sceneDescription Scene metadata.
  * @param {{ x: number, y: number, z?: number }} point Centered scene point.
  * @returns {{ x: number, y: number }}
@@ -155,7 +155,7 @@ const projectScenePoint = (presetName, sceneDescription, point) => {
 
 /**
  * Projects one generated detail source point through the runtime detail path.
- * @param {'top' | 'isometric'} presetName Camera preset.
+ * @param {'top' | 'bottom' | 'isometric'} presetName Camera preset.
  * @param {object} sceneDescription Scene metadata.
  * @param {{ x: number, y: number }} sourcePoint Source PCB point.
  * @returns {{ x: number, y: number }}
@@ -249,6 +249,30 @@ test('Altium isometric view keeps fake component, copper, and silkscreen anchors
     assertProjectedPointEqual(silkscreenScreenPoint, componentScreenPoint)
     assert.equal(componentScreenPoint.x < 0, true)
     assert.equal(silkscreenUpperMark.x < silkscreenScreenPoint.x, true)
+})
+
+test('Gerber bottom view keeps board-up markers upright', () => {
+    const sceneDescription = {
+        sourceFormat: 'gerber',
+        coordinateSystem: 'gerber-3d-y-up',
+        board: {
+            widthMil: 1000,
+            heightMil: 1000,
+            centerX: 500,
+            centerY: 500
+        }
+    }
+    const topUpperMark = projectScenePoint('top', sceneDescription, {
+        x: 0,
+        y: 100
+    })
+    const bottomUpperMark = projectScenePoint('bottom', sceneDescription, {
+        x: 0,
+        y: 100
+    })
+
+    assert.equal(topUpperMark.y < 0, true)
+    assert.equal(bottomUpperMark.y < 0, true)
 })
 
 test('Altium top view compensates fake silkscreen glyphs without moving their anchor', () => {

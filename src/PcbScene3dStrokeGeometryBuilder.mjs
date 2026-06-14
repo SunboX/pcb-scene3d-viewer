@@ -4,6 +4,7 @@ import { PcbScene3dArcUtils } from './PcbScene3dArcUtils.mjs'
  * Appends triangle geometry for PCB stroke-style tracks and arcs.
  */
 export class PcbScene3dStrokeGeometryBuilder {
+    static #ARC_SEGMENT_DEGREES = 3
     static #DEFAULT_MIN_WIDTH = 1
     static #ROUND_CAP_SEGMENTS = 16
 
@@ -66,7 +67,7 @@ export class PcbScene3dStrokeGeometryBuilder {
      * Appends one widened arc band with round caps for open arcs.
      * @param {number[]} positions Position buffer.
      * @param {{ x: number, y: number }} center Arc center.
-     * @param {{ radius?: number, width?: number, startAngle?: number, endAngle?: number }} arc
+     * @param {{ radius?: number, width?: number, startAngle?: number, endAngle?: number, sweepAngle?: number }} arc
      * Arc primitive.
      * @param {number} z Z position.
      * @param {boolean} mirrorY Whether the arc is mirrored around the X axis.
@@ -83,10 +84,7 @@ export class PcbScene3dStrokeGeometryBuilder {
         const outerRadius = radius + strokeWidth / 2
         const innerRadius = Math.max(radius - strokeWidth / 2, 0)
         const startAngleRad = (Number(arc?.startAngle || 0) * Math.PI) / 180
-        const deltaAngleDeg = PcbScene3dArcUtils.resolveSweepDelta(
-            Number(arc?.startAngle || 0),
-            Number(arc?.endAngle || 0)
-        )
+        const deltaAngleDeg = PcbScene3dArcUtils.resolveArcSweepDelta(arc)
         const epsilon = Number(options.fullCircleEpsilon ?? 0.001)
         const isFullCircle =
             Math.abs(deltaAngleDeg) <= epsilon ||
@@ -96,7 +94,10 @@ export class PcbScene3dStrokeGeometryBuilder {
             : (deltaAngleDeg * Math.PI) / 180
         const segments = Math.max(
             isFullCircle ? 20 : 8,
-            Math.ceil((Math.abs(deltaAngleRad) / Math.PI) * 18)
+            Math.ceil(
+                Math.abs(deltaAngleDeg) /
+                    PcbScene3dStrokeGeometryBuilder.#ARC_SEGMENT_DEGREES
+            )
         )
         const yDirection = mirrorY ? -1 : 1
 

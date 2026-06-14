@@ -117,6 +117,7 @@ function createFakeThree() {
          * @param {Record<string, unknown>} options
          */
         constructor(options) {
+            this.kind = 'basic'
             this.options = options
         }
     }
@@ -126,6 +127,7 @@ function createFakeThree() {
          * @param {Record<string, unknown>} options
          */
         constructor(options) {
+            this.kind = 'standard'
             this.options = options
         }
     }
@@ -745,6 +747,12 @@ test('PcbScene3dSilkscreenFactory honors side-specific stroke and fill colors', 
 
     assert.equal(trackMesh.material.options.color, 0x1f477d)
     assert.equal(fillMesh.material.options.color, 0xf8f6ef)
+    assert.equal(trackMesh.material.kind, 'standard')
+    assert.equal(trackMesh.material.options.roughness, 0.18)
+    assert.equal(trackMesh.material.options.metalness, 0)
+    assert.equal(fillMesh.material.kind, 'standard')
+    assert.equal(fillMesh.material.options.roughness, 0.18)
+    assert.equal(fillMesh.material.options.metalness, 0)
     assert.equal(trackMesh.material.options.transparent, false)
     assert.equal(trackMesh.material.options.opacity, 1)
     assert.equal(fillMesh.material.options.transparent, false)
@@ -811,6 +819,8 @@ test('PcbScene3dSilkscreenFactory renders silkscreen text with the stroke color'
 
     assert.equal(textGroup.name, 'copper-texts')
     assert.equal(textMesh.material.options.color, 0x2f6a2c)
+    assert.equal(textMesh.material.options.roughness, 0.18)
+    assert.equal(textMesh.material.options.metalness, 0)
     assert.ok(positions.length > 0)
     assert.ok(positions[2] > 18)
 })
@@ -856,7 +866,10 @@ test('PcbScene3dSilkscreenFactory renders TrueType silkscreen as textured text',
         assert.ok(textGroup)
         assert.equal(textMesh.name, 'true-type-text')
         assert.equal(textMesh.geometry.type, 'PlaneGeometry')
+        assert.equal(textMesh.material.kind, 'standard')
         assert.equal(textMesh.material.options.map.type, 'CanvasTexture')
+        assert.equal(textMesh.material.options.roughness, 0.18)
+        assert.equal(textMesh.material.options.metalness, 0)
         assert.equal(textMesh.material.options.transparent, true)
         assert.equal(textMesh.material.options.depthWrite, false)
         assert.equal(textMesh.position.x, 15)

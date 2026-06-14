@@ -1,5 +1,6 @@
 import { PcbScene3dBoardMaterialPalette } from './PcbScene3dBoardMaterialPalette.mjs'
 import { PcbScene3dBoardShapeFactory } from './PcbScene3dBoardShapeFactory.mjs'
+import { PcbScene3dMaterialFinish } from './PcbScene3dMaterialFinish.mjs'
 
 /**
  * Builds generated board meshes used by the interactive 3D runtime.
@@ -78,7 +79,11 @@ export class PcbScene3dRuntimeBoardMeshes {
             PcbScene3dBoardMaterialPalette.isGeneratedBodyVisible({
                 hasBoardAssemblyModel
             })
-        const materialOptions = {
+        const solderMaskMaterialOptions = {
+            ...PcbScene3dMaterialFinish.semiMatteSolderMaskProperties(),
+            visible: generatedBodyVisible
+        }
+        const edgeMaterialOptions = {
             roughness: 0.68,
             metalness: 0.08,
             visible: generatedBodyVisible
@@ -95,12 +100,12 @@ export class PcbScene3dRuntimeBoardMeshes {
 
         const mesh = new THREE.Mesh(geometry, [
             new THREE.MeshStandardMaterial({
-                ...materialOptions,
+                ...solderMaskMaterialOptions,
                 color: surfaceColor,
                 side: THREE.FrontSide
             }),
             new THREE.MeshStandardMaterial({
-                ...materialOptions,
+                ...edgeMaterialOptions,
                 color: resolvedEdgeColor,
                 side: THREE.DoubleSide
             }),

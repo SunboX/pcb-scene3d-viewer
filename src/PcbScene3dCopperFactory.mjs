@@ -1,15 +1,28 @@
 import { PcbScene3dArcUtils } from './PcbScene3dArcUtils.mjs'
 import { PcbScene3dPadFactory } from './PcbScene3dPadFactory.mjs'
 import { PcbScene3dCopperTextFactory } from './PcbScene3dCopperTextFactory.mjs'
+import { PcbScene3dMaskCoveredCopperMaterial } from './PcbScene3dMaskCoveredCopperMaterial.mjs'
+import { PcbScene3dGeometryZCompressor } from './PcbScene3dGeometryZCompressor.mjs'
 
 /**
  * Builds copper-detail meshes for the interactive 3D PCB scene.
  */
 export class PcbScene3dCopperFactory {
+    static #ARC_SEGMENT_DEGREES = 3
     static #TOP_COPPER_LAYER_ID = 1
     static #BOTTOM_COPPER_LAYER_ID = 32
     static #FULL_CIRCLE_EPSILON = 0.001
     static #ROUND_CAP_SEGMENTS = 16
+    static #COPPER_THICKNESS_MIL = 2.2
+    static #COPPER_COLOR = 0xd9a61d
+
+    /**
+     * Returns half the visual copper extrusion thickness.
+     * @returns {number}
+     */
+    static visualHalfThicknessMil() {
+        return PcbScene3dCopperFactory.#COPPER_THICKNESS_MIL / 2
+    }
 
     /**
      * Builds the combined top and bottom copper group.
@@ -66,6 +79,71 @@ export class PcbScene3dCopperFactory {
             normalizeBoardPoint,
             true,
             options
+        )
+
+        if (topGroup.children.length) {
+            group.add(topGroup)
+        }
+        if (bottomGroup.children.length) {
+            group.add(bottomGroup)
+        }
+
+        return group
+    }
+
+    /**
+     * Builds top and bottom traces that are covered by solder mask.
+     * @param {any} THREE
+     * @param {{ tracks?: any[], arcs?: any[] }} detail Mask-covered detail.
+     * @param {number} topZ
+     * @param {number} bottomZ
+     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
+     * @param {{ solderMaskColor?: number }} [options]
+     * @returns {any}
+     */
+    static buildMaskCoveredGroup(
+        THREE,
+        detail,
+        topZ,
+        bottomZ,
+        normalizeBoardPoint,
+        options = {}
+    ) {
+        const group = new THREE.Group()
+        const material = PcbScene3dMaskCoveredCopperMaterial.build(
+            THREE,
+            options
+        )
+        const topGroup = PcbScene3dCopperFactory.#buildMaskCoveredSideGroup(
+            THREE,
+            {
+                tracks: PcbScene3dCopperFactory.#filterTracks(
+                    detail?.tracks,
+                    'top'
+                ),
+                arcs: PcbScene3dCopperFactory.#filterArcs(detail?.arcs, 'top')
+            },
+            Math.abs(Number(topZ || 0)),
+            normalizeBoardPoint,
+            false,
+            material
+        )
+        const bottomGroup = PcbScene3dCopperFactory.#buildMaskCoveredSideGroup(
+            THREE,
+            {
+                tracks: PcbScene3dCopperFactory.#filterTracks(
+                    detail?.tracks,
+                    'bottom'
+                ),
+                arcs: PcbScene3dCopperFactory.#filterArcs(
+                    detail?.arcs,
+                    'bottom'
+                )
+            },
+            Math.abs(Number(bottomZ || 0)),
+            normalizeBoardPoint,
+            true,
+            material
         )
 
         if (topGroup.children.length) {
@@ -153,6 +231,65 @@ export class PcbScene3dCopperFactory {
     }
 
     /**
+     * Builds one side of the mask-covered trace relief.
+     * @param {any} THREE
+     * @param {{ tracks?: any[], arcs?: any[] }} detail Mask-covered detail.
+     * @param {number} z
+     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
+     * @param {boolean} mirrorY
+     * @param {any} material Shared covered-trace material.
+     * @returns {any}
+     */
+    static #buildMaskCoveredSideGroup(
+        THREE,
+        detail,
+        z,
+        normalizeBoardPoint,
+        mirrorY,
+        material
+    ) {
+        const group = new THREE.Group()
+        const trackMesh = PcbScene3dCopperFactory.#buildTrackMesh(
+            THREE,
+            detail?.tracks || [],
+            z,
+            normalizeBoardPoint,
+            mirrorY,
+            material
+        )
+        const arcMesh = PcbScene3dCopperFactory.#buildArcMesh(
+            THREE,
+            detail?.arcs || [],
+            z,
+            normalizeBoardPoint,
+            mirrorY,
+            material
+        )
+
+        if (trackMesh) {
+            PcbScene3dGeometryZCompressor.compressMaskCoveredCopperMesh(
+                trackMesh,
+                z
+            )
+            trackMesh.name = 'mask-covered-copper-tracks'
+            group.add(trackMesh)
+        }
+        if (arcMesh) {
+            PcbScene3dGeometryZCompressor.compressMaskCoveredCopperMesh(
+                arcMesh,
+                z
+            )
+            arcMesh.name = 'mask-covered-copper-arcs'
+            group.add(arcMesh)
+        }
+        if (mirrorY && group.children.length) {
+            group.rotation.x = Math.PI
+        }
+
+        return group
+    }
+
+    /**
      * Checks whether copper text glyph strokes are already in y-up scene space.
      * @param {{ coordinateSystem?: string } | undefined} options
      * @returns {boolean}
@@ -164,13 +301,21 @@ export class PcbScene3dCopperFactory {
     /**
      * Builds one widened copper-track mesh for one face.
      * @param {any} THREE
-     * @param {{ x1?: number, y1?: number, x2?: number, y2?: number, width?: number }[]} tracks
+     * @param {{ x1?: number, y1?: number, x2?: number, y2?: number, width?: number, capStartRound?: boolean, capEndRound?: boolean, capStartSideWall?: boolean, capEndSideWall?: boolean }[]} tracks
      * @param {number} z
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {boolean} mirrorY
+     * @param {any | null} [material] Optional material override.
      * @returns {any | null}
      */
-    static #buildTrackMesh(THREE, tracks, z, normalizeBoardPoint, mirrorY) {
+    static #buildTrackMesh(
+        THREE,
+        tracks,
+        z,
+        normalizeBoardPoint,
+        mirrorY,
+        material = null
+    ) {
         const positions = []
 
         for (const track of tracks) {
@@ -191,11 +336,16 @@ export class PcbScene3dCopperFactory {
                 start,
                 end,
                 Number(track?.width || 0),
-                z
+                z,
+                track
             )
         }
 
-        return PcbScene3dCopperFactory.#buildStrokeMesh(THREE, positions)
+        return PcbScene3dCopperFactory.#buildStrokeMesh(
+            THREE,
+            positions,
+            material
+        )
     }
 
     /**
@@ -205,9 +355,17 @@ export class PcbScene3dCopperFactory {
      * @param {number} z
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {boolean} mirrorY
+     * @param {any | null} [material] Optional material override.
      * @returns {any | null}
      */
-    static #buildArcMesh(THREE, arcs, z, normalizeBoardPoint, mirrorY) {
+    static #buildArcMesh(
+        THREE,
+        arcs,
+        z,
+        normalizeBoardPoint,
+        mirrorY,
+        material = null
+    ) {
         const positions = []
 
         for (const arc of arcs) {
@@ -226,16 +384,21 @@ export class PcbScene3dCopperFactory {
             )
         }
 
-        return PcbScene3dCopperFactory.#buildStrokeMesh(THREE, positions)
+        return PcbScene3dCopperFactory.#buildStrokeMesh(
+            THREE,
+            positions,
+            material
+        )
     }
 
     /**
      * Builds one copper stroke mesh from triangle positions.
      * @param {any} THREE
      * @param {number[]} positions
+     * @param {any | null} [material] Optional material override.
      * @returns {any | null}
      */
-    static #buildStrokeMesh(THREE, positions) {
+    static #buildStrokeMesh(THREE, positions, material = null) {
         if (!positions.length) {
             return null
         }
@@ -249,7 +412,7 @@ export class PcbScene3dCopperFactory {
 
         return new THREE.Mesh(
             geometry,
-            PcbScene3dCopperFactory.#buildMaterial(THREE)
+            material || PcbScene3dCopperFactory.#buildMaterial(THREE)
         )
     }
 
@@ -260,7 +423,7 @@ export class PcbScene3dCopperFactory {
      */
     static #buildMaterial(THREE) {
         return new THREE.MeshStandardMaterial({
-            color: 0xd9a61d,
+            color: PcbScene3dCopperFactory.#COPPER_COLOR,
             roughness: 0.38,
             metalness: 0.55,
             side: THREE.DoubleSide,
@@ -318,9 +481,17 @@ export class PcbScene3dCopperFactory {
      * @param {{ x: number, y: number }} end
      * @param {number} width
      * @param {number} z
+     * @param {{ capStartRound?: boolean, capEndRound?: boolean, capStartSideWall?: boolean, capEndSideWall?: boolean }} [options]
      * @returns {void}
      */
-    static #appendTrackTriangles(positions, start, end, width, z) {
+    static #appendTrackTriangles(
+        positions,
+        start,
+        end,
+        width,
+        z,
+        options = {}
+    ) {
         const dx = end.x - start.x
         const dy = end.y - start.y
         const length = Math.hypot(dx, dy)
@@ -352,25 +523,47 @@ export class PcbScene3dCopperFactory {
             { x: start.x - normalX, y: start.y - normalY },
             z
         )
-        PcbScene3dCopperFactory.#appendDiscTriangles(
+        PcbScene3dCopperFactory.#appendBoundarySideTriangles(
             positions,
-            start,
-            halfWidth,
+            { x: start.x + normalX, y: start.y + normalY },
+            { x: end.x + normalX, y: end.y + normalY },
             z
         )
-        PcbScene3dCopperFactory.#appendDiscTriangles(
+        PcbScene3dCopperFactory.#appendBoundarySideTriangles(
             positions,
-            end,
-            halfWidth,
+            { x: end.x - normalX, y: end.y - normalY },
+            { x: start.x - normalX, y: start.y - normalY },
             z
         )
+        if (options?.capStartRound !== false) {
+            PcbScene3dCopperFactory.#appendRoundCapTriangles(
+                positions,
+                start,
+                halfWidth,
+                z,
+                -dx / length,
+                -dy / length,
+                options?.capStartSideWall !== false
+            )
+        }
+        if (options?.capEndRound !== false) {
+            PcbScene3dCopperFactory.#appendRoundCapTriangles(
+                positions,
+                end,
+                halfWidth,
+                z,
+                dx / length,
+                dy / length,
+                options?.capEndSideWall !== false
+            )
+        }
     }
 
     /**
      * Appends one widened arc band as triangles.
      * @param {number[]} positions
      * @param {{ x: number, y: number }} center
-     * @param {{ radius?: number, width?: number, startAngle?: number, endAngle?: number }} arc
+     * @param {{ radius?: number, width?: number, startAngle?: number, endAngle?: number, sweepAngle?: number }} arc
      * @param {number} z
      * @param {boolean} mirrorY
      * @returns {void}
@@ -381,10 +574,7 @@ export class PcbScene3dCopperFactory {
         const outerRadius = radius + strokeWidth / 2
         const innerRadius = Math.max(radius - strokeWidth / 2, 0)
         const startAngleRad = (Number(arc?.startAngle || 0) * Math.PI) / 180
-        const deltaAngleDeg = PcbScene3dArcUtils.resolveSweepDelta(
-            Number(arc?.startAngle || 0),
-            Number(arc?.endAngle || 0)
-        )
+        const deltaAngleDeg = PcbScene3dArcUtils.resolveArcSweepDelta(arc)
         const isFullCircle =
             Math.abs(deltaAngleDeg) <=
                 PcbScene3dCopperFactory.#FULL_CIRCLE_EPSILON ||
@@ -395,7 +585,10 @@ export class PcbScene3dCopperFactory {
             : (deltaAngleDeg * Math.PI) / 180
         const segments = Math.max(
             isFullCircle ? 20 : 8,
-            Math.ceil((Math.abs(deltaAngleRad) / Math.PI) * 18)
+            Math.ceil(
+                Math.abs(deltaAngleDeg) /
+                    PcbScene3dCopperFactory.#ARC_SEGMENT_DEGREES
+            )
         )
         const yDirection = mirrorY ? -1 : 1
 
@@ -421,6 +614,12 @@ export class PcbScene3dCopperFactory {
                     outerEnd,
                     z
                 )
+                PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+                    positions,
+                    outerStart,
+                    outerEnd,
+                    z
+                )
                 continue
             }
 
@@ -441,19 +640,45 @@ export class PcbScene3dCopperFactory {
                 innerStart,
                 z
             )
+            PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+                positions,
+                outerStart,
+                outerEnd,
+                z
+            )
+            PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+                positions,
+                innerEnd,
+                innerStart,
+                z
+            )
         }
 
         if (!isFullCircle) {
-            PcbScene3dCopperFactory.#appendDiscTriangles(
+            const sweepDirection = deltaAngleRad < 0 ? -1 : 1
+            const startTangent = PcbScene3dCopperFactory.#resolveArcTangent(
+                startAngleRad,
+                yDirection,
+                sweepDirection
+            )
+            const endTangent = PcbScene3dCopperFactory.#resolveArcTangent(
+                startAngleRad + deltaAngleRad,
+                yDirection,
+                sweepDirection
+            )
+
+            PcbScene3dCopperFactory.#appendRoundCapTriangles(
                 positions,
                 {
                     x: center.x + Math.cos(startAngleRad) * radius,
                     y: center.y + Math.sin(startAngleRad) * radius * yDirection
                 },
                 strokeWidth / 2,
-                z
+                z,
+                -startTangent.x,
+                -startTangent.y
             )
-            PcbScene3dCopperFactory.#appendDiscTriangles(
+            PcbScene3dCopperFactory.#appendRoundCapTriangles(
                 positions,
                 {
                     x:
@@ -466,7 +691,9 @@ export class PcbScene3dCopperFactory {
                             yDirection
                 },
                 strokeWidth / 2,
-                z
+                z,
+                endTangent.x,
+                endTangent.y
             )
         }
     }
@@ -525,6 +752,153 @@ export class PcbScene3dCopperFactory {
                 },
                 z
             )
+            PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+                positions,
+                {
+                    x: center.x + Math.cos(startAngle) * safeRadius,
+                    y: center.y + Math.sin(startAngle) * safeRadius
+                },
+                {
+                    x: center.x + Math.cos(endAngle) * safeRadius,
+                    y: center.y + Math.sin(endAngle) * safeRadius
+                },
+                z
+            )
+        }
+    }
+
+    /**
+     * Appends only the exposed half of one rounded stroke endpoint.
+     * @param {number[]} positions Position buffer.
+     * @param {{ x: number, y: number }} center Cap center.
+     * @param {number} radius Cap radius.
+     * @param {number} z Center Z position.
+     * @param {number} outwardX Unit X direction pointing out of the stroke.
+     * @param {number} outwardY Unit Y direction pointing out of the stroke.
+     * @param {boolean} [includeSideWall] Whether to emit the cap perimeter wall.
+     * @returns {void}
+     */
+    static #appendRoundCapTriangles(
+        positions,
+        center,
+        radius,
+        z,
+        outwardX,
+        outwardY,
+        includeSideWall = true
+    ) {
+        const safeRadius = Math.max(Number(radius || 0), 0)
+        const outwardLength = Math.hypot(outwardX, outwardY)
+        if (safeRadius <= 0) {
+            return
+        }
+        if (outwardLength <= 0.001) {
+            PcbScene3dCopperFactory.#appendDiscTriangles(
+                positions,
+                center,
+                safeRadius,
+                z
+            )
+            return
+        }
+
+        const unitX = outwardX / outwardLength
+        const unitY = outwardY / outwardLength
+        const normalX = -unitY
+        const normalY = unitX
+
+        for (
+            let index = 0;
+            index < PcbScene3dCopperFactory.#ROUND_CAP_SEGMENTS;
+            index += 1
+        ) {
+            const startAngle =
+                -Math.PI / 2 +
+                (Math.PI * index) / PcbScene3dCopperFactory.#ROUND_CAP_SEGMENTS
+            const endAngle =
+                -Math.PI / 2 +
+                (Math.PI * (index + 1)) /
+                    PcbScene3dCopperFactory.#ROUND_CAP_SEGMENTS
+            const start = PcbScene3dCopperFactory.#resolveCapPoint(
+                center,
+                safeRadius,
+                unitX,
+                unitY,
+                normalX,
+                normalY,
+                startAngle
+            )
+            const end = PcbScene3dCopperFactory.#resolveCapPoint(
+                center,
+                safeRadius,
+                unitX,
+                unitY,
+                normalX,
+                normalY,
+                endAngle
+            )
+
+            PcbScene3dCopperFactory.#appendTriangle(
+                positions,
+                center,
+                start,
+                end,
+                z
+            )
+            if (includeSideWall) {
+                PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+                    positions,
+                    start,
+                    end,
+                    z
+                )
+            }
+        }
+    }
+
+    /**
+     * Resolves one point on an oriented round cap boundary.
+     * @param {{ x: number, y: number }} center Cap center.
+     * @param {number} radius Cap radius.
+     * @param {number} unitX Outward X direction.
+     * @param {number} unitY Outward Y direction.
+     * @param {number} normalX Cap normal X direction.
+     * @param {number} normalY Cap normal Y direction.
+     * @param {number} angle Local cap angle.
+     * @returns {{ x: number, y: number }}
+     */
+    static #resolveCapPoint(
+        center,
+        radius,
+        unitX,
+        unitY,
+        normalX,
+        normalY,
+        angle
+    ) {
+        return {
+            x:
+                center.x +
+                unitX * Math.cos(angle) * radius +
+                normalX * Math.sin(angle) * radius,
+            y:
+                center.y +
+                unitY * Math.cos(angle) * radius +
+                normalY * Math.sin(angle) * radius
+        }
+    }
+
+    /**
+     * Resolves one normalized centerline tangent for an arc endpoint.
+     * @param {number} angle Endpoint angle in radians.
+     * @param {number} yDirection Mirrored Y direction.
+     * @param {number} sweepDirection Arc sweep direction.
+     * @returns {{ x: number, y: number }}
+     */
+    static #resolveArcTangent(angle, yDirection, sweepDirection) {
+        return {
+            x: -Math.sin(angle) * sweepDirection,
+            y: Math.cos(angle) * yDirection * sweepDirection
         }
     }
 
@@ -548,15 +922,73 @@ export class PcbScene3dCopperFactory {
     }
 
     /**
-     * Appends one triangle into the position buffer.
-     * @param {number[]} positions
-     * @param {{ x: number, y: number }} a
-     * @param {{ x: number, y: number }} b
-     * @param {{ x: number, y: number }} c
-     * @param {number} z
+     * Appends one shallow triangular prism into the position buffer.
+     * @param {number[]} positions Position buffer.
+     * @param {{ x: number, y: number }} a First point.
+     * @param {{ x: number, y: number }} b Second point.
+     * @param {{ x: number, y: number }} c Third point.
+     * @param {number} z Center Z position.
      * @returns {void}
      */
     static #appendTriangle(positions, a, b, c, z) {
-        positions.push(a.x, a.y, z, b.x, b.y, z, c.x, c.y, z)
+        const halfThickness = PcbScene3dCopperFactory.#COPPER_THICKNESS_MIL / 2
+        const topZ = z + halfThickness
+        const bottomZ = z - halfThickness
+
+        positions.push(
+            a.x,
+            a.y,
+            topZ,
+            b.x,
+            b.y,
+            topZ,
+            c.x,
+            c.y,
+            topZ,
+            c.x,
+            c.y,
+            bottomZ,
+            b.x,
+            b.y,
+            bottomZ,
+            a.x,
+            a.y,
+            bottomZ
+        )
+    }
+
+    /**
+     * Appends a side wall for one actual copper boundary edge.
+     * @param {number[]} positions Position buffer.
+     * @param {{ x: number, y: number }} start Wall start point.
+     * @param {{ x: number, y: number }} end Wall end point.
+     * @param {number} z Center Z position.
+     * @returns {void}
+     */
+    static #appendBoundarySideTriangles(positions, start, end, z) {
+        const halfThickness = PcbScene3dCopperFactory.#COPPER_THICKNESS_MIL / 2
+        const topZ = z + halfThickness
+        const bottomZ = z - halfThickness
+
+        positions.push(
+            start.x,
+            start.y,
+            topZ,
+            end.x,
+            end.y,
+            topZ,
+            end.x,
+            end.y,
+            bottomZ,
+            start.x,
+            start.y,
+            topZ,
+            end.x,
+            end.y,
+            bottomZ,
+            start.x,
+            start.y,
+            bottomZ
+        )
     }
 }

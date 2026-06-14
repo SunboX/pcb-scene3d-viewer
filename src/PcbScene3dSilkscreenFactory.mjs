@@ -1,6 +1,7 @@
 import { PcbScene3dCopperTextFactory } from './PcbScene3dCopperTextFactory.mjs'
 import { PcbScene3dCutoutGeometryFilter } from './PcbScene3dCutoutGeometryFilter.mjs'
 import { PcbScene3dDrillCutoutFilter } from './PcbScene3dDrillCutoutFilter.mjs'
+import { PcbScene3dMaterialFinish } from './PcbScene3dMaterialFinish.mjs'
 import { PcbScene3dShapePathFactory } from './PcbScene3dShapePathFactory.mjs'
 import { PcbScene3dSilkscreenStrokeWidthResolver } from './PcbScene3dSilkscreenStrokeWidthResolver.mjs'
 import { PcbScene3dStrokeGeometryBuilder } from './PcbScene3dStrokeGeometryBuilder.mjs'
@@ -21,7 +22,7 @@ export class PcbScene3dSilkscreenFactory {
     /**
      * Builds the combined top and bottom silkscreen group.
      * @param {any} THREE
-     * @param {{ top?: { fills?: any[], tracks?: any[], arcs?: any[], texts?: any[], drillCutouts?: { x: number, y: number }[][], fillColor?: number, strokeColor?: number, knockoutColor?: number, nativeTextKnockouts?: boolean }, bottom?: { fills?: any[], tracks?: any[], arcs?: any[], texts?: any[], drillCutouts?: { x: number, y: number }[][], fillColor?: number, strokeColor?: number, knockoutColor?: number, nativeTextKnockouts?: boolean } }} silkscreen
+     * @param {{ top?: { fills?: any[], tracks?: any[], arcs?: any[], texts?: any[], drillCutouts?: { x: number, y: number }[][], copperCutouts?: { x: number, y: number }[][], fillColor?: number, strokeColor?: number, knockoutColor?: number, nativeTextKnockouts?: boolean }, bottom?: { fills?: any[], tracks?: any[], arcs?: any[], texts?: any[], drillCutouts?: { x: number, y: number }[][], copperCutouts?: { x: number, y: number }[][], fillColor?: number, strokeColor?: number, knockoutColor?: number, nativeTextKnockouts?: boolean } }} silkscreen
      * @param {number} topZ
      * @param {number} bottomZ
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
@@ -57,7 +58,7 @@ export class PcbScene3dSilkscreenFactory {
     /**
      * Builds one side-specific silkscreen group.
      * @param {any} THREE
-     * @param {{ fills?: any[], tracks?: any[], arcs?: any[], texts?: any[], drillCutouts?: { x: number, y: number }[][], fillColor?: number, strokeColor?: number, knockoutColor?: number, nativeTextKnockouts?: boolean } | undefined} silkscreen
+     * @param {{ fills?: any[], tracks?: any[], arcs?: any[], texts?: any[], drillCutouts?: { x: number, y: number }[][], copperCutouts?: { x: number, y: number }[][], fillColor?: number, strokeColor?: number, knockoutColor?: number, nativeTextKnockouts?: boolean } | undefined} silkscreen
      * @param {number} z
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {boolean} mirrorY
@@ -83,11 +84,17 @@ export class PcbScene3dSilkscreenFactory {
               ? fillColor
               : textMaterialColor
         const strokeZ = z + PcbScene3dSilkscreenFactory.#STROKE_Z_OFFSET
-        const drillCutouts = PcbScene3dSilkscreenFactory.#normalizeDrillCutouts(
+        const drillCutouts = PcbScene3dSilkscreenFactory.#normalizeCutouts(
             silkscreen?.drillCutouts,
             normalizeBoardPoint,
             mirrorY
         )
+        const copperCutouts = PcbScene3dSilkscreenFactory.#normalizeCutouts(
+            silkscreen?.copperCutouts,
+            normalizeBoardPoint,
+            mirrorY
+        )
+        const surfaceCutouts = drillCutouts.concat(copperCutouts)
         const strokeMaterial = PcbScene3dSilkscreenFactory.#buildMaterial(
             THREE,
             strokeColor
@@ -103,7 +110,7 @@ export class PcbScene3dSilkscreenFactory {
             normalizeBoardPoint,
             mirrorY,
             strokeMaterial,
-            drillCutouts
+            surfaceCutouts
         )
         const arcMesh = PcbScene3dSilkscreenFactory.#buildArcMesh(
             THREE,
@@ -112,7 +119,7 @@ export class PcbScene3dSilkscreenFactory {
             normalizeBoardPoint,
             mirrorY,
             strokeMaterial,
-            drillCutouts
+            surfaceCutouts
         )
         const fillMeshes = PcbScene3dSilkscreenFactory.#buildFillMeshes(
             THREE,
@@ -121,7 +128,7 @@ export class PcbScene3dSilkscreenFactory {
             normalizeBoardPoint,
             mirrorY,
             fillMaterial,
-            drillCutouts
+            surfaceCutouts
         )
         const texts = Array.isArray(silkscreen?.texts) ? silkscreen.texts : []
         const renderableTexts = texts.filter(
@@ -139,9 +146,11 @@ export class PcbScene3dSilkscreenFactory {
             strokeZ,
             normalizeBoardPoint,
             {
-                drillCutouts,
+                drillCutouts: surfaceCutouts,
                 filterSide: false,
                 materialColor: strokeColor,
+                materialProperties:
+                    PcbScene3dMaterialFinish.glossySilkscreenProperties(),
                 mirrorY,
                 side: mirrorY ? 'bottom' : 'top'
             }
@@ -748,18 +757,18 @@ export class PcbScene3dSilkscreenFactory {
     }
 
     /**
-     * Normalizes side-level drill cutouts into local silkscreen polygons.
-     * @param {{ x?: number, y?: number }[][] | undefined} drillCutouts
+     * Normalizes side-level cutouts into local silkscreen polygons.
+     * @param {{ x?: number, y?: number }[][] | undefined} cutouts
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {boolean} mirrorY
      * @returns {{ x: number, y: number }[][]}
      */
-    static #normalizeDrillCutouts(drillCutouts, normalizeBoardPoint, mirrorY) {
-        if (!Array.isArray(drillCutouts)) {
+    static #normalizeCutouts(cutouts, normalizeBoardPoint, mirrorY) {
+        if (!Array.isArray(cutouts)) {
             return []
         }
 
-        return drillCutouts
+        return cutouts
             .map((cutout) =>
                 PcbScene3dSilkscreenFactory.#normalizePointList(
                     cutout,
@@ -854,8 +863,11 @@ export class PcbScene3dSilkscreenFactory {
         THREE,
         color = PcbScene3dSilkscreenFactory.#DEFAULT_SILKSCREEN_COLOR
     ) {
-        return new THREE.MeshBasicMaterial({
+        const Material = THREE.MeshStandardMaterial || THREE.MeshBasicMaterial
+
+        return new Material({
             color,
+            ...PcbScene3dMaterialFinish.glossySilkscreenProperties(),
             transparent: false,
             opacity: 1,
             toneMapped: false,
