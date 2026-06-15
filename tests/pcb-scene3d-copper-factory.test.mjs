@@ -83,6 +83,158 @@ function hasVerticalWallThroughPoint(positions, x, y) {
     return false
 }
 
+/**
+ * Checks whether any triangle centroid lies inside the supplied bounds.
+ * @param {ArrayLike<number>} positions Position attribute array.
+ * @param {{ minX: number, maxX: number, minY: number, maxY: number }} bounds Bounds to test.
+ * @returns {boolean}
+ */
+function hasTriangleCentroidInsideBounds(positions, bounds) {
+    for (let index = 0; index < positions.length; index += 9) {
+        const centroidX =
+            (positions[index] + positions[index + 3] + positions[index + 6]) / 3
+        const centroidY =
+            (positions[index + 1] +
+                positions[index + 4] +
+                positions[index + 7]) /
+            3
+
+        if (
+            centroidX >= bounds.minX &&
+            centroidX <= bounds.maxX &&
+            centroidY >= bounds.minY &&
+            centroidY <= bounds.maxY
+        ) {
+            return true
+        }
+    }
+
+    return false
+}
+
+/**
+ * Checks whether any triangle intersects or covers a circle.
+ * @param {any} geometry Geometry to inspect.
+ * @param {{ x: number, y: number }} center Circle center.
+ * @param {number} radius Circle radius.
+ * @returns {boolean}
+ */
+function hasTriangleOverlappingCircle(geometry, center, radius) {
+    const position = geometry.getAttribute('position')
+
+    for (let index = 0; index < position.count; index += 3) {
+        const triangle = [0, 1, 2].map((offset) => ({
+            x: position.getX(index + offset),
+            y: position.getY(index + offset)
+        }))
+
+        if (triangleOverlapsCircle(triangle, center, radius)) {
+            return true
+        }
+    }
+
+    return false
+}
+
+/**
+ * Returns true when one triangle overlaps a circular area.
+ * @param {{ x: number, y: number }[]} triangle Triangle points.
+ * @param {{ x: number, y: number }} center Circle center.
+ * @param {number} radius Circle radius.
+ * @returns {boolean}
+ */
+function triangleOverlapsCircle(triangle, center, radius) {
+    const radiusSquared = (Number(radius || 0) - 0.001) ** 2
+
+    return (
+        triangle.some(
+            (point) =>
+                (point.x - center.x) ** 2 + (point.y - center.y) ** 2 <=
+                radiusSquared
+        ) ||
+        isPointInsideTriangle(center, triangle) ||
+        triangle.some(
+            (point, index) =>
+                squaredDistanceToSegment(
+                    center,
+                    point,
+                    triangle[(index + 1) % triangle.length]
+                ) <= radiusSquared
+        )
+    )
+}
+
+/**
+ * Returns true when a point lies inside one triangle.
+ * @param {{ x: number, y: number }} point Point to inspect.
+ * @param {{ x: number, y: number }[]} triangle Triangle points.
+ * @returns {boolean}
+ */
+function isPointInsideTriangle(point, triangle) {
+    let hasNegative = false
+    let hasPositive = false
+
+    for (let index = 0; index < triangle.length; index += 1) {
+        const current = triangle[index]
+        const next = triangle[(index + 1) % triangle.length]
+        const sign =
+            (next.x - current.x) * (point.y - current.y) -
+            (next.y - current.y) * (point.x - current.x)
+
+        hasNegative ||= sign < -0.001
+        hasPositive ||= sign > 0.001
+    }
+
+    return !(hasNegative && hasPositive)
+}
+
+/**
+ * Resolves squared distance from a point to a finite segment.
+ * @param {{ x: number, y: number }} point Point to inspect.
+ * @param {{ x: number, y: number }} start Segment start.
+ * @param {{ x: number, y: number }} end Segment end.
+ * @returns {number}
+ */
+function squaredDistanceToSegment(point, start, end) {
+    const dx = end.x - start.x
+    const dy = end.y - start.y
+    const lengthSquared = dx * dx + dy * dy
+    const ratio = lengthSquared
+        ? Math.max(
+              0,
+              Math.min(
+                  1,
+                  ((point.x - start.x) * dx + (point.y - start.y) * dy) /
+                      lengthSquared
+              )
+          )
+        : 0
+    const projected = {
+        x: start.x + dx * ratio,
+        y: start.y + dy * ratio
+    }
+
+    return (point.x - projected.x) ** 2 + (point.y - projected.y) ** 2
+}
+
+/**
+ * Builds one sampled circular cutout polygon.
+ * @param {number} centerX Center X.
+ * @param {number} centerY Center Y.
+ * @param {number} radius Circle radius.
+ * @returns {{ x: number, y: number }[]}
+ */
+function createCircularCutout(centerX, centerY, radius) {
+    return Array.from({ length: 64 }, (_unused, index) => {
+        const angle = (index / 64) * Math.PI * 2
+
+        return {
+            x: centerX + Math.cos(angle) * radius,
+            y: centerY + Math.sin(angle) * radius
+        }
+    })
+}
+
 test('PcbScene3dCopperFactory separates top and bottom copper detail', () => {
     const group = PcbScene3dCopperFactory.buildGroup(
         THREE,
@@ -314,6 +466,7 @@ test('PcbScene3dCopperFactory renders mask-covered traces with a solder-mask cop
     assert.equal(trackMesh.material.color.getHex(), 0x4d6d25)
     assert.equal(trackMesh.material.metalness, 0)
     assert.equal(trackMesh.material.roughness, 0.56)
+    assert.notEqual(trackMesh.material.polygonOffset, true)
     assert.ok(bounds.maxZ > 5)
 })
 
@@ -349,6 +502,69 @@ test('PcbScene3dCopperFactory keeps mask-covered traces below exposed copper', (
 
     assert.ok(coveredBounds.maxZ > 5)
     assert.ok(coveredBounds.maxZ < exposedBounds.maxZ)
+})
+
+test('PcbScene3dCopperFactory clips mask-covered traces below silkscreen fills', () => {
+    const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
+        THREE,
+        {
+            tracks: [{ x1: 0, y1: 0, x2: 100, y2: 0, width: 8, layerId: 1 }],
+            arcs: []
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y }),
+        {
+            occlusionCutouts: {
+                top: [
+                    [
+                        { x: 20, y: -20 },
+                        { x: 80, y: -20 },
+                        { x: 80, y: 20 },
+                        { x: 20, y: 20 }
+                    ]
+                ]
+            }
+        }
+    )
+
+    const trackMesh = group.children[0].children[0]
+    const positions = trackMesh.geometry.attributes.position.array
+
+    assert.equal(
+        hasTriangleCentroidInsideBounds(positions, {
+            minX: 20,
+            maxX: 80,
+            minY: -4,
+            maxY: 4
+        }),
+        false
+    )
+})
+
+test('PcbScene3dCopperFactory removes mask-covered trace slivers at circular pad cutouts', () => {
+    const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
+        THREE,
+        {
+            tracks: [{ x1: -20, y1: 0, x2: 20, y2: 0, width: 4, layerId: 1 }],
+            arcs: []
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y }),
+        {
+            occlusionCutouts: {
+                top: [createCircularCutout(0, 0, 8)]
+            }
+        }
+    )
+
+    const trackMesh = group.children[0].children[0]
+
+    assert.equal(
+        hasTriangleOverlappingCircle(trackMesh.geometry, { x: 0, y: 0 }, 8),
+        false
+    )
 })
 
 test('PcbScene3dCopperFactory leaves drilled openings uncovered for real board holes', () => {

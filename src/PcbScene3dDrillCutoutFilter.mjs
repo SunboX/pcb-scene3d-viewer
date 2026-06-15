@@ -5,6 +5,26 @@ export class PcbScene3dDrillCutoutFilter {
     static #GEOMETRY_EPSILON = 0.001
 
     /**
+     * Removes cutout polygons that are fully covered by a larger sibling.
+     * @param {{ x: number, y: number }[][]} cutouts Cutout polygons.
+     * @returns {{ x: number, y: number }[][]}
+     */
+    static removeNestedCutouts(cutouts) {
+        const validCutouts = (Array.isArray(cutouts) ? cutouts : []).filter(
+            (cutout) => Array.isArray(cutout) && cutout.length >= 3
+        )
+
+        return validCutouts.filter(
+            (cutout, index) =>
+                !PcbScene3dDrillCutoutFilter.#isNestedCutout(
+                    cutout,
+                    index,
+                    validCutouts
+                )
+        )
+    }
+
+    /**
      * Removes drill cutouts that are already covered by authored fill holes.
      * @param {{ x: number, y: number }[][]} drillCutouts
      * @param {{ x: number, y: number }[][]} fillHoles
@@ -69,6 +89,62 @@ export class PcbScene3dDrillCutoutFilter {
     }
 
     /**
+     * Returns true when another cutout fully covers this one.
+     * @param {{ x: number, y: number }[]} cutout Cutout under test.
+     * @param {number} index Cutout index.
+     * @param {{ x: number, y: number }[][]} cutouts All cutouts.
+     * @returns {boolean}
+     */
+    static #isNestedCutout(cutout, index, cutouts) {
+        const area = PcbScene3dDrillCutoutFilter.#absolutePolygonArea(cutout)
+
+        return cutouts.some((otherCutout, otherIndex) => {
+            if (otherIndex === index) {
+                return false
+            }
+
+            if (
+                !PcbScene3dDrillCutoutFilter.#doesHoleCoverCutout(
+                    otherCutout,
+                    cutout
+                )
+            ) {
+                return false
+            }
+
+            const otherArea =
+                PcbScene3dDrillCutoutFilter.#absolutePolygonArea(otherCutout)
+
+            return (
+                otherArea >
+                    area + PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON ||
+                (Math.abs(otherArea - area) <=
+                    PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON &&
+                    otherIndex < index)
+            )
+        })
+    }
+
+    /**
+     * Resolves the absolute area of a polygon.
+     * @param {{ x: number, y: number }[]} points Polygon points.
+     * @returns {number}
+     */
+    static #absolutePolygonArea(points) {
+        let area = 0
+
+        for (let index = 0; index < points.length; index += 1) {
+            const current = points[index]
+            const next = points[(index + 1) % points.length]
+            area +=
+                Number(current.x || 0) * Number(next.y || 0) -
+                Number(next.x || 0) * Number(current.y || 0)
+        }
+
+        return Math.abs(area) / 2
+    }
+
+    /**
      * Returns true when a fill hole represents one known drill cutout.
      * @param {{ x: number, y: number }[]} hole
      * @param {{ x: number, y: number }[][]} drillCutouts
@@ -92,6 +168,10 @@ export class PcbScene3dDrillCutoutFilter {
             hole.length >= 3 &&
             Array.isArray(cutout) &&
             cutout.length >= 3 &&
+            PcbScene3dDrillCutoutFilter.#boundsContain(
+                PcbScene3dDrillCutoutFilter.#resolvePolygonBounds(hole),
+                PcbScene3dDrillCutoutFilter.#resolvePolygonBounds(cutout)
+            ) &&
             PcbScene3dDrillCutoutFilter.#isPointInsideOrOnPolygon(
                 PcbScene3dDrillCutoutFilter.#resolvePolygonCentroid(cutout),
                 hole
@@ -102,6 +182,49 @@ export class PcbScene3dDrillCutoutFilter {
                     hole
                 )
             )
+        )
+    }
+
+    /**
+     * Returns true when one bounds fully contains another.
+     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} outer
+     * Outer bounds.
+     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} inner
+     * Inner bounds.
+     * @returns {boolean}
+     */
+    static #boundsContain(outer, inner) {
+        return (
+            outer.minX <=
+                inner.minX + PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON &&
+            outer.maxX >=
+                inner.maxX - PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON &&
+            outer.minY <=
+                inner.minY + PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON &&
+            outer.maxY >=
+                inner.maxY - PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON
+        )
+    }
+
+    /**
+     * Resolves axis-aligned polygon bounds.
+     * @param {{ x: number, y: number }[]} points Polygon points.
+     * @returns {{ minX: number, maxX: number, minY: number, maxY: number }}
+     */
+    static #resolvePolygonBounds(points) {
+        return points.reduce(
+            (bounds, point) => ({
+                minX: Math.min(bounds.minX, Number(point.x || 0)),
+                maxX: Math.max(bounds.maxX, Number(point.x || 0)),
+                minY: Math.min(bounds.minY, Number(point.y || 0)),
+                maxY: Math.max(bounds.maxY, Number(point.y || 0))
+            }),
+            {
+                minX: Infinity,
+                maxX: -Infinity,
+                minY: Infinity,
+                maxY: -Infinity
+            }
         )
     }
 

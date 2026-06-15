@@ -808,10 +808,8 @@ export class PcbScene3dTrueTypeTextFactory {
      * @returns {any}
      */
     static #buildMaterial(THREE, textureInfo) {
-        const Material = THREE.MeshStandardMaterial || THREE.MeshBasicMaterial
-
-        return new Material({
-            ...PcbScene3dMaterialFinish.glossySilkscreenProperties(),
+        const Material = THREE.MeshBasicMaterial || THREE.MeshStandardMaterial
+        const materialOptions = {
             map: textureInfo.texture,
             transparent: true,
             opacity: 0.96,
@@ -820,7 +818,16 @@ export class PcbScene3dTrueTypeTextFactory {
             toneMapped: false,
             fog: false,
             side: THREE.DoubleSide
-        })
+        }
+
+        if (Material === THREE.MeshStandardMaterial) {
+            Object.assign(
+                materialOptions,
+                PcbScene3dMaterialFinish.glossySilkscreenProperties()
+            )
+        }
+
+        return new Material(materialOptions)
     }
 
     /**

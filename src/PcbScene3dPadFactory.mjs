@@ -1,4 +1,8 @@
 import { PcbScene3dDrillPathFactory } from './PcbScene3dDrillPathFactory.mjs'
+import { PcbScene3dBoardEdgeCutoutBuilder } from './PcbScene3dBoardEdgeCutoutBuilder.mjs'
+import { PcbScene3dCutoutGeometryFilter } from './PcbScene3dCutoutGeometryFilter.mjs'
+import { PcbScene3dGeometryFaceRefiner } from './PcbScene3dGeometryFaceRefiner.mjs'
+import { PcbScene3dPadSurfaceStack } from './PcbScene3dPadSurfaceStack.mjs'
 
 /**
  * Builds copper pad meshes for the interactive 3D PCB scene.
@@ -6,6 +10,9 @@ import { PcbScene3dDrillPathFactory } from './PcbScene3dDrillPathFactory.mjs'
 export class PcbScene3dPadFactory {
     static #PAD_SHAPE_RECTANGULAR = 2
     static #PAD_THICKNESS_MIL = 2.2
+    static #DRILL_SAMPLE_POINTS = 72
+    static #CUTOUT_MAX_EDGE_LENGTH = 1.5
+    static #CUTOUT_FACE_MAX_EDGE_LENGTH = 8
 
     /**
      * Builds the pad mesh group for one scene.
@@ -31,6 +38,7 @@ export class PcbScene3dPadFactory {
         const boardDrills = PcbScene3dDrillPathFactory.resolveBoardDrillSpecs({
             pads: normalizedPads
         })
+        const surfaceStack = []
 
         ;(normalizedPads || []).forEach((pad) => {
             if (!PcbScene3dPadFactory.#hasVisibleSurface(pad, side)) {
@@ -56,6 +64,13 @@ export class PcbScene3dPadFactory {
                 Number(pad?.y || 0),
                 mirrorY
             )
+            const zOffset = PcbScene3dPadSurfaceStack.resolveLift(
+                surfaceStack,
+                point,
+                pad,
+                spec,
+                mirrorY
+            )
             const root = new THREE.Group()
             const mesh = new THREE.Mesh(geometry, material)
             root.position.set(point.x, point.y, 0)
@@ -63,7 +78,7 @@ export class PcbScene3dPadFactory {
             mesh.position.set(
                 spec.offsetX,
                 mirrorY ? -spec.offsetY : spec.offsetY,
-                z
+                z + zOffset
             )
             if (geometry.type === 'CylinderGeometry') {
                 mesh.rotation.x = Math.PI / 2
@@ -424,8 +439,13 @@ export class PcbScene3dPadFactory {
                 28
             )
         } else {
-            const shape = PcbScene3dPadFactory.#buildOuterShape(THREE, spec)
-            for (const drillCutout of drillCutouts) {
+            const { shape, shapeHoleCutouts, clippingCutouts } =
+                PcbScene3dPadFactory.#buildShapeCutoutPlan(
+                    THREE,
+                    spec,
+                    drillCutouts
+                )
+            for (const drillCutout of shapeHoleCutouts) {
                 const drillHole = PcbScene3dDrillPathFactory.buildDrillPath(
                     THREE,
                     drillCutout
@@ -445,10 +465,147 @@ export class PcbScene3dPadFactory {
                 0,
                 -PcbScene3dPadFactory.#PAD_THICKNESS_MIL / 2
             )
+            geometry = PcbScene3dCutoutGeometryFilter.filter(
+                THREE,
+                geometry,
+                clippingCutouts,
+                {
+                    maxDepth: 10,
+                    maxEdgeLength: PcbScene3dPadFactory.#CUTOUT_MAX_EDGE_LENGTH,
+                    discardTerminalOverlaps: true
+                }
+            )
+            if (clippingCutouts.length) {
+                geometry = PcbScene3dGeometryFaceRefiner.refine(
+                    THREE,
+                    geometry,
+                    {
+                        maxDepth: 8,
+                        maxEdgeLength:
+                            PcbScene3dPadFactory.#CUTOUT_FACE_MAX_EDGE_LENGTH
+                    }
+                )
+            }
         }
 
         geometryCache.set(cacheKey, geometry)
         return geometry
+    }
+
+    /**
+     * Builds the outer pad shape and classifies drill cutouts.
+     * @param {any} THREE
+     * @param {{ width: number, height: number, kind: 'circle' | 'rect' | 'rounded-rect', radius: number, cornerRadius: number }} spec
+     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[]} drillCutouts
+     * @returns {{ shape: any, shapeHoleCutouts: { x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[], clippingCutouts: { x: number, y: number }[][] }}
+     */
+    static #buildShapeCutoutPlan(THREE, spec, drillCutouts) {
+        const baseShape = PcbScene3dPadFactory.#buildOuterShape(THREE, spec)
+        if (!drillCutouts.length) {
+            return {
+                shape: baseShape,
+                shapeHoleCutouts: [],
+                clippingCutouts: []
+            }
+        }
+
+        const contourPoints =
+            PcbScene3dBoardEdgeCutoutBuilder.resolveShapePoints(baseShape)
+        const shapeHoleCutouts = []
+        const clippingCutouts = []
+
+        for (const drillCutout of drillCutouts) {
+            const cutoutPoints = PcbScene3dPadFactory.#resolveDrillCutoutPoints(
+                THREE,
+                drillCutout
+            )
+            if (
+                PcbScene3dBoardEdgeCutoutBuilder.isHoleInsideContour(
+                    cutoutPoints,
+                    contourPoints
+                )
+            ) {
+                shapeHoleCutouts.push(drillCutout)
+                continue
+            }
+
+            clippingCutouts.push(cutoutPoints)
+        }
+
+        const finalShapeHoleCutouts = []
+        const finalClippingCutouts = [...clippingCutouts]
+
+        for (const drillCutout of shapeHoleCutouts) {
+            const cutoutPoints = PcbScene3dPadFactory.#resolveDrillCutoutPoints(
+                THREE,
+                drillCutout
+            )
+            if (
+                PcbScene3dBoardEdgeCutoutBuilder.isHoleInsideContour(
+                    cutoutPoints,
+                    contourPoints
+                )
+            ) {
+                finalShapeHoleCutouts.push(drillCutout)
+            } else {
+                finalClippingCutouts.push(cutoutPoints)
+            }
+        }
+
+        return {
+            shape: baseShape,
+            shapeHoleCutouts: finalShapeHoleCutouts,
+            clippingCutouts: finalClippingCutouts
+        }
+    }
+
+    /**
+     * Resolves polygon points for one local drill cutout.
+     * @param {any} THREE
+     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }} drillCutout
+     * @returns {{ x: number, y: number }[]}
+     */
+    static #resolveDrillCutoutPoints(THREE, drillCutout) {
+        const circularCutout =
+            PcbScene3dPadFactory.#resolveCircularDrillCutout(drillCutout)
+        if (circularCutout) {
+            return PcbScene3dBoardEdgeCutoutBuilder.buildCircularCutoutPoints(
+                circularCutout.centerX,
+                circularCutout.centerY,
+                circularCutout.radius
+            )
+        }
+
+        return (
+            PcbScene3dDrillPathFactory.buildDrillPath(
+                THREE,
+                drillCutout
+            )?.getPoints?.(PcbScene3dPadFactory.#DRILL_SAMPLE_POINTS) || []
+        ).map((point) => ({
+            x: Number(point.x || 0),
+            y: Number(point.y || 0)
+        }))
+    }
+
+    /**
+     * Resolves one local circular drill descriptor.
+     * @param {{ x?: number, y?: number, diameter?: number, slotLength?: number | null }} drillCutout
+     * @returns {{ centerX: number, centerY: number, radius: number } | null}
+     */
+    static #resolveCircularDrillCutout(drillCutout) {
+        const diameter = Number(drillCutout?.diameter || 0)
+        if (
+            diameter <= 0 ||
+            Number(drillCutout?.slotLength || 0) > diameter + 0.001
+        ) {
+            return null
+        }
+
+        return {
+            centerX: Number(drillCutout?.x || 0),
+            centerY: Number(drillCutout?.y || 0),
+            radius: Math.max(diameter / 2, 0.6)
+        }
     }
 
     /**

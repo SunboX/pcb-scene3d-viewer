@@ -17,7 +17,7 @@ export class PcbScene3dCopperTextFactory {
      * @param {any[]} texts
      * @param {number} z
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
-     * @param {{ side?: 'top' | 'bottom', mirrorY?: boolean, materialColor?: number, materialProperties?: { roughness?: number, metalness?: number }, filterSide?: boolean, glyphYUp?: boolean, drillCutouts?: { x: number, y: number }[][] }} [options]
+     * @param {{ side?: 'top' | 'bottom', mirrorY?: boolean, materialColor?: number, materialProperties?: { materialKind?: 'basic' | 'standard', roughness?: number, metalness?: number, transparent?: boolean, opacity?: number, toneMapped?: boolean, fog?: boolean }, filterSide?: boolean, glyphYUp?: boolean, drillCutouts?: { x: number, y: number }[][] }} [options]
      * @returns {any}
      */
     static buildGroup(THREE, texts, z, normalizeBoardPoint, options = {}) {
@@ -472,15 +472,32 @@ export class PcbScene3dCopperTextFactory {
      * Builds the shared copper text material.
      * @param {any} THREE
      * @param {number} color
-     * @param {{ roughness?: number, metalness?: number }} [materialProperties]
+     * @param {{ materialKind?: 'basic' | 'standard', roughness?: number, metalness?: number, transparent?: boolean, opacity?: number, toneMapped?: boolean, fog?: boolean }} [materialProperties]
      * @returns {any}
      */
     static #buildMaterial(THREE, color, materialProperties = {}) {
-        return new THREE.MeshStandardMaterial({
+        const materialKind = String(materialProperties?.materialKind || '')
+        const Material =
+            materialKind === 'basic' && THREE.MeshBasicMaterial
+                ? THREE.MeshBasicMaterial
+                : THREE.MeshStandardMaterial || THREE.MeshBasicMaterial
+        const options = { ...materialProperties }
+        delete options.materialKind
+
+        if (Material === THREE.MeshBasicMaterial) {
+            delete options.roughness
+            delete options.metalness
+        }
+
+        return new Material({
             color,
-            roughness: 0.38,
-            metalness: 0.55,
-            ...materialProperties,
+            ...(Material === THREE.MeshStandardMaterial
+                ? {
+                      roughness: 0.38,
+                      metalness: 0.55
+                  }
+                : {}),
+            ...options,
             side: THREE.DoubleSide
         })
     }

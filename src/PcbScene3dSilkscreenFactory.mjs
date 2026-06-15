@@ -1,8 +1,14 @@
+import { PcbScene3dBoardEdgeCutoutBuilder } from './PcbScene3dBoardEdgeCutoutBuilder.mjs'
 import { PcbScene3dCopperTextFactory } from './PcbScene3dCopperTextFactory.mjs'
+import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector.mjs'
 import { PcbScene3dCutoutGeometryFilter } from './PcbScene3dCutoutGeometryFilter.mjs'
 import { PcbScene3dDrillCutoutFilter } from './PcbScene3dDrillCutoutFilter.mjs'
 import { PcbScene3dMaterialFinish } from './PcbScene3dMaterialFinish.mjs'
+import { PcbScene3dPolygonOverlap } from './PcbScene3dPolygonOverlap.mjs'
+import { PcbScene3dShapeHoleMerger } from './PcbScene3dShapeHoleMerger.mjs'
 import { PcbScene3dShapePathFactory } from './PcbScene3dShapePathFactory.mjs'
+import { PcbScene3dShapeHoleGeometryCleaner } from './PcbScene3dShapeHoleGeometryCleaner.mjs'
+import { PcbScene3dSilkscreenFillSeamBuilder } from './PcbScene3dSilkscreenFillSeamBuilder.mjs'
 import { PcbScene3dSilkscreenStrokeWidthResolver } from './PcbScene3dSilkscreenStrokeWidthResolver.mjs'
 import { PcbScene3dStrokeGeometryBuilder } from './PcbScene3dStrokeGeometryBuilder.mjs'
 import { PcbScene3dTrueTypeTextFactory } from './PcbScene3dTrueTypeTextFactory.mjs'
@@ -18,6 +24,7 @@ export class PcbScene3dSilkscreenFactory {
     static #MIN_STROKE_WIDTH_MIL = 0.04
     static #STROKE_MESH_POSITION_CHUNK_SIZE = 24000
     static #STROKE_Z_OFFSET = 0.04
+    static #CUTOUT_MAX_EDGE_LENGTH = 1.5
 
     /**
      * Builds the combined top and bottom silkscreen group.
@@ -130,6 +137,15 @@ export class PcbScene3dSilkscreenFactory {
             fillMaterial,
             surfaceCutouts
         )
+        const fillSeamMeshes = PcbScene3dSilkscreenFillSeamBuilder.buildMeshes(
+            THREE,
+            silkscreen?.fills || [],
+            z,
+            normalizeBoardPoint,
+            mirrorY,
+            fillMaterial,
+            surfaceCutouts
+        )
         const texts = Array.isArray(silkscreen?.texts) ? silkscreen.texts : []
         const renderableTexts = texts.filter(
             (text) =>
@@ -149,8 +165,14 @@ export class PcbScene3dSilkscreenFactory {
                 drillCutouts: surfaceCutouts,
                 filterSide: false,
                 materialColor: strokeColor,
-                materialProperties:
-                    PcbScene3dMaterialFinish.glossySilkscreenProperties(),
+                materialProperties: {
+                    materialKind: 'basic',
+                    ...PcbScene3dMaterialFinish.glossySilkscreenProperties(),
+                    transparent: false,
+                    opacity: 1,
+                    toneMapped: false,
+                    fog: false
+                },
                 mirrorY,
                 side: mirrorY ? 'bottom' : 'top'
             }
@@ -175,6 +197,9 @@ export class PcbScene3dSilkscreenFactory {
         }
         if (fillMeshes.length) {
             group.add(...fillMeshes)
+        }
+        if (fillSeamMeshes.length) {
+            group.add(...fillSeamMeshes)
         }
         if (textGroup.children.length) {
             group.add(textGroup)
@@ -410,41 +435,155 @@ export class PcbScene3dSilkscreenFactory {
         z,
         material
     ) {
-        const shape = PcbScene3dShapePathFactory.buildShape(THREE, points)
         const { authoredHoles, drillHoles, uncoveredCutouts } =
             PcbScene3dDrillCutoutFilter.partitionFillHoles(
                 drillCutouts,
                 fillHoles
             )
+        const { points: contourPoints, appliedCutouts: edgeCutouts } =
+            PcbScene3dSilkscreenFactory.#applyCircularEdgeCutouts(
+                points,
+                drillHoles.concat(uncoveredCutouts)
+            )
+        const edgeCutoutSet = new Set(edgeCutouts)
+        const remainingDrillHoles = drillHoles.filter(
+            (cutout) => !edgeCutoutSet.has(cutout)
+        )
+        const remainingUncoveredCutouts = uncoveredCutouts.filter(
+            (cutout) => !edgeCutoutSet.has(cutout)
+        )
+        const shape = PcbScene3dShapePathFactory.buildShape(
+            THREE,
+            contourPoints
+        )
+        const {
+            shapeHoles: copiedShapeHoles,
+            clippingHoles: copiedClippingHoles
+        } = PcbScene3dSilkscreenFactory.#partitionDrillCutouts(
+            remainingDrillHoles,
+            contourPoints
+        )
         const { shapeHoles, clippingHoles } =
             PcbScene3dSilkscreenFactory.#partitionDrillCutouts(
-                uncoveredCutouts,
-                points
+                remainingUncoveredCutouts,
+                contourPoints
+            )
+        const physicalShapeCutoutHoles =
+            PcbScene3dShapeHoleMerger.mergeOverlapping(
+                PcbScene3dDrillCutoutFilter.removeNestedCutouts(
+                    copiedShapeHoles.concat(shapeHoles)
+                )
+            )
+        const shapeCutoutHoles = PcbScene3dShapeHoleMerger.mergeOverlapping(
+            PcbScene3dDrillCutoutFilter.removeNestedCutouts(
+                authoredHoles.concat(copiedShapeHoles, shapeHoles)
+            )
+        )
+        const fallbackClippingHoles =
+            PcbScene3dDrillCutoutFilter.removeNestedCutouts(
+                copiedClippingHoles.concat(clippingHoles)
             )
         PcbScene3dSilkscreenFactory.#appendShapeHoles(
             THREE,
             shape,
-            authoredHoles,
-            points
-        )
-        PcbScene3dSilkscreenFactory.#appendShapeHoles(
-            THREE,
-            shape,
-            shapeHoles,
-            points
+            shapeCutoutHoles,
+            contourPoints
         )
 
+        const shapeFilterHoles =
+            PcbScene3dPolygonOverlap.filterOverlapping(shapeCutoutHoles)
+        const shapeGeometry =
+            PcbScene3dShapeHoleGeometryCleaner.removeCoveredHoleCenters(
+                THREE,
+                new THREE.ShapeGeometry(shape),
+                physicalShapeCutoutHoles
+            )
         const geometry = PcbScene3dCutoutGeometryFilter.filter(
             THREE,
-            new THREE.ShapeGeometry(shape),
-            authoredHoles.concat(shapeHoles, drillHoles, clippingHoles),
-            { maxDepth: 12, maxEdgeLength: 2 }
+            shapeGeometry,
+            shapeFilterHoles.concat(fallbackClippingHoles),
+            {
+                maxDepth: 12,
+                maxEdgeLength:
+                    PcbScene3dSilkscreenFactory.#CUTOUT_MAX_EDGE_LENGTH
+            }
         )
         const mesh = new THREE.Mesh(geometry, material)
         mesh.position.set(0, 0, z)
         return mesh
     }
 
+    /**
+     * Converts circular edge cutouts into the fill contour before triangulation.
+     * @param {{ x: number, y: number }[]} contourPoints Fill contour points.
+     * @param {{ x: number, y: number }[][]} drillCutouts Candidate cutouts.
+     * @returns {{ points: { x: number, y: number }[], appliedCutouts: { x: number, y: number }[][] }}
+     */
+    static #applyCircularEdgeCutouts(contourPoints, drillCutouts) {
+        let points = contourPoints
+        const appliedCutouts = []
+        const candidates = PcbScene3dDrillCutoutFilter.removeNestedCutouts(
+            (Array.isArray(drillCutouts) ? drillCutouts : []).filter(
+                (cutout) =>
+                    PcbScene3dCutoutCircleDetector.resolve(cutout) &&
+                    !PcbScene3dSilkscreenFactory.#isHoleInsideContour(
+                        cutout,
+                        contourPoints
+                    )
+            )
+        )
+
+        for (const cutout of candidates) {
+            const circularCutout =
+                PcbScene3dCutoutCircleDetector.resolve(cutout)
+            if (
+                !circularCutout ||
+                PcbScene3dSilkscreenFactory.#isHoleInsideContour(cutout, points)
+            ) {
+                continue
+            }
+
+            const nextPoints =
+                PcbScene3dBoardEdgeCutoutBuilder.applyCircularEdgeCutouts(
+                    points,
+                    [circularCutout]
+                )
+            if (
+                PcbScene3dSilkscreenFactory.#samePointList(points, nextPoints)
+            ) {
+                continue
+            }
+
+            points = nextPoints
+            appliedCutouts.push(cutout)
+        }
+
+        return { points, appliedCutouts }
+    }
+
+    /**
+     * Returns true when two point lists share identical coordinates.
+     * @param {{ x: number, y: number }[]} first First point list.
+     * @param {{ x: number, y: number }[]} second Second point list.
+     * @returns {boolean}
+     */
+    static #samePointList(first, second) {
+        return (
+            Array.isArray(first) &&
+            Array.isArray(second) &&
+            first.length === second.length &&
+            first.every((point, index) => {
+                const otherPoint = second[index]
+
+                return (
+                    Math.abs(point.x - otherPoint.x) <=
+                        PcbScene3dSilkscreenFactory.#GEOMETRY_EPSILON &&
+                    Math.abs(point.y - otherPoint.y) <=
+                        PcbScene3dSilkscreenFactory.#GEOMETRY_EPSILON
+                )
+            })
+        )
+    }
     /**
      * Splits drill cutouts into safe shape holes and fallback clip polygons.
      * @param {{ x: number, y: number }[][]} drillCutouts
@@ -508,104 +647,9 @@ export class PcbScene3dSilkscreenFactory {
      * @returns {boolean}
      */
     static #isHoleInsideContour(hole, contour) {
-        return (
-            Array.isArray(hole) &&
-            Array.isArray(contour) &&
-            hole.length >= 3 &&
-            contour.length >= 3 &&
-            hole.every((point) =>
-                PcbScene3dSilkscreenFactory.#isPointStrictlyInsidePolygon(
-                    point,
-                    contour
-                )
-            )
-        )
-    }
-
-    /**
-     * Returns true when a point lies inside a polygon and away from its border.
-     * @param {{ x: number, y: number }} point
-     * @param {{ x: number, y: number }[]} polygon
-     * @returns {boolean}
-     */
-    static #isPointStrictlyInsidePolygon(point, polygon) {
-        if (
-            PcbScene3dSilkscreenFactory.#isPointOnPolygonBoundary(
-                point,
-                polygon
-            )
-        ) {
-            return false
-        }
-
-        let inside = false
-
-        for (
-            let index = 0, previousIndex = polygon.length - 1;
-            index < polygon.length;
-            previousIndex = index, index += 1
-        ) {
-            const current = polygon[index]
-            const previous = polygon[previousIndex]
-            const intersects =
-                current.y > point.y !== previous.y > point.y &&
-                point.x <
-                    ((previous.x - current.x) * (point.y - current.y)) /
-                        (previous.y - current.y) +
-                        current.x
-
-            if (intersects) {
-                inside = !inside
-            }
-        }
-
-        return inside
-    }
-
-    /**
-     * Returns true when a point lies on a polygon edge.
-     * @param {{ x: number, y: number }} point
-     * @param {{ x: number, y: number }[]} polygon
-     * @returns {boolean}
-     */
-    static #isPointOnPolygonBoundary(point, polygon) {
-        return polygon.some((start, index) =>
-            PcbScene3dSilkscreenFactory.#isPointOnSegment(
-                point,
-                start,
-                polygon[(index + 1) % polygon.length]
-            )
-        )
-    }
-
-    /**
-     * Returns true when a point lies on a segment within geometry tolerance.
-     * @param {{ x: number, y: number }} point
-     * @param {{ x: number, y: number }} start
-     * @param {{ x: number, y: number }} end
-     * @returns {boolean}
-     */
-    static #isPointOnSegment(point, start, end) {
-        const cross =
-            (point.y - start.y) * (end.x - start.x) -
-            (point.x - start.x) * (end.y - start.y)
-
-        if (Math.abs(cross) > PcbScene3dSilkscreenFactory.#GEOMETRY_EPSILON) {
-            return false
-        }
-
-        const dot =
-            (point.x - start.x) * (end.x - start.x) +
-            (point.y - start.y) * (end.y - start.y)
-
-        if (dot < -PcbScene3dSilkscreenFactory.#GEOMETRY_EPSILON) {
-            return false
-        }
-
-        const lengthSquared = (end.x - start.x) ** 2 + (end.y - start.y) ** 2
-
-        return (
-            dot <= lengthSquared + PcbScene3dSilkscreenFactory.#GEOMETRY_EPSILON
+        return PcbScene3dBoardEdgeCutoutBuilder.isHoleInsideContour(
+            hole,
+            contour
         )
     }
 
@@ -825,7 +869,11 @@ export class PcbScene3dSilkscreenFactory {
                 THREE,
                 geometry,
                 drillCutouts,
-                { maxDepth: 12, maxEdgeLength: 2 }
+                {
+                    maxDepth: 12,
+                    maxEdgeLength:
+                        PcbScene3dSilkscreenFactory.#CUTOUT_MAX_EDGE_LENGTH
+                }
             ),
             material
         )
@@ -863,11 +911,9 @@ export class PcbScene3dSilkscreenFactory {
         THREE,
         color = PcbScene3dSilkscreenFactory.#DEFAULT_SILKSCREEN_COLOR
     ) {
-        const Material = THREE.MeshStandardMaterial || THREE.MeshBasicMaterial
-
-        return new Material({
+        const Material = THREE.MeshBasicMaterial || THREE.MeshStandardMaterial
+        const materialOptions = {
             color,
-            ...PcbScene3dMaterialFinish.glossySilkscreenProperties(),
             transparent: false,
             opacity: 1,
             toneMapped: false,
@@ -876,7 +922,16 @@ export class PcbScene3dSilkscreenFactory {
             polygonOffset: true,
             polygonOffsetFactor: -3,
             polygonOffsetUnits: -3
-        })
+        }
+
+        if (Material === THREE.MeshStandardMaterial) {
+            Object.assign(
+                materialOptions,
+                PcbScene3dMaterialFinish.glossySilkscreenProperties()
+            )
+        }
+
+        return new Material(materialOptions)
     }
 
     /**

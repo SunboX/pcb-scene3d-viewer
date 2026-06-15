@@ -144,6 +144,26 @@ function countMeshes(group) {
 }
 
 /**
+ * Counts generated seam-cover meshes in a rendered group tree.
+ * @param {any} group
+ * @returns {number}
+ */
+function countSeamMeshes(group) {
+    let count = 0
+    const visit = (node) => {
+        if (node?.userData?.scene3dSilkscreenFillSeam === true) {
+            count += 1
+        }
+        for (const child of node?.children || []) {
+            visit(child)
+        }
+    }
+
+    visit(group)
+    return count
+}
+
+/**
  * Collects position arrays from a rendered group tree.
  * @param {any} group
  * @returns {number[][]}
@@ -237,5 +257,6 @@ test('PcbScene3dSilkscreenChunkedFactory yields between large fill batches', asy
 
     assert.equal(yieldCount >= 40, true)
     assert.equal(group.children.length >= 40, true)
-    assert.equal(countMeshes(group), 360)
+    assert.equal(countMeshes(group), 405)
+    assert.equal(countSeamMeshes(group), 45)
 })

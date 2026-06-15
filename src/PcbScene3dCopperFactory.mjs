@@ -3,14 +3,14 @@ import { PcbScene3dPadFactory } from './PcbScene3dPadFactory.mjs'
 import { PcbScene3dCopperTextFactory } from './PcbScene3dCopperTextFactory.mjs'
 import { PcbScene3dMaskCoveredCopperMaterial } from './PcbScene3dMaskCoveredCopperMaterial.mjs'
 import { PcbScene3dGeometryZCompressor } from './PcbScene3dGeometryZCompressor.mjs'
+import { PcbScene3dCopperOcclusionClipper } from './PcbScene3dCopperOcclusionClipper.mjs'
+import { PcbScene3dCopperLayerFilter } from './PcbScene3dCopperLayerFilter.mjs'
 
 /**
  * Builds copper-detail meshes for the interactive 3D PCB scene.
  */
 export class PcbScene3dCopperFactory {
     static #ARC_SEGMENT_DEGREES = 3
-    static #TOP_COPPER_LAYER_ID = 1
-    static #BOTTOM_COPPER_LAYER_ID = 32
     static #FULL_CIRCLE_EPSILON = 0.001
     static #ROUND_CAP_SEGMENTS = 16
     static #COPPER_THICKNESS_MIL = 2.2
@@ -46,11 +46,11 @@ export class PcbScene3dCopperFactory {
         const topGroup = PcbScene3dCopperFactory.#buildSideGroup(
             THREE,
             {
-                tracks: PcbScene3dCopperFactory.#filterTracks(
+                tracks: PcbScene3dCopperLayerFilter.tracks(
                     detail?.tracks,
                     'top'
                 ),
-                arcs: PcbScene3dCopperFactory.#filterArcs(detail?.arcs, 'top'),
+                arcs: PcbScene3dCopperLayerFilter.arcs(detail?.arcs, 'top'),
                 pads: detail?.pads || [],
                 vias: detail?.vias || [],
                 copperTexts: detail?.copperTexts || []
@@ -63,14 +63,11 @@ export class PcbScene3dCopperFactory {
         const bottomGroup = PcbScene3dCopperFactory.#buildSideGroup(
             THREE,
             {
-                tracks: PcbScene3dCopperFactory.#filterTracks(
+                tracks: PcbScene3dCopperLayerFilter.tracks(
                     detail?.tracks,
                     'bottom'
                 ),
-                arcs: PcbScene3dCopperFactory.#filterArcs(
-                    detail?.arcs,
-                    'bottom'
-                ),
+                arcs: PcbScene3dCopperLayerFilter.arcs(detail?.arcs, 'bottom'),
                 pads: detail?.pads || [],
                 vias: detail?.vias || [],
                 copperTexts: detail?.copperTexts || []
@@ -98,7 +95,7 @@ export class PcbScene3dCopperFactory {
      * @param {number} topZ
      * @param {number} bottomZ
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
-     * @param {{ solderMaskColor?: number }} [options]
+     * @param {{ solderMaskColor?: number, occlusionCutouts?: { top?: { x: number, y: number }[][], bottom?: { x: number, y: number }[][] } }} [options]
      * @returns {any}
      */
     static buildMaskCoveredGroup(
@@ -117,33 +114,40 @@ export class PcbScene3dCopperFactory {
         const topGroup = PcbScene3dCopperFactory.#buildMaskCoveredSideGroup(
             THREE,
             {
-                tracks: PcbScene3dCopperFactory.#filterTracks(
+                tracks: PcbScene3dCopperLayerFilter.tracks(
                     detail?.tracks,
                     'top'
                 ),
-                arcs: PcbScene3dCopperFactory.#filterArcs(detail?.arcs, 'top')
+                arcs: PcbScene3dCopperLayerFilter.arcs(detail?.arcs, 'top')
             },
             Math.abs(Number(topZ || 0)),
             normalizeBoardPoint,
             false,
-            material
+            material,
+            PcbScene3dCopperOcclusionClipper.normalizeCutouts(
+                options?.occlusionCutouts?.top,
+                normalizeBoardPoint,
+                false
+            )
         )
         const bottomGroup = PcbScene3dCopperFactory.#buildMaskCoveredSideGroup(
             THREE,
             {
-                tracks: PcbScene3dCopperFactory.#filterTracks(
+                tracks: PcbScene3dCopperLayerFilter.tracks(
                     detail?.tracks,
                     'bottom'
                 ),
-                arcs: PcbScene3dCopperFactory.#filterArcs(
-                    detail?.arcs,
-                    'bottom'
-                )
+                arcs: PcbScene3dCopperLayerFilter.arcs(detail?.arcs, 'bottom')
             },
             Math.abs(Number(bottomZ || 0)),
             normalizeBoardPoint,
             true,
-            material
+            material,
+            PcbScene3dCopperOcclusionClipper.normalizeCutouts(
+                options?.occlusionCutouts?.bottom,
+                normalizeBoardPoint,
+                true
+            )
         )
 
         if (topGroup.children.length) {
@@ -238,6 +242,7 @@ export class PcbScene3dCopperFactory {
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {boolean} mirrorY
      * @param {any} material Shared covered-trace material.
+     * @param {{ x: number, y: number }[][]} occlusionCutouts Silkscreen ink polygons covering this copper.
      * @returns {any}
      */
     static #buildMaskCoveredSideGroup(
@@ -246,7 +251,8 @@ export class PcbScene3dCopperFactory {
         z,
         normalizeBoardPoint,
         mirrorY,
-        material
+        material,
+        occlusionCutouts
     ) {
         const group = new THREE.Group()
         const trackMesh = PcbScene3dCopperFactory.#buildTrackMesh(
@@ -255,7 +261,8 @@ export class PcbScene3dCopperFactory {
             z,
             normalizeBoardPoint,
             mirrorY,
-            material
+            material,
+            occlusionCutouts
         )
         const arcMesh = PcbScene3dCopperFactory.#buildArcMesh(
             THREE,
@@ -263,7 +270,8 @@ export class PcbScene3dCopperFactory {
             z,
             normalizeBoardPoint,
             mirrorY,
-            material
+            material,
+            occlusionCutouts
         )
 
         if (trackMesh) {
@@ -306,6 +314,7 @@ export class PcbScene3dCopperFactory {
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {boolean} mirrorY
      * @param {any | null} [material] Optional material override.
+     * @param {{ x: number, y: number }[][]} [cutouts] Optional geometry cutouts.
      * @returns {any | null}
      */
     static #buildTrackMesh(
@@ -314,7 +323,8 @@ export class PcbScene3dCopperFactory {
         z,
         normalizeBoardPoint,
         mirrorY,
-        material = null
+        material = null,
+        cutouts = []
     ) {
         const positions = []
 
@@ -344,7 +354,8 @@ export class PcbScene3dCopperFactory {
         return PcbScene3dCopperFactory.#buildStrokeMesh(
             THREE,
             positions,
-            material
+            material,
+            cutouts
         )
     }
 
@@ -356,6 +367,7 @@ export class PcbScene3dCopperFactory {
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {boolean} mirrorY
      * @param {any | null} [material] Optional material override.
+     * @param {{ x: number, y: number }[][]} [cutouts] Optional geometry cutouts.
      * @returns {any | null}
      */
     static #buildArcMesh(
@@ -364,7 +376,8 @@ export class PcbScene3dCopperFactory {
         z,
         normalizeBoardPoint,
         mirrorY,
-        material = null
+        material = null,
+        cutouts = []
     ) {
         const positions = []
 
@@ -387,7 +400,8 @@ export class PcbScene3dCopperFactory {
         return PcbScene3dCopperFactory.#buildStrokeMesh(
             THREE,
             positions,
-            material
+            material,
+            cutouts
         )
     }
 
@@ -396,9 +410,10 @@ export class PcbScene3dCopperFactory {
      * @param {any} THREE
      * @param {number[]} positions
      * @param {any | null} [material] Optional material override.
+     * @param {{ x: number, y: number }[][]} [cutouts] Optional geometry cutouts.
      * @returns {any | null}
      */
-    static #buildStrokeMesh(THREE, positions, material = null) {
+    static #buildStrokeMesh(THREE, positions, material = null, cutouts = []) {
         if (!positions.length) {
             return null
         }
@@ -408,10 +423,18 @@ export class PcbScene3dCopperFactory {
             'position',
             new THREE.Float32BufferAttribute(positions, 3)
         )
-        geometry.computeVertexNormals?.()
+        const clippedGeometry = PcbScene3dCopperOcclusionClipper.filter(
+            THREE,
+            geometry,
+            cutouts
+        )
+
+        if (!clippedGeometry) {
+            return null
+        }
 
         return new THREE.Mesh(
-            geometry,
+            clippedGeometry,
             material || PcbScene3dCopperFactory.#buildMaterial(THREE)
         )
     }
@@ -431,47 +454,6 @@ export class PcbScene3dCopperFactory {
             polygonOffsetFactor: -2,
             polygonOffsetUnits: -2
         })
-    }
-
-    /**
-     * Filters one track list to one outer copper face.
-     * @param {any[] | undefined} tracks
-     * @param {'top' | 'bottom'} side
-     * @returns {any[]}
-     */
-    static #filterTracks(tracks, side) {
-        return (tracks || []).filter((track) =>
-            PcbScene3dCopperFactory.#matchesCopperLayer(track, side)
-        )
-    }
-
-    /**
-     * Filters one arc list to one outer copper face.
-     * @param {any[] | undefined} arcs
-     * @param {'top' | 'bottom'} side
-     * @returns {any[]}
-     */
-    static #filterArcs(arcs, side) {
-        return (arcs || []).filter((arc) =>
-            PcbScene3dCopperFactory.#matchesCopperLayer(arc, side)
-        )
-    }
-
-    /**
-     * Returns true when one primitive belongs to the requested outer copper
-     * face.
-     * @param {{ layerId?: number, layerCode?: number }} primitive
-     * @param {'top' | 'bottom'} side
-     * @returns {boolean}
-     */
-    static #matchesCopperLayer(primitive, side) {
-        const layerId = Number(
-            primitive?.layerId ?? primitive?.layerCode ?? NaN
-        )
-
-        return side === 'bottom'
-            ? layerId === PcbScene3dCopperFactory.#BOTTOM_COPPER_LAYER_ID
-            : layerId === PcbScene3dCopperFactory.#TOP_COPPER_LAYER_ID
     }
 
     /**

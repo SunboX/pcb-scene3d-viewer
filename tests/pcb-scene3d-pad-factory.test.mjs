@@ -438,6 +438,89 @@ test('buildGroup cuts neighboring slotted drills out of overlapping pads', () =>
     )
 })
 
+test('buildGroup clips partial neighboring drills without deforming pads', () => {
+    const drilledPad = {
+        x: 0,
+        y: -39.37,
+        sizeTopX: 86,
+        sizeTopY: 86,
+        shapeTop: 1,
+        holeDiameter: 59.055
+    }
+    const overlappingPad = {
+        x: 0,
+        y: 0,
+        sizeTopX: 86,
+        sizeTopY: 118.11,
+        shapeTop: 2
+    }
+    const group = PcbScene3dPadFactory.buildGroup(
+        THREE,
+        [drilledPad, overlappingPad],
+        0,
+        (x, y) => ({ x, y }),
+        { side: 'top' }
+    )
+    const overlappingMesh = group.children[1].children[0]
+    const bounds = resolveGeometryBounds(overlappingMesh.geometry)
+
+    assert.ok(bounds.minY >= -59.06)
+    assert.equal(
+        countCircularDrillFaceCapTriangles(overlappingMesh.geometry, 29.527, {
+            centerX: 0,
+            centerY: -39.37,
+            inset: 1
+        }),
+        0,
+        'Expected partial neighboring drill to stay open inside the overlapping pad'
+    )
+    assert.equal(
+        countCircularDrillOverlappingTriangles(overlappingMesh.geometry, {
+            centerX: 0,
+            centerY: -39.37,
+            radius: 29.527
+        }),
+        0,
+        'Expected partial neighboring drill to leave no boundary-crossing pad slivers'
+    )
+    assert.ok(
+        maxProjectedTriangleArea(overlappingMesh.geometry) < 80,
+        'Expected the partial drill cutout to avoid visible wedge faces across the pad'
+    )
+})
+
+test('buildGroup separates overlapping pad surfaces from shared depth planes', () => {
+    const drilledPad = {
+        x: 0,
+        y: -39.37,
+        sizeTopX: 86,
+        sizeTopY: 86,
+        shapeTop: 1,
+        holeDiameter: 59.055
+    }
+    const overlappingPad = {
+        x: 0,
+        y: 0,
+        sizeTopX: 86,
+        sizeTopY: 118.11,
+        shapeTop: 2
+    }
+    const group = PcbScene3dPadFactory.buildGroup(
+        THREE,
+        [drilledPad, overlappingPad],
+        14.2,
+        (x, y) => ({ x, y }),
+        { side: 'top' }
+    )
+    const annularMesh = group.children[0].children[0]
+    const overlappingMesh = group.children[1].children[0]
+
+    assert.ok(
+        overlappingMesh.position.z > annularMesh.position.z,
+        'Expected overlapping exposed pad faces to avoid coplanar rendering artifacts'
+    )
+})
+
 /**
  * Counts side-wall triangles that lie on a circular drill contour.
  * @param {any} geometry
@@ -468,26 +551,210 @@ function countCircularDrillWallTriangles(geometry, radius) {
  * Counts face triangles whose centroid sits inside a circular drill.
  * @param {any} geometry
  * @param {number} radius
+ * @param {{ centerX?: number, centerY?: number, inset?: number }} [options]
  * @returns {number}
  */
-function countCircularDrillFaceCapTriangles(geometry, radius) {
+function countCircularDrillFaceCapTriangles(geometry, radius, options = {}) {
     const position = geometry.getAttribute('position')
     let count = 0
+    const centerX = Number(options?.centerX || 0)
+    const centerY = Number(options?.centerY || 0)
+    const inset = Number(options?.inset || 0)
+    const groups = geometry.groups.length
+        ? geometry.groups
+        : [{ start: 0, count: position.count, materialIndex: 0 }]
 
-    for (const group of geometry.groups) {
+    for (const group of groups) {
         if (Number(group.materialIndex) !== 0) {
             continue
         }
 
         const end = Number(group.start || 0) + Number(group.count || 0)
         for (let index = Number(group.start || 0); index < end; index += 3) {
-            if (triangleCentroidRadius(position, index) < radius - 0.01) {
+            const point = triangleCentroidPoint(position, index)
+            if (
+                Math.hypot(point.x - centerX, point.y - centerY) <
+                radius - Math.max(inset, 0.01)
+            ) {
                 count += 1
             }
         }
     }
 
     return count
+}
+
+/**
+ * Counts triangles that intersect or cover a circular drill opening.
+ * @param {any} geometry Geometry to inspect.
+ * @param {{ centerX: number, centerY: number, radius: number }} circle Circle bounds.
+ * @returns {number}
+ */
+function countCircularDrillOverlappingTriangles(geometry, circle) {
+    const position = geometry.getAttribute('position')
+    let count = 0
+
+    for (let index = 0; index + 2 < position.count; index += 3) {
+        if (triangleOverlapsCircle(position, index, circle)) {
+            count += 1
+        }
+    }
+
+    return count
+}
+
+/**
+ * Returns true when one triangle intersects or covers a circle.
+ * @param {any} position Position buffer.
+ * @param {number} vertexIndex First triangle vertex index.
+ * @param {{ centerX: number, centerY: number, radius: number }} circle Circle bounds.
+ * @returns {boolean}
+ */
+function triangleOverlapsCircle(position, vertexIndex, circle) {
+    const triangle = [0, 1, 2].map((offset) => ({
+        x: position.getX(vertexIndex + offset),
+        y: position.getY(vertexIndex + offset)
+    }))
+    const center = { x: circle.centerX, y: circle.centerY }
+    const radiusSquared = (circle.radius - 0.001) ** 2
+
+    return (
+        triangle.some(
+            (point) =>
+                (point.x - center.x) ** 2 + (point.y - center.y) ** 2 <=
+                radiusSquared
+        ) ||
+        isPointInsideTriangle(center, triangle) ||
+        triangle.some(
+            (point, index) =>
+                squaredDistanceToSegment(
+                    center,
+                    point,
+                    triangle[(index + 1) % triangle.length]
+                ) <= radiusSquared
+        )
+    )
+}
+
+/**
+ * Returns true when a point lies inside one triangle.
+ * @param {{ x: number, y: number }} point Point to inspect.
+ * @param {{ x: number, y: number }[]} triangle Triangle points.
+ * @returns {boolean}
+ */
+function isPointInsideTriangle(point, triangle) {
+    let hasNegative = false
+    let hasPositive = false
+
+    for (let index = 0; index < triangle.length; index += 1) {
+        const current = triangle[index]
+        const next = triangle[(index + 1) % triangle.length]
+        const sign =
+            (next.x - current.x) * (point.y - current.y) -
+            (next.y - current.y) * (point.x - current.x)
+
+        hasNegative ||= sign < -0.001
+        hasPositive ||= sign > 0.001
+    }
+
+    return !(hasNegative && hasPositive)
+}
+
+/**
+ * Resolves squared distance from a point to a finite segment.
+ * @param {{ x: number, y: number }} point Point to inspect.
+ * @param {{ x: number, y: number }} start Segment start.
+ * @param {{ x: number, y: number }} end Segment end.
+ * @returns {number}
+ */
+function squaredDistanceToSegment(point, start, end) {
+    const dx = end.x - start.x
+    const dy = end.y - start.y
+    const lengthSquared = dx * dx + dy * dy
+    const ratio = lengthSquared
+        ? Math.max(
+              0,
+              Math.min(
+                  1,
+                  ((point.x - start.x) * dx + (point.y - start.y) * dy) /
+                      lengthSquared
+              )
+          )
+        : 0
+    const projected = {
+        x: start.x + dx * ratio,
+        y: start.y + dy * ratio
+    }
+
+    return (point.x - projected.x) ** 2 + (point.y - projected.y) ** 2
+}
+
+/**
+ * Resolves axis-aligned bounds for one geometry position buffer.
+ * @param {any} geometry Geometry to inspect.
+ * @returns {{ minX: number, maxX: number, minY: number, maxY: number }}
+ */
+function resolveGeometryBounds(geometry) {
+    const position = geometry.getAttribute('position')
+    const bounds = {
+        minX: Infinity,
+        maxX: -Infinity,
+        minY: Infinity,
+        maxY: -Infinity
+    }
+
+    for (let index = 0; index < position.count; index += 1) {
+        bounds.minX = Math.min(bounds.minX, position.getX(index))
+        bounds.maxX = Math.max(bounds.maxX, position.getX(index))
+        bounds.minY = Math.min(bounds.minY, position.getY(index))
+        bounds.maxY = Math.max(bounds.maxY, position.getY(index))
+    }
+
+    return bounds
+}
+
+/**
+ * Resolves the largest projected XY triangle area in one geometry.
+ * @param {any} geometry Geometry to inspect.
+ * @returns {number}
+ */
+function maxProjectedTriangleArea(geometry) {
+    const position = geometry.getAttribute('position')
+    let maxArea = 0
+
+    for (let index = 0; index + 2 < position.count; index += 3) {
+        maxArea = Math.max(maxArea, projectedTriangleArea(position, index))
+    }
+
+    return maxArea
+}
+
+/**
+ * Resolves one triangle's projected XY area.
+ * @param {any} position Position buffer.
+ * @param {number} vertexIndex First triangle vertex index.
+ * @returns {number}
+ */
+function projectedTriangleArea(position, vertexIndex) {
+    const first = {
+        x: position.getX(vertexIndex),
+        y: position.getY(vertexIndex)
+    }
+    const second = {
+        x: position.getX(vertexIndex + 1),
+        y: position.getY(vertexIndex + 1)
+    }
+    const third = {
+        x: position.getX(vertexIndex + 2),
+        y: position.getY(vertexIndex + 2)
+    }
+
+    return (
+        Math.abs(
+            (second.x - first.x) * (third.y - first.y) -
+                (second.y - first.y) * (third.x - first.x)
+        ) / 2
+    )
 }
 
 /**

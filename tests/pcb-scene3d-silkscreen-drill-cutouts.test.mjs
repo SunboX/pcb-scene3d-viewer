@@ -361,6 +361,47 @@ test('PcbScene3dSilkscreenFactory cuts bottom drill cutouts from mirrored polygo
     ])
 })
 
+test('PcbScene3dSilkscreenFactory collapses nested drill and copper fill cutouts', () => {
+    const THREE = createFakeThree()
+    const group = PcbScene3dSilkscreenFactory.buildGroup(
+        THREE,
+        {
+            top: {
+                fills: [
+                    {
+                        points: [
+                            { x: 0, y: 0 },
+                            { x: 100, y: 0 },
+                            { x: 100, y: 100 },
+                            { x: 0, y: 100 }
+                        ]
+                    }
+                ],
+                tracks: [],
+                arcs: [],
+                drillCutouts: [squareCutout(50, 50, 4)],
+                copperCutouts: [squareCutout(50, 50, 8)]
+            },
+            bottom: { fills: [], tracks: [], arcs: [], drillCutouts: [] }
+        },
+        18,
+        -18,
+        (x, y) => ({ x, y })
+    )
+
+    const fillMesh = group.children[0].children[0]
+
+    assert.equal(fillMesh.geometry.type, 'ShapeGeometry')
+    assert.equal(fillMesh.geometry.shape.holes.length, 1)
+    assert.deepEqual(fillMesh.geometry.shape.holes[0].commands, [
+        { type: 'moveTo', x: 42, y: 42 },
+        { type: 'lineTo', x: 58, y: 42 },
+        { type: 'lineTo', x: 58, y: 58 },
+        { type: 'lineTo', x: 42, y: 58 },
+        { type: 'closePath' }
+    ])
+})
+
 test('PcbScene3dSilkscreenFactory clips stroke geometry away from drill cutouts', () => {
     const THREE = createFakeThree()
     const group = PcbScene3dSilkscreenFactory.buildGroup(

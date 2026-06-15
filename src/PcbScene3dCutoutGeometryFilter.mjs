@@ -1,23 +1,21 @@
 import { PcbScene3dCircularCutoutOverlap } from './PcbScene3dCircularCutoutOverlap.mjs'
 import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector.mjs'
 import { PcbScene3dGeometryBoundsResolver } from './PcbScene3dGeometryBoundsResolver.mjs'
+import { PcbScene3dTerminalCutoutClassifier } from './PcbScene3dTerminalCutoutClassifier.mjs'
 
-/**
- * Clips filled 2D geometry against drill-cutout polygons.
- */
+/** Clips filled 2D geometry against drill-cutout polygons. */
 export class PcbScene3dCutoutGeometryFilter {
     static #GEOMETRY_EPSILON = 0.001
     static #DEFAULT_MAX_DEPTH = 9
     static #DEFAULT_MAX_EDGE_LENGTH = 4
     static #SPATIAL_INDEX_MIN_CELL_SIZE = 8
     static #SPATIAL_INDEX_MAX_CELLS_PER_CUTOUT = 128
-
     /**
      * Removes triangles that still overlap cutouts after triangulation.
      * @param {any} THREE
      * @param {any} geometry
      * @param {{ x: number, y: number }[][]} cutouts
-     * @param {{ maxDepth?: number, maxEdgeLength?: number }} [options]
+     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean }} [options]
      * @returns {any}
      */
     static filter(THREE, geometry, cutouts, options = {}) {
@@ -30,10 +28,9 @@ export class PcbScene3dCutoutGeometryFilter {
         ) {
             return geometry
         }
-        const sourceGeometry =
-            geometry.index && geometry.toNonIndexed
-                ? geometry.toNonIndexed()
-                : geometry
+        const sourceGeometry = geometry.index
+            ? geometry.toNonIndexed?.() || geometry
+            : geometry
         const position = sourceGeometry.getAttribute('position')
         if (!position?.count) {
             return geometry
@@ -72,7 +69,6 @@ export class PcbScene3dCutoutGeometryFilter {
                 cutoutIndex
             )
         }
-
         if (!state.changed) {
             return geometry
         }
@@ -84,30 +80,31 @@ export class PcbScene3dCutoutGeometryFilter {
         filteredGeometry.computeVertexNormals?.()
         return filteredGeometry
     }
-
     /**
      * Resolves clipping settings.
-     * @param {{ maxDepth?: number, maxEdgeLength?: number }} options
-     * @returns {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number }}
+     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean }} options
+     * @returns {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number, discardTerminalOverlaps: boolean }}
      */
     static #resolveSettings(options) {
         const maxEdgeLength = Math.max(
-            Number(options?.maxEdgeLength) ||
-                PcbScene3dCutoutGeometryFilter.#DEFAULT_MAX_EDGE_LENGTH,
+            Number.isFinite(Number(options?.maxEdgeLength))
+                ? Number(options.maxEdgeLength)
+                : PcbScene3dCutoutGeometryFilter.#DEFAULT_MAX_EDGE_LENGTH,
             PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
         )
 
         return {
             maxDepth: Math.max(
-                Number(options?.maxDepth) ||
-                    PcbScene3dCutoutGeometryFilter.#DEFAULT_MAX_DEPTH,
+                Number.isFinite(Number(options?.maxDepth))
+                    ? Number(options.maxDepth)
+                    : PcbScene3dCutoutGeometryFilter.#DEFAULT_MAX_DEPTH,
                 0
             ),
             maxEdgeLength,
-            maxEdgeLengthSquared: maxEdgeLength * maxEdgeLength
+            maxEdgeLengthSquared: maxEdgeLength * maxEdgeLength,
+            discardTerminalOverlaps: options?.discardTerminalOverlaps === true
         }
     }
-
     /**
      * Prepares cutout polygons with bounds for fast overlap checks.
      * @param {{ x: number, y: number }[][]} cutouts
@@ -133,7 +130,6 @@ export class PcbScene3dCutoutGeometryFilter {
                 }
             })
     }
-
     /**
      * Builds reusable segment metadata for one cutout polygon.
      * @param {{ x: number, y: number }[]} points
@@ -165,13 +161,12 @@ export class PcbScene3dCutoutGeometryFilter {
 
         return segments
     }
-
     /**
      * Appends a triangle, subdividing near cutouts before removal.
      * @param {number[]} positions
      * @param {{ x: number, y: number, z: number }[]} triangle
      * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }[]} cutouts
-     * @param {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number }} settings
+     * @param {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number, discardTerminalOverlaps: boolean }} settings
      * @param {number} depth
      * @param {{ changed: boolean }} state
      * @param {object | null} [cutoutIndex]
@@ -214,17 +209,22 @@ export class PcbScene3dCutoutGeometryFilter {
             PcbScene3dCutoutGeometryFilter.#appendTriangle(positions, triangle)
             return
         }
-
         state.changed = true
-
         if (
             depth >= settings.maxDepth ||
             PcbScene3dCutoutGeometryFilter.#maxEdgeLengthSquared(triangle) <=
                 settings.maxEdgeLengthSquared
         ) {
+            if (!settings.discardTerminalOverlaps) {
+                PcbScene3dTerminalCutoutClassifier.appendTriangleIfKept(
+                    positions,
+                    triangle,
+                    overlappingCutouts,
+                    PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
+                )
+            }
             return
         }
-
         PcbScene3dCutoutGeometryFilter.#subdivideTriangle(triangle).forEach(
             (childTriangle) => {
                 PcbScene3dCutoutGeometryFilter.#appendFilteredTriangle(
@@ -959,7 +959,6 @@ export class PcbScene3dCutoutGeometryFilter {
         const cross =
             (point.y - start.y) * (end.x - start.x) -
             (point.x - start.x) * (end.y - start.y)
-
         if (
             Math.abs(cross) > PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
         ) {
@@ -969,13 +968,11 @@ export class PcbScene3dCutoutGeometryFilter {
         const dot =
             (point.x - start.x) * (end.x - start.x) +
             (point.y - start.y) * (end.y - start.y)
-
         if (dot < -PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON) {
             return false
         }
 
         const lengthSquared = (end.x - start.x) ** 2 + (end.y - start.y) ** 2
-
         return (
             dot <=
             lengthSquared + PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON

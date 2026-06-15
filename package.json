@@ -1,6 +1,6 @@
 {
     "name": "pcb-scene3d-viewer",
-    "version": "1.1.10",
+    "version": "1.1.11",
     "description": "Reusable Three.js PCB 3D scene viewer for normalized ECAD and CircuitJSON scene descriptions",
     "keywords": [
         "pcb",

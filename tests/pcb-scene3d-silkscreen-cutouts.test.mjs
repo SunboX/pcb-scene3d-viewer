@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as RealThree from 'three'
 import { PcbScene3dSilkscreenFactory } from '../src/PcbScene3dSilkscreenFactory.mjs'
 
 /**
@@ -169,6 +170,40 @@ function hasTriangleCentroidInsideBounds(positions, bounds) {
     return false
 }
 
+/**
+ * Builds a smooth horizontal obround cutout polygon.
+ * @param {number} centerX
+ * @param {number} centerY
+ * @param {number} width
+ * @param {number} height
+ * @param {number} [segments]
+ * @returns {{ x: number, y: number }[]}
+ */
+function createObroundCutout(centerX, centerY, width, height, segments = 68) {
+    const radius = height / 2
+    const straightHalf = Math.max(0, (width - height) / 2)
+    const arcSegments = Math.max(4, Math.floor(segments / 2))
+    const points = []
+
+    for (let index = 0; index < arcSegments; index += 1) {
+        const angle = -Math.PI / 2 + (Math.PI * index) / (arcSegments - 1)
+        points.push({
+            x: centerX + straightHalf + Math.cos(angle) * radius,
+            y: centerY + Math.sin(angle) * radius
+        })
+    }
+
+    for (let index = 0; index < arcSegments; index += 1) {
+        const angle = Math.PI / 2 + (Math.PI * index) / (arcSegments - 1)
+        points.push({
+            x: centerX - straightHalf + Math.cos(angle) * radius,
+            y: centerY + Math.sin(angle) * radius
+        })
+    }
+
+    return points
+}
+
 test('PcbScene3dSilkscreenFactory cuts stroke geometry around copper keepouts', () => {
     const THREE = createFakeThree()
     const group = PcbScene3dSilkscreenFactory.buildGroup(
@@ -206,4 +241,43 @@ test('PcbScene3dSilkscreenFactory cuts stroke geometry around copper keepouts', 
         }),
         false
     )
+})
+
+test('PcbScene3dSilkscreenFactory keeps contained fill cutouts as shape holes', () => {
+    const group = PcbScene3dSilkscreenFactory.buildGroup(
+        RealThree,
+        {
+            top: {
+                fills: [
+                    {
+                        points: [
+                            { x: 0, y: 0 },
+                            { x: 100, y: 0 },
+                            { x: 100, y: 100 },
+                            { x: 0, y: 100 }
+                        ]
+                    }
+                ],
+                tracks: [],
+                arcs: [],
+                copperCutouts: [
+                    [
+                        { x: 35, y: 45 },
+                        { x: 65, y: 45 },
+                        { x: 65, y: 55 },
+                        { x: 35, y: 55 }
+                    ],
+                    createObroundCutout(50, 24, 54, 18)
+                ]
+            },
+            bottom: { fills: [], tracks: [], arcs: [] }
+        },
+        12,
+        -12,
+        (x, y) => ({ x, y })
+    )
+
+    const fillMesh = group.children[0].children[0]
+
+    assert.equal(fillMesh.geometry.type, 'ShapeGeometry')
 })

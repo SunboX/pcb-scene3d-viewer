@@ -20,10 +20,7 @@ export class PcbScene3dMaskCoveredCopperMaterial {
                 options.solderMaskColor
             ),
             ...PcbScene3dMaterialFinish.semiMatteSolderMaskProperties(),
-            side: THREE.DoubleSide,
-            polygonOffset: true,
-            polygonOffsetFactor: -1.5,
-            polygonOffsetUnits: -1.5
+            side: THREE.DoubleSide
         })
     }
 
