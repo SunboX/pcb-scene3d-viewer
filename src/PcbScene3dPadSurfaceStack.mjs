@@ -3,13 +3,15 @@
  */
 export class PcbScene3dPadSurfaceStack {
     static #COPLANAR_PAD_LIFT_MIL = 0.04
+    static #SURFACE_Z_PRIORITY_DEFAULT = 0
+    static #SURFACE_Z_PRIORITY_DRILLED = 1
 
     /**
      * Resolves a small lift for a pad face that overlaps previous pad faces.
-     * @param {{ bounds: { minX: number, maxX: number, minY: number, maxY: number }, zIndex: number }[]} stack
+     * @param {{ bounds: { minX: number, maxX: number, minY: number, maxY: number }, zIndex: number, priority?: number }[]} stack
      * @param {{ x: number, y: number }} point Normalized pad anchor.
-     * @param {{ rotation?: number | null }} pad Source pad.
-     * @param {{ width: number, height: number, kind: 'circle' | 'rect' | 'rounded-rect', radius: number, offsetX: number, offsetY: number }} spec Pad face spec.
+     * @param {{ rotation?: number | null, holeDiameter?: number | null }} pad Source pad.
+     * @param {{ width: number, height: number, kind: 'circle' | 'rect' | 'rounded-rect', radius: number, offsetX: number, offsetY: number, hasHole?: boolean, holeDiameter?: number | null }} spec Pad face spec.
      * @param {boolean} mirrorY Whether underside coordinates are mirrored.
      * @returns {number}
      */
@@ -20,21 +22,48 @@ export class PcbScene3dPadSurfaceStack {
             spec,
             mirrorY
         )
-        let zIndex = 0
+        const priority = PcbScene3dPadSurfaceStack.#resolveSurfacePriority(
+            pad,
+            spec
+        )
+        let zIndex = priority
 
         for (const previous of stack) {
             if (
                 PcbScene3dPadSurfaceStack.#boundsOverlap(
                     surface.bounds,
                     previous.bounds
-                )
+                ) &&
+                priority >=
+                    Number(
+                        previous.priority ??
+                            PcbScene3dPadSurfaceStack
+                                .#SURFACE_Z_PRIORITY_DEFAULT
+                    )
             ) {
                 zIndex = Math.max(zIndex, previous.zIndex + 1)
             }
         }
 
-        stack.push({ bounds: surface.bounds, zIndex })
+        stack.push({ bounds: surface.bounds, zIndex, priority })
         return zIndex * PcbScene3dPadSurfaceStack.#COPLANAR_PAD_LIFT_MIL
+    }
+
+    /**
+     * Resolves stable visual priority for overlapping pad surfaces.
+     * @param {{ holeDiameter?: number | null }} pad Source pad.
+     * @param {{ hasHole?: boolean, holeDiameter?: number | null }} spec Pad face spec.
+     * @returns {number}
+     */
+    static #resolveSurfacePriority(pad, spec) {
+        if (
+            spec?.hasHole === true ||
+            Number(spec?.holeDiameter || pad?.holeDiameter || 0) > 0
+        ) {
+            return PcbScene3dPadSurfaceStack.#SURFACE_Z_PRIORITY_DRILLED
+        }
+
+        return PcbScene3dPadSurfaceStack.#SURFACE_Z_PRIORITY_DEFAULT
     }
 
     /**

@@ -205,8 +205,8 @@ export class PcbScene3dShapeHoleMerger {
 
         for (const point of Array.isArray(points) ? points : []) {
             const normalizedPoint = {
-                x: Number(point?.x),
-                y: Number(point?.y)
+                x: PcbScene3dShapeHoleMerger.#snapCoordinate(point?.x),
+                y: PcbScene3dShapeHoleMerger.#snapCoordinate(point?.y)
             }
 
             if (
@@ -226,6 +226,17 @@ export class PcbScene3dShapeHoleMerger {
         }
 
         return uniquePoints
+    }
+
+    /**
+     * Snaps one coordinate to the duplicate-detection precision.
+     * @param {unknown} value Coordinate value.
+     * @returns {number}
+     */
+    static #snapCoordinate(value) {
+        const number = Number(value)
+
+        return Number.isFinite(number) ? Number(number.toFixed(6)) : number
     }
 
     /**

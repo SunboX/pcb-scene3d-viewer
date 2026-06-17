@@ -29,7 +29,10 @@ export class PcbScene3dPadFactory {
             color: 0xd9a61d,
             roughness: 0.38,
             metalness: 0.55,
-            side: THREE.DoubleSide
+            side: THREE.DoubleSide,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: -2
         })
         const geometryCache = new Map()
         const side = PcbScene3dPadFactory.#normalizeSide(options?.side)
@@ -500,7 +503,7 @@ export class PcbScene3dPadFactory {
      * @returns {{ shape: any, shapeHoleCutouts: { x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[], clippingCutouts: { x: number, y: number }[][] }}
      */
     static #buildShapeCutoutPlan(THREE, spec, drillCutouts) {
-        const baseShape = PcbScene3dPadFactory.#buildOuterShape(THREE, spec)
+        let baseShape = PcbScene3dPadFactory.#buildOuterShape(THREE, spec)
         if (!drillCutouts.length) {
             return {
                 shape: baseShape,
@@ -509,7 +512,7 @@ export class PcbScene3dPadFactory {
             }
         }
 
-        const contourPoints =
+        let contourPoints =
             PcbScene3dBoardEdgeCutoutBuilder.resolveShapePoints(baseShape)
         const shapeHoleCutouts = []
         const clippingCutouts = []
@@ -527,6 +530,30 @@ export class PcbScene3dPadFactory {
             ) {
                 shapeHoleCutouts.push(drillCutout)
                 continue
+            }
+
+            const circularCutout =
+                PcbScene3dPadFactory.#resolveCircularDrillCutout(drillCutout)
+            if (circularCutout) {
+                const notchedContour =
+                    PcbScene3dBoardEdgeCutoutBuilder.applyCircularEdgeCutouts(
+                        contourPoints,
+                        [circularCutout]
+                    )
+                if (
+                    !PcbScene3dPadFactory.#sameContourPoints(
+                        contourPoints,
+                        notchedContour
+                    )
+                ) {
+                    contourPoints = notchedContour
+                    baseShape =
+                        PcbScene3dBoardEdgeCutoutBuilder.buildShapeFromPoints(
+                            THREE,
+                            contourPoints
+                        )
+                    continue
+                }
             }
 
             clippingCutouts.push(cutoutPoints)
@@ -557,6 +584,30 @@ export class PcbScene3dPadFactory {
             shapeHoleCutouts: finalShapeHoleCutouts,
             clippingCutouts: finalClippingCutouts
         }
+    }
+
+    /**
+     * Checks whether two sampled contours have the same vertices.
+     * @param {{ x: number, y: number }[]} first
+     * @param {{ x: number, y: number }[]} second
+     * @returns {boolean}
+     */
+    static #sameContourPoints(first, second) {
+        if (!Array.isArray(first) || !Array.isArray(second)) {
+            return false
+        }
+
+        if (first.length !== second.length) {
+            return false
+        }
+
+        return first.every(
+            (point, index) =>
+                Math.hypot(
+                    Number(point?.x || 0) - Number(second[index]?.x || 0),
+                    Number(point?.y || 0) - Number(second[index]?.y || 0)
+                ) <= 0.001
+        )
     }
 
     /**

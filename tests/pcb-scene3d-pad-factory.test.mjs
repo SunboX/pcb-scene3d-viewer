@@ -280,6 +280,30 @@ test('buildGroup preserves pad-specific geometry kinds and local offsets', () =>
     )
 })
 
+test('buildGroup offsets pad material above the solder mask surface', () => {
+    const THREE = createFakeThree()
+    const group = PcbScene3dPadFactory.buildGroup(
+        THREE,
+        [
+            {
+                x: 0,
+                y: 0,
+                sizeTopX: 86,
+                sizeTopY: 118,
+                shapeTop: 2
+            }
+        ],
+        14.2,
+        (x, y) => ({ x, y }),
+        { side: 'top' }
+    )
+    const mesh = group.children[0].children[0]
+
+    assert.equal(mesh.material.options.polygonOffset, true)
+    assert.equal(mesh.material.options.polygonOffsetFactor, -2)
+    assert.equal(mesh.material.options.polygonOffsetUnits, -2)
+})
+
 test('buildGroup respects explicit side solder-mask openings', () => {
     const THREE = createFakeThree()
     const pads = [
@@ -356,7 +380,7 @@ test('buildGroup extrudes drilled pads as annular rings', () => {
     assert.equal(root.rotation.z, Math.PI / 2)
     assert.equal(mesh.geometry.type, 'ExtrudeGeometry')
     assert.equal(mesh.geometry.parameters.shapes.holes.length, 1)
-    assert.equal(mesh.position.z, 14.2)
+    assert.ok(Math.abs(mesh.position.z - 14.24) < 0.001)
     assert.equal(mesh.rotation.x, 0)
 })
 
@@ -474,22 +498,120 @@ test('buildGroup clips partial neighboring drills without deforming pads', () =>
         0,
         'Expected partial neighboring drill to stay open inside the overlapping pad'
     )
-    assert.equal(
-        countCircularDrillOverlappingTriangles(overlappingMesh.geometry, {
-            centerX: 0,
-            centerY: -39.37,
-            radius: 29.527
-        }),
-        0,
-        'Expected partial neighboring drill to leave no boundary-crossing pad slivers'
-    )
     assert.ok(
-        maxProjectedTriangleArea(overlappingMesh.geometry) < 80,
-        'Expected the partial drill cutout to avoid visible wedge faces across the pad'
+        countFaceTrianglesCoveringPoint(overlappingMesh.geometry, {
+            x: 35,
+            y: 45
+        }) > 0,
+        'Expected the partial drill cutout to keep the upper SMD contact rectangle filled'
     )
 })
 
-test('buildGroup separates overlapping pad surfaces from shared depth planes', () => {
+test('buildGroup applies circular edge drill cutouts as pad outline notches', () => {
+    const drilledPad = {
+        x: 0,
+        y: -39.37,
+        sizeTopX: 86,
+        sizeTopY: 86,
+        shapeTop: 1,
+        holeDiameter: 59.055
+    }
+    const overlappingPad = {
+        x: 0,
+        y: 0,
+        sizeTopX: 86,
+        sizeTopY: 118.11,
+        shapeTop: 2
+    }
+    const group = PcbScene3dPadFactory.buildGroup(
+        THREE,
+        [drilledPad, overlappingPad],
+        0,
+        (x, y) => ({ x, y }),
+        { side: 'top' }
+    )
+    const overlappingMesh = group.children[1].children[0]
+
+    assert.equal(
+        overlappingMesh.geometry.type,
+        'ExtrudeGeometry',
+        'Expected circular edge drill cutouts to become a stable pad contour instead of a recursively clipped triangle mesh'
+    )
+    assert.ok(
+        countFaceTrianglesCoveringPoint(overlappingMesh.geometry, {
+            x: 35,
+            y: 45
+        }) > 0,
+        'Expected the upper-right SMD contact rectangle to remain filled'
+    )
+    assert.equal(
+        countFaceTrianglesCoveringPoint(overlappingMesh.geometry, {
+            x: 0,
+            y: -39.37
+        }),
+        0,
+        'Expected the neighboring through-hole drill center to remain open'
+    )
+})
+
+test('buildGroup stacks drilled rings above overlapping SMD contacts', () => {
+    const drilledPad = {
+        x: 0,
+        y: -39.37,
+        type: 'thru_hole',
+        isPlated: true,
+        sizeTopX: 86,
+        sizeTopY: 86,
+        shapeTop: 1,
+        holeDiameter: 59.055
+    }
+    const smdPad = {
+        x: 0,
+        y: 0,
+        type: 'smd',
+        isPlated: false,
+        sizeTopX: 86,
+        sizeTopY: 118.11,
+        shapeTop: 2
+    }
+    const group = PcbScene3dPadFactory.buildGroup(
+        THREE,
+        [drilledPad, smdPad],
+        0,
+        (x, y) => ({ x, y }),
+        { side: 'top' }
+    )
+    const annularMesh = group.children[0].children[0]
+    const smdMesh = group.children[1].children[0]
+    const bounds = resolveGeometryBounds(smdMesh.geometry)
+
+    assert.ok(Math.abs(bounds.minX + 43) < 0.001)
+    assert.ok(Math.abs(bounds.maxX - 43) < 0.001)
+    assert.ok(Math.abs(bounds.minY + 59.055) < 0.001)
+    assert.ok(
+        annularMesh.position.z > smdMesh.position.z,
+        'Expected the drilled annular ring to render above the overlapping SMD contact'
+    )
+    assert.ok(
+        countFaceTrianglesCoveringPoint(smdMesh.geometry, { x: 0, y: 5 }) > 0,
+        'Expected the SMD copper body to keep its authored orientation'
+    )
+    assert.equal(
+        countCircularDrillFaceCapTriangles(smdMesh.geometry, 29.527, {
+            centerX: 0,
+            centerY: -39.37,
+            inset: 1
+        }),
+        0,
+        'Expected the neighboring through-hole drill aperture to stay open'
+    )
+    assert.ok(
+        countFaceTrianglesCoveringPoint(smdMesh.geometry, { x: 35, y: 45 }) > 0,
+        'Expected the neighboring drill aperture to keep the upper SMD contact rectangle filled'
+    )
+})
+
+test('buildGroup keeps drilled annular surfaces above overlapping pads', () => {
     const drilledPad = {
         x: 0,
         y: -39.37,
@@ -516,8 +638,8 @@ test('buildGroup separates overlapping pad surfaces from shared depth planes', (
     const overlappingMesh = group.children[1].children[0]
 
     assert.ok(
-        overlappingMesh.position.z > annularMesh.position.z,
-        'Expected overlapping exposed pad faces to avoid coplanar rendering artifacts'
+        annularMesh.position.z > overlappingMesh.position.z,
+        'Expected drilled annular rings to avoid being covered by overlapping pad faces'
     )
 })
 
@@ -585,55 +707,36 @@ function countCircularDrillFaceCapTriangles(geometry, radius, options = {}) {
 }
 
 /**
- * Counts triangles that intersect or cover a circular drill opening.
+ * Counts cap triangles whose projected area covers one local point.
  * @param {any} geometry Geometry to inspect.
- * @param {{ centerX: number, centerY: number, radius: number }} circle Circle bounds.
+ * @param {{ x: number, y: number }} point Point to inspect.
  * @returns {number}
  */
-function countCircularDrillOverlappingTriangles(geometry, circle) {
+function countFaceTrianglesCoveringPoint(geometry, point) {
     const position = geometry.getAttribute('position')
+    const groups = geometry.groups.length
+        ? geometry.groups
+        : [{ start: 0, count: position.count, materialIndex: 0 }]
     let count = 0
 
-    for (let index = 0; index + 2 < position.count; index += 3) {
-        if (triangleOverlapsCircle(position, index, circle)) {
-            count += 1
+    for (const group of groups) {
+        if (Number(group.materialIndex) !== 0) {
+            continue
+        }
+
+        const end = Number(group.start || 0) + Number(group.count || 0)
+        for (let index = Number(group.start || 0); index < end; index += 3) {
+            const triangle = [0, 1, 2].map((offset) => ({
+                x: position.getX(index + offset),
+                y: position.getY(index + offset)
+            }))
+            if (isPointInsideTriangle(point, triangle)) {
+                count += 1
+            }
         }
     }
 
     return count
-}
-
-/**
- * Returns true when one triangle intersects or covers a circle.
- * @param {any} position Position buffer.
- * @param {number} vertexIndex First triangle vertex index.
- * @param {{ centerX: number, centerY: number, radius: number }} circle Circle bounds.
- * @returns {boolean}
- */
-function triangleOverlapsCircle(position, vertexIndex, circle) {
-    const triangle = [0, 1, 2].map((offset) => ({
-        x: position.getX(vertexIndex + offset),
-        y: position.getY(vertexIndex + offset)
-    }))
-    const center = { x: circle.centerX, y: circle.centerY }
-    const radiusSquared = (circle.radius - 0.001) ** 2
-
-    return (
-        triangle.some(
-            (point) =>
-                (point.x - center.x) ** 2 + (point.y - center.y) ** 2 <=
-                radiusSquared
-        ) ||
-        isPointInsideTriangle(center, triangle) ||
-        triangle.some(
-            (point, index) =>
-                squaredDistanceToSegment(
-                    center,
-                    point,
-                    triangle[(index + 1) % triangle.length]
-                ) <= radiusSquared
-        )
-    )
 }
 
 /**
@@ -661,35 +764,6 @@ function isPointInsideTriangle(point, triangle) {
 }
 
 /**
- * Resolves squared distance from a point to a finite segment.
- * @param {{ x: number, y: number }} point Point to inspect.
- * @param {{ x: number, y: number }} start Segment start.
- * @param {{ x: number, y: number }} end Segment end.
- * @returns {number}
- */
-function squaredDistanceToSegment(point, start, end) {
-    const dx = end.x - start.x
-    const dy = end.y - start.y
-    const lengthSquared = dx * dx + dy * dy
-    const ratio = lengthSquared
-        ? Math.max(
-              0,
-              Math.min(
-                  1,
-                  ((point.x - start.x) * dx + (point.y - start.y) * dy) /
-                      lengthSquared
-              )
-          )
-        : 0
-    const projected = {
-        x: start.x + dx * ratio,
-        y: start.y + dy * ratio
-    }
-
-    return (point.x - projected.x) ** 2 + (point.y - projected.y) ** 2
-}
-
-/**
  * Resolves axis-aligned bounds for one geometry position buffer.
  * @param {any} geometry Geometry to inspect.
  * @returns {{ minX: number, maxX: number, minY: number, maxY: number }}
@@ -711,50 +785,6 @@ function resolveGeometryBounds(geometry) {
     }
 
     return bounds
-}
-
-/**
- * Resolves the largest projected XY triangle area in one geometry.
- * @param {any} geometry Geometry to inspect.
- * @returns {number}
- */
-function maxProjectedTriangleArea(geometry) {
-    const position = geometry.getAttribute('position')
-    let maxArea = 0
-
-    for (let index = 0; index + 2 < position.count; index += 3) {
-        maxArea = Math.max(maxArea, projectedTriangleArea(position, index))
-    }
-
-    return maxArea
-}
-
-/**
- * Resolves one triangle's projected XY area.
- * @param {any} position Position buffer.
- * @param {number} vertexIndex First triangle vertex index.
- * @returns {number}
- */
-function projectedTriangleArea(position, vertexIndex) {
-    const first = {
-        x: position.getX(vertexIndex),
-        y: position.getY(vertexIndex)
-    }
-    const second = {
-        x: position.getX(vertexIndex + 1),
-        y: position.getY(vertexIndex + 1)
-    }
-    const third = {
-        x: position.getX(vertexIndex + 2),
-        y: position.getY(vertexIndex + 2)
-    }
-
-    return (
-        Math.abs(
-            (second.x - first.x) * (third.y - first.y) -
-                (second.y - first.y) * (third.x - first.x)
-        ) / 2
-    )
 }
 
 /**
@@ -808,17 +838,6 @@ function triangleCentroidPoint(position, vertexIndex) {
     }
 
     return { x: x / 3, y: y / 3, z: z / 3 }
-}
-
-/**
- * Resolves the XY radius of one triangle centroid.
- * @param {any} position
- * @param {number} vertexIndex
- * @returns {number}
- */
-function triangleCentroidRadius(position, vertexIndex) {
-    const { x, y } = triangleCentroidPoint(position, vertexIndex)
-    return Math.hypot(x, y)
 }
 
 /**
