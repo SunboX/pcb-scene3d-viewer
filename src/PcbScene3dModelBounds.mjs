@@ -1,4 +1,5 @@
 import { PcbScene3dBufferAttributeFactory } from './PcbScene3dBufferAttributeFactory.mjs'
+import { PcbScene3dModelSeatingPolicy } from './PcbScene3dModelSeatingPolicy.mjs'
 
 /**
  * Measures and normalizes loaded 3D model bounds.
@@ -15,9 +16,18 @@ export class PcbScene3dModelBounds {
      * Seats one transformed model group on its local mount plane.
      * @param {any} THREE Three.js namespace.
      * @param {{ position?: { z?: number }, updateMatrixWorld?: (force?: boolean) => void }} modelGroup Model group.
+     * @param {{ sceneDescription?: object, placement?: object }} [options] Scene and placement context.
      * @returns {void}
      */
-    static seatOnMountPlane(THREE, modelGroup) {
+    static seatOnMountPlane(THREE, modelGroup, options = {}) {
+        if (
+            PcbScene3dModelSeatingPolicy.shouldSkipGenericSeating(
+                options?.sceneDescription
+            )
+        ) {
+            return
+        }
+
         if (!THREE?.Box3 || !modelGroup?.position) {
             return
         }
@@ -42,6 +52,8 @@ export class PcbScene3dModelBounds {
                 ? 0
                 : adjustedZ
         modelGroup.updateMatrixWorld?.(true)
+
+        PcbScene3dModelSeatingPolicy.applyPostSeat(THREE, modelGroup, options)
     }
 
     /**

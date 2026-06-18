@@ -2,6 +2,7 @@ import { PcbScene3dBoardAssemblyPresentation } from './PcbScene3dBoardAssemblyPr
 import { PcbScene3dBoardAssemblyPlacement } from './PcbScene3dBoardAssemblyPlacement.mjs'
 import { PcbScene3dBoardAssemblyTransform } from './PcbScene3dBoardAssemblyTransform.mjs'
 import { PcbScene3dBufferAttributeFactory } from './PcbScene3dBufferAttributeFactory.mjs'
+import { PcbScene3dExternalModelPlacementRepair } from './PcbScene3dExternalModelPlacementRepair.mjs'
 import { PcbScene3dExternalModelLoadOrder } from './PcbScene3dExternalModelLoadOrder.mjs'
 import { PcbScene3dModelBounds } from './PcbScene3dModelBounds.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
@@ -47,13 +48,23 @@ export class PcbScene3dExternalModels {
                             placement,
                             stepLoader,
                             cachedModelGroups,
-                            options?.modelViewScale
+                            options?.modelViewScale,
+                            options?.sceneDescription
                         )
                     if (!loadedGroup || options?.isDisposed?.()) {
                         continue
                     }
 
                     externalModelsGroup.add(loadedGroup)
+                    PcbScene3dExternalModelPlacementRepair.apply(
+                        options.three,
+                        options?.sceneDescription,
+                        placement,
+                        loadedGroup
+                    )
+                    PcbScene3dExternalModelPlacementRepair.isolatePlacementMaterials(
+                        loadedGroup
+                    )
                     options?.onPlacementGroup?.(placement, loadedGroup)
                     processedPlacements += 1
                     if (processedPlacements % 12 === 0) {
@@ -159,6 +170,7 @@ export class PcbScene3dExternalModels {
      * @param {PcbScene3dStepLoader} stepLoader
      * @param {Map<string, any>} cachedModelGroups
      * @param {{ x?: number, y?: number, z?: number } | null | undefined} modelViewScale Active scene view scale.
+     * @param {object | null | undefined} sceneDescription Scene description.
      * @returns {Promise<any>}
      */
     static async #loadPlacementGroup(
@@ -166,7 +178,8 @@ export class PcbScene3dExternalModels {
         placement,
         stepLoader,
         cachedModelGroups,
-        modelViewScale
+        modelViewScale,
+        sceneDescription
     ) {
         const model = placement?.externalModel
         if (!model) {
@@ -185,7 +198,8 @@ export class PcbScene3dExternalModels {
             THREE,
             placement,
             PcbScene3dExternalModels.#cloneModelGroup(templateGroup),
-            modelViewScale
+            modelViewScale,
+            sceneDescription
         )
     }
 
@@ -252,13 +266,15 @@ export class PcbScene3dExternalModels {
      * @param {{ mountSide?: string, modelTransform?: object, designator?: string }} placement
      * @param {any} modelGroup
      * @param {{ x?: number, y?: number, z?: number } | null | undefined} modelViewScale Active scene view scale.
+     * @param {object | null | undefined} sceneDescription Scene description.
      * @returns {any}
      */
     static #buildPlacementWrapper(
         THREE,
         placement,
         modelGroup,
-        modelViewScale
+        modelViewScale,
+        sceneDescription
     ) {
         if (PcbScene3dExternalModels.#isBoardAssemblyPlacement(placement)) {
             return PcbScene3dExternalModels.#buildBoardAssemblyWrapper(
@@ -332,7 +348,10 @@ export class PcbScene3dExternalModels {
             modelGroup,
             PcbScene3dExternalModels.#resolveModelScale(modelTransform)
         )
-        PcbScene3dModelBounds.seatOnMountPlane(THREE, modelGroup)
+        PcbScene3dModelBounds.seatOnMountPlane(THREE, modelGroup, {
+            sceneDescription,
+            placement
+        })
         modelGroup.position.z += modelOffset.z
         adjustmentGroup.add(modelGroup)
         mountRig.faceGroup.add(adjustmentGroup)

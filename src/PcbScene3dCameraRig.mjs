@@ -2,6 +2,8 @@
  * Resolves camera presets and basic rig state for the PCB 3D scene.
  */
 export class PcbScene3dCameraRig {
+    static #INSPECTION_PROJECTION_STATE_KEY = 'scene3dInspectionProjection'
+
     /**
      * Resolves the initial camera radius from the board size.
      * @param {{ board?: { widthMil?: number, heightMil?: number }, sourceFormat?: string }} sceneDescription
@@ -111,6 +113,15 @@ export class PcbScene3dCameraRig {
         camera?.lookAt?.(pose.target.x, pose.target.y, pose.target.z)
         controls?.update?.()
         camera?.updateProjectionMatrix?.()
+        if (normalizedPreset === 'top' || normalizedPreset === 'bottom') {
+            PcbScene3dCameraRig.#applyInspectionProjection(
+                camera,
+                controls,
+                pose
+            )
+        } else {
+            PcbScene3dCameraRig.#restoreProjection(camera, controls)
+        }
 
         return pose
     }
@@ -164,6 +175,174 @@ export class PcbScene3dCameraRig {
             y: Number(controls?.target?.y || 0),
             z: Number(controls?.target?.z || 0)
         }
+    }
+
+    /**
+     * Replaces perspective projection with orthographic projection for
+     * top/bottom inspection views.
+     * @param {object} camera Three.js perspective camera.
+     * @param {object} controls OrbitControls-like instance.
+     * @param {object} pose Resolved camera pose.
+     * @returns {void}
+     */
+    static #applyInspectionProjection(camera, controls, pose) {
+        if (!camera || !pose?.target || !pose?.radius) {
+            return
+        }
+
+        const state = PcbScene3dCameraRig.#captureProjectionState(
+            camera,
+            controls
+        )
+        const radius = Math.max(Number(pose.radius || 0), 1)
+        const fovRadians = (Number(camera.fov || 38) * Math.PI) / 180
+
+        state.active = true
+        state.orthographicHeight = 2 * radius * Math.tan(fovRadians / 2)
+        PcbScene3dCameraRig.#applyOrthographicProjection(camera, state)
+        controls?.update?.()
+    }
+
+    /**
+     * Captures the first unmodified projection settings for a camera.
+     * @param {object} camera Three.js camera.
+     * @param {object} controls OrbitControls-like instance.
+     * @returns {object}
+     */
+    static #captureProjectionState(camera, controls) {
+        const userData = PcbScene3dCameraRig.#userData(camera)
+        const stateKey = PcbScene3dCameraRig.#INSPECTION_PROJECTION_STATE_KEY
+
+        if (!userData[stateKey]) {
+            userData[stateKey] = {
+                active: false,
+                orthographicHeight: 0,
+                originalUpdateProjectionMatrix:
+                    camera.updateProjectionMatrix?.bind?.(camera) || null,
+                isPerspectiveCamera: camera.isPerspectiveCamera,
+                isOrthographicCamera: camera.isOrthographicCamera,
+                left: camera.left,
+                right: camera.right,
+                top: camera.top,
+                bottom: camera.bottom,
+                zoom: Number(camera?.zoom || 1),
+                near: Number(camera?.near || 0),
+                far: Number(camera?.far || 0),
+                maxDistance: Number(controls?.maxDistance || 0)
+            }
+            PcbScene3dCameraRig.#patchCameraProjectionUpdater(camera)
+        }
+
+        return userData[stateKey]
+    }
+
+    /**
+     * Patches projection updates so orthographic inspection survives resizes.
+     * @param {object} camera Three.js camera.
+     * @returns {void}
+     */
+    static #patchCameraProjectionUpdater(camera) {
+        const state =
+            camera.userData[
+                PcbScene3dCameraRig.#INSPECTION_PROJECTION_STATE_KEY
+            ]
+
+        if (!state?.originalUpdateProjectionMatrix) {
+            return
+        }
+
+        camera.updateProjectionMatrix = () => {
+            state.originalUpdateProjectionMatrix()
+            if (state.active) {
+                PcbScene3dCameraRig.#applyOrthographicProjection(camera, state)
+            }
+        }
+    }
+
+    /**
+     * Applies an orthographic projection matrix to the existing camera.
+     * @param {object} camera Three.js camera.
+     * @param {object} state Captured camera state.
+     * @returns {void}
+     */
+    static #applyOrthographicProjection(camera, state) {
+        const zoom = Math.max(Number(camera.zoom || 1), 0.0001)
+        const height = Math.max(Number(state.orthographicHeight || 0) / zoom, 1)
+        const width = height * Math.max(Number(camera.aspect || 1), 0.0001)
+        const left = -width / 2
+        const right = width / 2
+        const top = height / 2
+        const bottom = -height / 2
+
+        camera.left = left
+        camera.right = right
+        camera.top = top
+        camera.bottom = bottom
+        camera.isPerspectiveCamera = false
+        camera.isOrthographicCamera = true
+        camera.projectionMatrix?.makeOrthographic?.(
+            left,
+            right,
+            top,
+            bottom,
+            camera.near,
+            camera.far
+        )
+        camera.projectionMatrixInverse
+            ?.copy?.(camera.projectionMatrix)
+            ?.invert?.()
+    }
+
+    /**
+     * Restores perspective settings after leaving top/bottom inspection views.
+     * @param {object} camera Three.js camera.
+     * @param {object} controls OrbitControls-like instance.
+     * @returns {void}
+     */
+    static #restoreProjection(camera, controls) {
+        const state =
+            camera?.userData?.[
+                PcbScene3dCameraRig.#INSPECTION_PROJECTION_STATE_KEY
+            ]
+
+        if (!state) {
+            return
+        }
+
+        if ('zoom' in camera) {
+            camera.zoom = state.zoom
+        }
+        if ('near' in camera && state.near > 0) {
+            camera.near = state.near
+        }
+        if ('far' in camera && state.far > 0) {
+            camera.far = state.far
+        }
+        camera.isPerspectiveCamera = state.isPerspectiveCamera
+        camera.isOrthographicCamera = state.isOrthographicCamera
+        camera.left = state.left
+        camera.right = state.right
+        camera.top = state.top
+        camera.bottom = state.bottom
+        if (controls && 'maxDistance' in controls && state.maxDistance > 0) {
+            controls.maxDistance = state.maxDistance
+        }
+        state.active = false
+        controls?.update?.()
+        camera.updateProjectionMatrix?.()
+    }
+
+    /**
+     * Ensures a mutable user-data object exists on the camera.
+     * @param {object} camera Three.js camera.
+     * @returns {object}
+     */
+    static #userData(camera) {
+        if (!camera.userData) {
+            camera.userData = {}
+        }
+
+        return camera.userData
     }
 
     /**

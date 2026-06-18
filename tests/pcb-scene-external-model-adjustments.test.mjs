@@ -221,3 +221,191 @@ test('PcbScene3dExternalModels seats dominant body planes above sparse lower lea
 
     assert.equal(modelGroup.position.z, 0)
 })
+
+test('PcbScene3dExternalModels preserves source-origin model Z placement', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'kicad',
+            coordinateSystem: 'kicad-3d-y-up',
+            externalPlacements: [
+                {
+                    designator: 'U4',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 30 },
+                    modelTransform: {
+                        rotationDeg: { x: 0, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'session',
+                        name: 'source-origin-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/source-origin-body'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [
+                                0, 0, -0.04, 0.1, 0, -0.04, 0, 0.1, 0.06
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assert.equal(modelGroup.position.z, 0)
+})
+
+test('PcbScene3dExternalModels seats source-specific contact pads on the face', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            externalPlacements: [
+                {
+                    designator: 'J2',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 40 },
+                    modelTransform: {
+                        rotationDeg: { x: 0, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        contactPadsMil: [{ x: 0, y: 0, width: 60, depth: 60 }],
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'contact-pad-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/contact-pad-body'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [
+                                -0.02, -0.02, 0.02, 0.02, -0.02, 0.02, 0.02,
+                                0.02, 0.02, -0.02, -0.02, 0.02, 0.02, 0.02,
+                                0.02, -0.02, 0.02, 0.02, 0.15, 0.15, -0.05,
+                                0.18, 0.15, -0.05, 0.15, 0.18, -0.05
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assert.ok(Math.abs(modelGroup.position.z + 20) < 0.001)
+})
+
+test('PcbScene3dExternalModels prefers source-specific zero body planes', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            externalPlacements: [
+                {
+                    designator: 'U5',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 40 },
+                    modelTransform: {
+                        rotationDeg: { x: 0, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'zero-plane-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/zero-plane-body'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [
+                                -0.05, -0.05, 0, 0.05, -0.05, 0, 0.05, 0.05, 0,
+                                -0.05, -0.05, 0, 0.05, 0.05, 0, -0.05, 0.05, 0,
+                                0.15, 0.15, -0.04, 0.18, 0.15, -0.04, 0.15,
+                                0.18, -0.04
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assert.equal(modelGroup.position.z, 0)
+})

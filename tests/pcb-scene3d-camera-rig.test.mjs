@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as THREE from 'three'
 import { PcbScene3dCameraRig } from '../src/PcbScene3dCameraRig.mjs'
 
 /**
@@ -141,4 +142,136 @@ test('PcbScene3dCameraRig keeps KiCad bottom view upright', () => {
     assert.ok(topScreenPoint.y > 0)
     assert.ok(bottomScreenPoint.x < 0)
     assert.ok(bottomScreenPoint.y > 0)
+})
+
+/**
+ * Builds a perspective camera matching the browser runtime defaults.
+ * @returns {THREE.PerspectiveCamera}
+ */
+function createCamera() {
+    return new THREE.PerspectiveCamera(38, 16 / 9, 10, 25000)
+}
+
+/**
+ * Builds a minimal controls stand-in for preset application.
+ * @returns {{ target: THREE.Vector3, maxDistance: number, update: () => void }}
+ */
+function createControls() {
+    return {
+        target: new THREE.Vector3(0, 0, 0),
+        maxDistance: 8000,
+        update() {}
+    }
+}
+
+/**
+ * Builds a synthetic scene description.
+ * @returns {object}
+ */
+function createSceneDescription() {
+    return {
+        board: {
+            widthMil: 1000,
+            heightMil: 600,
+            thicknessMil: 80
+        }
+    }
+}
+
+/**
+ * Projects the same XY point at two heights and measures screen-space drift.
+ * @param {THREE.Camera} camera Camera to inspect.
+ * @returns {number}
+ */
+function projectionHeightDrift(camera) {
+    camera.updateMatrixWorld(true)
+    const lower = new THREE.Vector3(500, 100, 0).project(camera)
+    const upper = new THREE.Vector3(500, 100, 120).project(camera)
+
+    return Math.hypot(lower.x - upper.x, lower.y - upper.y)
+}
+
+/**
+ * Resolves camera distance from the current controls target.
+ * @param {THREE.Camera} camera Camera to inspect.
+ * @param {{ target: THREE.Vector3 }} controls Controls stand-in.
+ * @returns {number}
+ */
+function cameraTargetDistance(camera, controls) {
+    return camera.position.distanceTo(controls.target)
+}
+
+test('PcbScene3dCameraRig suppresses height parallax in top inspection preset', () => {
+    const camera = createCamera()
+    const controls = createControls()
+    const sceneDescription = createSceneDescription()
+
+    PcbScene3dCameraRig.applyPreset(
+        camera,
+        controls,
+        'isometric',
+        sceneDescription
+    )
+    PcbScene3dCameraRig.applyPreset(camera, controls, 'top', sceneDescription)
+
+    assert.ok(projectionHeightDrift(camera) < 0.001)
+
+    const lowerBeforeZoom = new THREE.Vector3(500, 100, 0).project(camera)
+    camera.zoom = 2
+    camera.updateProjectionMatrix()
+    const lowerAfterZoom = new THREE.Vector3(500, 100, 0).project(camera)
+
+    assert.ok(Math.abs(lowerAfterZoom.x) > Math.abs(lowerBeforeZoom.x))
+    assert.ok(projectionHeightDrift(camera) < 0.001)
+})
+
+test('PcbScene3dCameraRig inspection projection does not compound', () => {
+    const camera = createCamera()
+    const controls = createControls()
+    const sceneDescription = createSceneDescription()
+
+    PcbScene3dCameraRig.applyPreset(
+        camera,
+        controls,
+        'isometric',
+        sceneDescription
+    )
+    PcbScene3dCameraRig.applyPreset(camera, controls, 'top', sceneDescription)
+    const firstDistance = cameraTargetDistance(camera, controls)
+    const firstZoom = camera.zoom
+
+    PcbScene3dCameraRig.applyPreset(camera, controls, 'top', sceneDescription)
+
+    assert.equal(cameraTargetDistance(camera, controls), firstDistance)
+    assert.equal(camera.zoom, firstZoom)
+})
+
+test('PcbScene3dCameraRig restores perspective projection after inspection', () => {
+    const camera = createCamera()
+    const controls = createControls()
+    const sceneDescription = createSceneDescription()
+
+    PcbScene3dCameraRig.applyPreset(
+        camera,
+        controls,
+        'isometric',
+        sceneDescription
+    )
+    PcbScene3dCameraRig.applyPreset(camera, controls, 'top', sceneDescription)
+    assert.equal(camera.isPerspectiveCamera, false)
+    assert.equal(camera.isOrthographicCamera, true)
+
+    PcbScene3dCameraRig.applyPreset(
+        camera,
+        controls,
+        'isometric',
+        sceneDescription
+    )
+
+    assert.equal(camera.zoom, 1)
+    assert.equal(camera.isPerspectiveCamera, true)
+    assert.equal(Boolean(camera.isOrthographicCamera), false)
+    assert.equal(camera.near, 10)
+    assert.equal(camera.far, 25000)
+    assert.equal(controls.maxDistance, 8000)
 })
