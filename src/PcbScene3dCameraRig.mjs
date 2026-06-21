@@ -267,12 +267,18 @@ export class PcbScene3dCameraRig {
      */
     static #applyOrthographicProjection(camera, state) {
         const zoom = Math.max(Number(camera.zoom || 1), 0.0001)
-        const height = Math.max(Number(state.orthographicHeight || 0) / zoom, 1)
+        const height = Math.max(Number(state.orthographicHeight || 0), 1)
         const width = height * Math.max(Number(camera.aspect || 1), 0.0001)
         const left = -width / 2
         const right = width / 2
         const top = height / 2
         const bottom = -height / 2
+        // Keep camera bounds unzoomed for OrbitControls pan math; apply zoom
+        // only to the projection matrix so dragging stays cursor-locked.
+        const projectedLeft = left / zoom
+        const projectedRight = right / zoom
+        const projectedTop = top / zoom
+        const projectedBottom = bottom / zoom
 
         camera.left = left
         camera.right = right
@@ -281,10 +287,10 @@ export class PcbScene3dCameraRig {
         camera.isPerspectiveCamera = false
         camera.isOrthographicCamera = true
         camera.projectionMatrix?.makeOrthographic?.(
-            left,
-            right,
-            top,
-            bottom,
+            projectedLeft,
+            projectedRight,
+            projectedTop,
+            projectedBottom,
             camera.near,
             camera.far
         )

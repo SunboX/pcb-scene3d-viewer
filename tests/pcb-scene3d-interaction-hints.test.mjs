@@ -32,6 +32,34 @@ test('PcbScene3dInteractionHints configures mouse and touch gestures', () => {
     })
 })
 
+test('PcbScene3dInteractionHints maps inspection presets to direct pan', () => {
+    const controls = {}
+    const THREE = {
+        MOUSE: {
+            ROTATE: 'mouse-rotate',
+            DOLLY: 'mouse-dolly',
+            PAN: 'mouse-pan'
+        },
+        TOUCH: {
+            ROTATE: 'touch-rotate',
+            PAN: 'touch-pan',
+            DOLLY_PAN: 'touch-dolly-pan'
+        }
+    }
+
+    PcbScene3dInteractionHints.configureControls(controls, THREE, 'top')
+
+    assert.deepEqual(controls.mouseButtons, {
+        LEFT: 'mouse-pan',
+        MIDDLE: 'mouse-dolly',
+        RIGHT: 'mouse-rotate'
+    })
+    assert.deepEqual(controls.touches, {
+        ONE: 'touch-pan',
+        TWO: 'touch-dolly-pan'
+    })
+})
+
 /**
  * Verifies the default instruction copy reflects touch-first devices.
  */
@@ -44,6 +72,6 @@ test('PcbScene3dInteractionHints resolves mobile gesture copy', () => {
 
     assert.equal(
         PcbScene3dInteractionHints.resolveDefaultMessage(environment),
-        'Drag with one finger to orbit, pinch to zoom, and drag with two fingers to pan.'
+        'One-finger drag pans in Top/Bottom and orbits in Isometric. Pinch to zoom.'
     )
 })

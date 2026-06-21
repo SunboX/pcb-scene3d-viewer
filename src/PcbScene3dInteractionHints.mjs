@@ -6,24 +6,32 @@ export class PcbScene3dInteractionHints {
      * Applies explicit OrbitControls input mappings for desktop and touch.
      * @param {{ mouseButtons?: any, touches?: any }} controls
      * @param {{ MOUSE?: any, TOUCH?: any }} THREE
+     * @param {string} [preset] Active camera preset.
      * @returns {void}
      */
-    static configureControls(controls, THREE) {
+    static configureControls(controls, THREE, preset = 'isometric') {
         if (!controls) {
             return
         }
 
+        const inspectionPreset =
+            String(preset || '').toLowerCase() === 'top' ||
+            String(preset || '').toLowerCase() === 'bottom'
+
         if (THREE?.MOUSE) {
             controls.mouseButtons = {
-                LEFT: THREE.MOUSE.ROTATE,
+                LEFT: inspectionPreset ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE,
                 MIDDLE: THREE.MOUSE.DOLLY,
-                RIGHT: THREE.MOUSE.PAN
+                RIGHT: inspectionPreset ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN
             }
         }
 
         if (THREE?.TOUCH) {
             controls.touches = {
-                ONE: THREE.TOUCH.ROTATE,
+                ONE:
+                    inspectionPreset && THREE.TOUCH.PAN
+                        ? THREE.TOUCH.PAN
+                        : THREE.TOUCH.ROTATE,
                 TWO: THREE.TOUCH.DOLLY_PAN
             }
         }
@@ -44,13 +52,13 @@ export class PcbScene3dInteractionHints {
                 const value = translate('scene3d.touchHint')
                 if (value && value !== 'scene3d.touchHint') return value
             }
-            return 'Drag with one finger to orbit, pinch to zoom, and drag with two fingers to pan.'
+            return 'One-finger drag pans in Top/Bottom and orbits in Isometric. Pinch to zoom.'
         }
 
         if (typeof translate === 'function') {
             const value = translate('scene3d.pointerHint')
             if (value && value !== 'scene3d.pointerHint') return value
         }
-        return 'Drag to orbit, right-drag to pan, and use the wheel to zoom.'
+        return 'Drag pans in Top/Bottom and orbits in Isometric; right-drag uses the alternate action. Use the wheel to zoom.'
     }
 }

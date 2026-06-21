@@ -2,6 +2,7 @@ import { PcbScene3dBoardSolderMaskFactory } from './PcbScene3dBoardSolderMaskFac
 import { PcbScene3dBodyColor } from './PcbScene3dBodyColor.mjs'
 import { PcbScene3dCameraRig } from './PcbScene3dCameraRig.mjs'
 import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs'
+import { PcbScene3dComponentVisibility } from './PcbScene3dComponentVisibility.mjs'
 import { PcbScene3dComponentAdjustment } from './PcbScene3dComponentAdjustment.mjs'
 import { PcbScene3dComponentAdjustmentRegistry } from './PcbScene3dComponentAdjustmentRegistry.mjs'
 import { PcbScene3dCopperDetailGroupBuilder } from './PcbScene3dCopperDetailGroupBuilder.mjs'
@@ -15,6 +16,7 @@ import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 import { PcbScene3dModelSearchPlacement } from './PcbScene3dModelSearchPlacement.mjs'
 import { PcbScene3dPresetState } from './PcbScene3dPresetState.mjs'
 import { PcbScene3dRenderGroupVisibility } from './PcbScene3dRenderGroupVisibility.mjs'
+import { PcbScene3dRenderScheduler } from './PcbScene3dRenderScheduler.mjs'
 import { PcbScene3dRuntimeBoardMeshes } from './PcbScene3dRuntimeBoardMeshes.mjs'
 import { PcbScene3dSilkscreenChunkedFactory } from './PcbScene3dSilkscreenChunkedFactory.mjs'
 import { PcbScene3dTrueTypeTextFactory } from './PcbScene3dTrueTypeTextFactory.mjs'
@@ -52,6 +54,7 @@ export class PcbScene3dRuntime {
     #pointer
     #pointerDownPosition
     #selectionRoots
+    #hiddenComponentDesignators
     #componentAdjustmentRegistry
     #fallbackBodyRoots
     #loadedExternalModelDesignators
@@ -64,6 +67,7 @@ export class PcbScene3dRuntime {
     #readyPromise
     #resolveReadyPromise
     #hasSettledReady
+    #renderScheduler
     /**
      * @param {HTMLElement} viewportNode
      * @param {any} sceneDescription Scene description or CircuitJSON model.
@@ -96,6 +100,7 @@ export class PcbScene3dRuntime {
         this.#pointer = null
         this.#pointerDownPosition = null
         this.#selectionRoots = new Map()
+        this.#hiddenComponentDesignators = new Set()
         this.#componentAdjustmentRegistry =
             new PcbScene3dComponentAdjustmentRegistry(() => this.#three)
         this.#fallbackBodyRoots = new Map()
@@ -108,6 +113,11 @@ export class PcbScene3dRuntime {
         this.#presetState = new PcbScene3dPresetState()
         this.#isDisposed = false
         this.#hasSettledReady = false
+        this.#renderScheduler = new PcbScene3dRenderScheduler(() => {
+            if (!this.#isDisposed) {
+                this.#render()
+            }
+        })
         this.#resolveReadyPromise = null
         this.#readyPromise = new Promise((resolve) => {
             this.#resolveReadyPromise = resolve
@@ -124,10 +134,14 @@ export class PcbScene3dRuntime {
     setPreset(preset) {
         const normalizedPreset = this.#presetState.set(preset)
         this.#applyViewScale(normalizedPreset)
+        PcbScene3dInteractionHints.configureControls(
+            this.#controls,
+            this.#three,
+            normalizedPreset
+        )
         if (!this.#camera) {
             return
         }
-
         PcbScene3dCameraRig.applyPreset(
             this.#camera,
             this.#controls,
@@ -141,7 +155,6 @@ export class PcbScene3dRuntime {
         if (!(toggleName in this.#toggles)) {
             return
         }
-
         this.#toggles[toggleName] = enabled
         this.#applyToggleVisibility()
         this.#render()
@@ -149,6 +162,27 @@ export class PcbScene3dRuntime {
     /** @param {string} designator */
     setSelectedDesignator(designator) {
         this.#setSelectedDesignator(designator)
+    }
+    /** @param {string} designator @param {boolean} hidden */
+    setComponentHidden(designator, hidden) {
+        if (
+            !PcbScene3dComponentVisibility.setHidden(
+                this.#hiddenComponentDesignators,
+                designator,
+                hidden
+            )
+        ) {
+            return
+        }
+        this.#applyToggleVisibility()
+        this.#render()
+    }
+    /** @param {string} designator @returns {boolean} */
+    isComponentHidden(designator) {
+        return PcbScene3dComponentVisibility.isHidden(
+            this.#hiddenComponentDesignators,
+            designator
+        )
     }
     /**
      * Applies a live model-local adjustment to one component.
@@ -172,6 +206,7 @@ export class PcbScene3dRuntime {
     /** @returns {void} */
     dispose() {
         this.#isDisposed = true
+        this.#renderScheduler.cancel()
         this.#listeners.forEach(({ node, type, listener }) => {
             node.removeEventListener?.(type, listener)
         })
@@ -196,6 +231,7 @@ export class PcbScene3dRuntime {
         this.#pointer = null
         this.#pointerDownPosition = null
         this.#selectionRoots.clear()
+        this.#hiddenComponentDesignators.clear()
         this.#componentAdjustmentRegistry.clear()
         this.#fallbackBodyRoots.clear()
         this.#loadedExternalModelDesignators.clear()
@@ -636,7 +672,11 @@ export class PcbScene3dRuntime {
         this.#controls.minDistance = 140
         this.#controls.maxDistance = this.#initialRadius * 8
         this.#controls.target.set(0, 0, 0)
-        PcbScene3dInteractionHints.configureControls(this.#controls, THREE)
+        PcbScene3dInteractionHints.configureControls(
+            this.#controls,
+            THREE,
+            this.#presetState.get()
+        )
 
         PcbScene3dCameraRig.applyPreset(
             this.#camera,
@@ -645,7 +685,9 @@ export class PcbScene3dRuntime {
             this.#sceneDescription
         )
 
-        this.#bindListener(this.#controls, 'change', () => this.#render())
+        this.#bindListener(this.#controls, 'change', () => {
+            this.#renderScheduler.schedule()
+        })
         this.#bindListener(domElement, 'contextmenu', (event) => {
             event.preventDefault?.()
         })
@@ -724,6 +766,16 @@ export class PcbScene3dRuntime {
             loadedExternalModelDesignators:
                 this.#loadedExternalModelDesignators,
             modelSearchExternalModelRoots: this.#modelSearchExternalModelRoots,
+            hasLoadedBoardAssemblyModel: this.#hasLoadedBoardAssemblyModel
+        })
+        PcbScene3dComponentVisibility.apply({
+            selectionRoots: this.#selectionRoots,
+            hiddenDesignators: this.#hiddenComponentDesignators,
+            fallbackBodyRoots: this.#fallbackBodyRoots,
+            loadedExternalModelDesignators:
+                this.#loadedExternalModelDesignators,
+            modelSearchExternalModelRoots: this.#modelSearchExternalModelRoots,
+            toggles: this.#toggles,
             hasLoadedBoardAssemblyModel: this.#hasLoadedBoardAssemblyModel
         })
     }

@@ -57,7 +57,7 @@ function createAsymmetricLeadScene(padOddSide, terminalOddSide) {
 
 /**
  * Builds a fake pad-fallback scene whose loaded body center is source-offset.
- * @param {{ placementRotationDeg?: number, componentPosition?: { x: number, y: number, z: number }, placementPosition?: { x: number, y: number, z: number } }} [options] Scene options.
+ * @param {{ placementRotationDeg?: number, componentPosition?: { x: number, y: number, z: number }, placementPosition?: { x: number, y: number, z: number }, payloadCenter?: { x: number, y: number } }} [options] Scene options.
  * @returns {object}
  */
 function createOffsetCenterScene(options = {}) {
@@ -72,6 +72,7 @@ function createOffsetCenterScene(options = {}) {
         y: 80,
         z: 31.5
     }
+    const payloadCenter = options.payloadCenter || { x: 0.1, y: 0 }
 
     return {
         sourceFormat: 'altium',
@@ -111,7 +112,9 @@ function createOffsetCenterScene(options = {}) {
                     origin: 'embedded',
                     name: 'fake-offset-body.step',
                     format: 'step',
-                    preparedMeshPayloads: [createTerminalPayload(0.1, 0)]
+                    preparedMeshPayloads: [
+                        createTerminalPayload(payloadCenter.x, payloadCenter.y)
+                    ]
                 }
             }
         ]
@@ -274,6 +277,22 @@ test('PcbScene3dExternalModels keeps matching five-lead package yaw', async () =
 
 test('PcbScene3dExternalModels centers source-offset pad fallback models', async () => {
     const group = await loadPlacementGroup(createOffsetCenterScene())
+    const bounds = new THREE.Box3().setFromObject(group)
+    const center = new THREE.Vector3()
+    bounds.getCenter(center)
+
+    assert.equal(group.userData.scene3dPadFallbackCenterRepair, true)
+    assert.ok(Math.abs(center.x) < 0.001)
+    assert.ok(Math.abs(center.y) < 0.001)
+})
+
+test('PcbScene3dExternalModels centers small pad fallback offsets', async () => {
+    const group = await loadPlacementGroup(
+        createOffsetCenterScene({
+            placementPosition: { x: 12, y: 1, z: 31.5 },
+            payloadCenter: { x: 0, y: 0 }
+        })
+    )
     const bounds = new THREE.Box3().setFromObject(group)
     const center = new THREE.Vector3()
     bounds.getCenter(center)

@@ -22,6 +22,7 @@ const FALLBACK_MESSAGES = {
     'scene3d.fallbackBody': 'Fallback body',
     'scene3d.fallbackBodies': 'Fallback bodies',
     'scene3d.footprint': 'Footprint',
+    'scene3d.hideSelectedComponent': 'Hide selected component',
     'scene3d.inspectPrompt': 'Click a component to inspect it.',
     'scene3d.interactiveViewAria': 'Interactive 3D PCB view',
     'scene3d.isometric': 'Isometric',
@@ -39,11 +40,12 @@ const FALLBACK_MESSAGES = {
     'scene3d.picked': 'Picked',
     'scene3d.placements': 'Placements',
     'scene3d.pointerHint':
-        'Drag to orbit, right-drag to pan, and use the wheel to zoom.',
+        'Drag pans in Top/Bottom and orbits in Isometric; right-drag uses the alternate action. Use the wheel to zoom.',
     'scene3d.offset': 'Offset',
     'scene3d.resetTransform': 'Reset',
     'scene3d.rotation': 'Rotation',
     'scene3d.scale': 'Scale',
+    'scene3d.showSelectedComponent': 'Show selected component',
     'scene3d.skipped': 'Skipped',
     'scene3d.source': 'Source',
     'scene3d.startFailed': '3D preview could not start:',
@@ -53,7 +55,7 @@ const FALLBACK_MESSAGES = {
     'scene3d.toolbarAria': '3D camera presets',
     'scene3d.top': 'Top',
     'scene3d.touchHint':
-        'Drag with one finger to orbit, pinch to zoom, and drag with two fingers to pan.',
+        'One-finger drag pans in Top/Bottom and orbits in Isometric. Pinch to zoom.',
     'scene3d.unresolved': 'unresolved'
 }
 

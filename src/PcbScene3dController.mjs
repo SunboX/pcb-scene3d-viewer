@@ -4,6 +4,7 @@ import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs
 import { PcbScene3dInteractionHints } from './PcbScene3dInteractionHints.mjs'
 import { PcbScene3dRuntime } from './PcbScene3dRuntime.mjs'
 import { PcbScene3dSelectionInspectorRenderer } from './PcbScene3dSelectionInspectorRenderer.mjs'
+import { PcbScene3dSelectionVisibilityBinder } from './PcbScene3dSelectionVisibilityBinder.mjs'
 import { PcbScene3dText } from './PcbScene3dText.mjs'
 
 /**
@@ -31,6 +32,8 @@ export class PcbScene3dController {
     /** @type {PcbScene3dAdjustmentControlBinder | null} */
     #adjustmentControls
 
+    /** @type {PcbScene3dSelectionVisibilityBinder | null} */
+    #visibilityControls
     /** @type {Array<{ node: EventTarget, type: string, listener: (event: any) => void }>} */
     #listeners
 
@@ -43,7 +46,7 @@ export class PcbScene3dController {
     /** @type {string} */
     #selectedComponentKey
 
-    /** @type {{ setPreset?: (preset: string) => void, setToggle?: (toggleName: string, enabled: boolean) => void, setSelectedDesignator?: (designator: string) => void, setComponentAdjustment?: (designator: string, adjustment: { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }) => void, dispose?: () => void } | null} */
+    /** @type {any | null} */
     #runtime
 
     /** @type {any | null} */
@@ -151,19 +154,36 @@ export class PcbScene3dController {
                     suppressed ? '' : this.#selectedComponentKey
                 )
             },
-            refreshSelection: (designator) => {
+            refreshSelection: (designator, sourceType) => {
                 this.#setSelection({
                     designator,
-                    sourceType: this.#resolveSelectionSourceType(designator)
+                    sourceType:
+                        sourceType ||
+                        this.#resolveSelectionSourceType(designator)
                 })
             }
         })
-
+        this.#visibilityControls = new PcbScene3dSelectionVisibilityBinder({
+            resolveDesignator: () => this.#selectedComponentKey,
+            resolveHidden: (designator) =>
+                Boolean(this.#runtime?.isComponentHidden?.(designator)),
+            setHidden: (designator, hidden) => {
+                this.#runtime?.setComponentHidden?.(designator, hidden)
+            },
+            refreshSelection: (designator, source) => {
+                this.#setSelection({
+                    designator,
+                    sourceType:
+                        source || this.#resolveSelectionSourceType(designator)
+                })
+            }
+        })
         this.#bindPresets()
         this.#setActivePresetButton('isometric')
         this.#bindToggles()
         this.#bindExportAction()
         this.#adjustmentControls.bindSelectionNode(this.#selectionNode)
+        this.#visibilityControls.bindSelectionNode(this.#selectionNode)
         this.#setSelection(null)
         this.#setLoadingVisible(true)
         const circuitJsonModel = PcbScene3dController.#resolveCircuitJsonModel(
@@ -287,6 +307,8 @@ export class PcbScene3dController {
         this.#scenePrepClient = null
         this.#adjustmentControls?.dispose()
         this.#adjustmentControls = null
+        this.#visibilityControls?.dispose()
+        this.#visibilityControls = null
         this.#runtime?.dispose?.()
         this.#runtime = null
         this.#sceneDescription = null
@@ -739,6 +761,9 @@ export class PcbScene3dController {
             this.#selectionNode.innerHTML =
                 PcbScene3dSelectionInspectorRenderer.renderSelected({
                     designator,
+                    hidden: Boolean(
+                        this.#runtime?.isComponentHidden?.(designator)
+                    ),
                     selection,
                     selectionEntry,
                     adjustment,

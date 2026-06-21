@@ -225,6 +225,32 @@ test('PcbScene3dCameraRig suppresses height parallax in top inspection preset', 
     assert.ok(projectionHeightDrift(camera) < 0.001)
 })
 
+test('PcbScene3dCameraRig keeps inspection pan scale zoom-aware once', () => {
+    const camera = createCamera()
+    const controls = createControls()
+    const sceneDescription = createSceneDescription()
+
+    PcbScene3dCameraRig.applyPreset(
+        camera,
+        controls,
+        'isometric',
+        sceneDescription
+    )
+    PcbScene3dCameraRig.applyPreset(camera, controls, 'top', sceneDescription)
+    const visibleHeight = camera.top - camera.bottom
+    const visibleWidth = camera.right - camera.left
+    const lowerBeforeZoom = new THREE.Vector3(500, 100, 0).project(camera)
+
+    camera.zoom = 2
+    camera.updateProjectionMatrix()
+    const lowerAfterZoom = new THREE.Vector3(500, 100, 0).project(camera)
+
+    assert.equal(camera.top - camera.bottom, visibleHeight)
+    assert.equal(camera.right - camera.left, visibleWidth)
+    assert.ok(Math.abs(lowerAfterZoom.x) > Math.abs(lowerBeforeZoom.x))
+    assert.equal((camera.top - camera.bottom) / camera.zoom, visibleHeight / 2)
+})
+
 test('PcbScene3dCameraRig inspection projection does not compound', () => {
     const camera = createCamera()
     const controls = createControls()

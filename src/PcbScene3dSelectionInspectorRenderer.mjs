@@ -46,12 +46,13 @@ export class PcbScene3dSelectionInspectorRenderer {
 
     /**
      * Renders selected component details and optional editable transform controls.
-     * @param {{ designator: string, selection?: { sourceType?: string } | null, selectionEntry: { component: any | null, externalPlacement: any | null }, adjustment: { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }, includeControls?: boolean, translate: (key: string) => string }} options Render options.
+     * @param {{ designator: string, hidden?: boolean, selection?: { sourceType?: string } | null, selectionEntry: { component: any | null, externalPlacement: any | null }, adjustment: { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }, includeControls?: boolean, translate: (key: string) => string }} options Render options.
      * @returns {string}
      */
     static renderSelected(options) {
         const component = options.selectionEntry.component
         const externalPlacement = options.selectionEntry.externalPlacement
+        const hidden = options.hidden === true
         const fields = [
             [options.translate('scene3d.designator'), options.designator],
             [
@@ -127,11 +128,18 @@ export class PcbScene3dSelectionInspectorRenderer {
         ].filter(([, value]) => String(value || '').trim())
 
         return (
-            '<h4 class="scene-3d__selection-title">' +
+            '<div class="scene-3d__selection-header"><h4 class="scene-3d__selection-title">' +
             PcbScene3dSelectionInspectorRenderer.#escapeHtml(
                 options.translate('scene3d.componentInspector')
             ) +
-            '</h4><dl class="scene-3d__selection-list">' +
+            '</h4>' +
+            PcbScene3dSelectionInspectorRenderer.#renderVisibilityToggle(
+                options.designator,
+                options.selection?.sourceType || '',
+                hidden,
+                options.translate
+            ) +
+            '</div><dl class="scene-3d__selection-list">' +
             fields
                 .map(
                     ([label, value]) =>
@@ -458,6 +466,59 @@ export class PcbScene3dSelectionInspectorRenderer {
                 )
                 .join('') +
             '</fieldset>'
+        )
+    }
+
+    /**
+     * Renders the selected-component visibility toggle.
+     * @param {string} designator Selected component designator.
+     * @param {string} sourceType Selection source type.
+     * @param {boolean} hidden Whether the component is hidden.
+     * @param {(key: string) => string} translate Translation lookup.
+     * @returns {string}
+     */
+    static #renderVisibilityToggle(designator, sourceType, hidden, translate) {
+        const label = hidden
+            ? translate('scene3d.showSelectedComponent')
+            : translate('scene3d.hideSelectedComponent')
+        const iconClass = hidden
+            ? 'scene-3d__selection-eye-icon scene-3d__selection-eye-off-icon'
+            : 'scene-3d__selection-eye-icon'
+
+        return (
+            '<button class="scene-3d__selection-visibility" type="button" data-scene-3d-component-visibility="' +
+            PcbScene3dSelectionInspectorRenderer.#escapeHtml(designator) +
+            '" data-scene-3d-component-source="' +
+            PcbScene3dSelectionInspectorRenderer.#escapeHtml(sourceType) +
+            '" aria-label="' +
+            PcbScene3dSelectionInspectorRenderer.#escapeHtml(label) +
+            '" title="' +
+            PcbScene3dSelectionInspectorRenderer.#escapeHtml(label) +
+            '" aria-pressed="' +
+            (hidden ? 'true' : 'false') +
+            '"><span class="' +
+            iconClass +
+            '" aria-hidden="true">' +
+            PcbScene3dSelectionInspectorRenderer.#renderVisibilityIcon(
+                !hidden
+            ) +
+            '</span></button>'
+        )
+    }
+
+    /**
+     * Renders an eye icon for component visibility state.
+     * @param {boolean} visible Whether the component is visible.
+     * @returns {string}
+     */
+    static #renderVisibilityIcon(visible) {
+        const slash = visible ? '' : '<path d="M4 4l16 16" />'
+        return (
+            '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">' +
+            '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z" />' +
+            '<circle cx="12" cy="12" r="2.5" />' +
+            slash +
+            '</svg>'
         )
     }
 

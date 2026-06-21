@@ -13,7 +13,7 @@ export class PcbScene3dExternalModelPlacementRepair {
         '#333333',
         '#3f3f3f'
     ])
-    static #MIN_CENTER_ERROR_MIL = 25
+    static #MIN_CENTER_ERROR_MIL = 1
     static #MIN_TERMINAL_SIZE_MIL = 1
     static #SOURCE_ORIGIN_SHIFT_EPSILON_MIL = 0.01
     static #SOURCE_Z_DEPTH_MIN_RATIO = 1.5
