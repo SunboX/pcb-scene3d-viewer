@@ -739,15 +739,37 @@ export class PcbAssemblyStepWriter {
     }
 
     /**
-     * Returns clamped RGB components for one mesh color.
+     * Returns display-space RGB components for one mesh color.
      * @param {number[] | undefined} color Mesh RGB color.
      * @returns {number[]}
      */
     static #colorComponents(color) {
         const normalized = Array.isArray(color) ? color : [0.55, 0.56, 0.58]
         return [0, 1, 2].map((index) =>
-            Math.max(Math.min(Number(normalized[index] || 0), 1), 0)
+            PcbAssemblyStepWriter.#linearToSrgb(
+                PcbAssemblyStepWriter.#clampColorChannel(normalized[index])
+            )
         )
+    }
+
+    /**
+     * Clamps one color channel to the STEP RGB range.
+     * @param {unknown} value Candidate color channel.
+     * @returns {number}
+     */
+    static #clampColorChannel(value) {
+        return Math.max(Math.min(Number(value || 0), 1), 0)
+    }
+
+    /**
+     * Converts one linear RGB channel to display-space sRGB.
+     * @param {number} value Linear RGB channel.
+     * @returns {number}
+     */
+    static #linearToSrgb(value) {
+        return value <= 0.0031308
+            ? value * 12.92
+            : 1.055 * Math.pow(value, 1 / 2.4) - 0.055
     }
 
     /**

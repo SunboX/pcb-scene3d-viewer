@@ -381,6 +381,17 @@ function resolveFallbackBodiesGroup() {
 }
 
 /**
+ * Resolves one fallback root by designator.
+ * @param {string} designator Component designator.
+ * @returns {FakeGroup | undefined}
+ */
+function resolveFallbackRoot(designator) {
+    return resolveFallbackBodiesGroup()?.children?.find(
+        (child) => child?.userData?.scene3dSelection?.designator === designator
+    )
+}
+
+/**
  * Resolves the root PCB render group from the current fake scene tree.
  * @returns {FakeGroup | undefined}
  */
@@ -464,6 +475,87 @@ function createSceneDescription(externalPlacements = []) {
         externalPlacements
     }
 }
+
+test('PcbScene3dRuntime tags fallback bodies that stitch partial embedded external models', async () => {
+    const originalWindow = globalThis.window
+    const originalDocument = globalThis.document
+    const originalLoadIntoScene = PcbScene3dExternalModels.loadIntoScene
+    let loadedSceneDescription = null
+
+    globalThis.window = {
+        devicePixelRatio: 1,
+        requestAnimationFrame(callback) {
+            callback()
+        },
+        addEventListener() {},
+        removeEventListener() {}
+    }
+    globalThis.document = {}
+    lastCreatedScene = null
+    PcbScene3dExternalModels.loadIntoScene = async (options) => {
+        loadedSceneDescription = options.sceneDescription
+        const placement = options.sceneDescription.externalPlacements[0]
+        options.onPlacementGroup?.(placement, new FakeGroup())
+        return []
+    }
+
+    const runtime = new PcbScene3dRuntime(
+        new FakeViewportNode(),
+        createSceneDescription([
+            {
+                designator: 'U1',
+                mountSide: 'top',
+                positionMil: { x: 0, y: 0, z: 0 },
+                projection: {
+                    source: 'model-anchor-fallback',
+                    boundsMil: { width: 0, depth: 0, height: 0 }
+                },
+                externalModel: {
+                    origin: 'embedded',
+                    name: 'partial-body.step',
+                    format: 'step'
+                }
+            },
+            {
+                designator: 'C1',
+                mountSide: 'top',
+                positionMil: { x: 20, y: 20, z: 0 },
+                projection: {
+                    source: 'pad-fallback',
+                    boundsMil: { width: 10, depth: 10, height: 5 }
+                },
+                externalModel: {
+                    origin: 'embedded',
+                    name: 'stitched-chip.step',
+                    format: 'step'
+                }
+            }
+        ]),
+        {
+            loadRuntimeModules: async () => createFakeRuntimeModules()
+        }
+    )
+
+    try {
+        await runtime.whenReady()
+        await flushAsyncTurns(4)
+
+        const fallbackRoot = resolveFallbackRoot('U1')
+        assert.equal(
+            fallbackRoot?.userData?.scene3dFallbackExternalCompanion,
+            true
+        )
+        assert.equal(
+            loadedSceneDescription?.externalPlacements?.[1]?.positionMil?.z,
+            40
+        )
+    } finally {
+        runtime.dispose()
+        PcbScene3dExternalModels.loadIntoScene = originalLoadIntoScene
+        globalThis.window = originalWindow
+        globalThis.document = originalDocument
+    }
+})
 
 test('PcbScene3dRuntime reports ready before slow external model loading settles', async () => {
     const originalWindow = globalThis.window

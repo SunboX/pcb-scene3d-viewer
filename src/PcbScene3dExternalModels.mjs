@@ -293,6 +293,12 @@ export class PcbScene3dExternalModels {
             designator,
             sourceType: 'external-model'
         }
+        const variantGroupKey = String(
+            placement?.coLocatedVariantGroupKey || ''
+        ).trim()
+        if (variantGroupKey) {
+            wrapperGroup.userData.scene3dVariantGroupKey = variantGroupKey
+        }
         adjustmentGroup.userData.scene3dAdjustmentTarget = true
         adjustmentGroup.userData.scene3dAdjustmentDesignator = designator
         adjustmentGroup.userData.scene3dAdjustmentBaseline =

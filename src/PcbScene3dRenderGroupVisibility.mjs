@@ -37,9 +37,16 @@ export class PcbScene3dRenderGroupVisibility {
             state?.groups?.get('copper'),
             boardAssemblyActive
         )
+        const showFallbackBodies =
+            !boardAssemblyActive &&
+            (Boolean(state?.toggles?.['fallback-bodies']) ||
+                PcbScene3dFallbackVisibility.hasVisibleExternalCompanion(
+                    state?.fallbackBodyRoots,
+                    state?.toggles
+                ))
         PcbScene3dRenderGroupVisibility.#setVisible(
             state?.groups?.get('fallback-bodies'),
-            Boolean(state?.toggles?.['fallback-bodies']) && !boardAssemblyActive
+            showFallbackBodies
         )
 
         PcbScene3dFallbackVisibility.applyVisibility(

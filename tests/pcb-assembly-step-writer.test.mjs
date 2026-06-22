@@ -179,7 +179,7 @@ test('PcbAssemblyStepWriter writes displayable surface-backed B-rep topology', (
     assert.match(stepText, /EDGE_LOOP\('/)
     assert.match(stepText, /ORIENTED_EDGE\('/)
     assert.match(stepText, /EDGE_CURVE\('/)
-    assert.match(stepText, /COLOUR_RGB\('',0\.05,0\.32,0\.18\)/)
+    assert.match(stepText, /COLOUR_RGB\('',0\.247801,0\.601243,0\.461356\)/)
     assert.match(stepText, /STYLED_ITEM\('',\(#\d+\),#\d+\)/)
     assert.doesNotMatch(stepText, /FACETED_BREP\('/)
     assert.doesNotMatch(stepText, /#[0-9]+=FACE\('/)
@@ -225,10 +225,27 @@ test('PcbAssemblyStepWriter uses compact tessellated STEP for dense detail', () 
     assert.match(stepText, /AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF/)
     assert.match(stepText, /TESSELLATED_SHAPE_REPRESENTATION\('/)
     assert.match(stepText, /TRIANGULATED_SURFACE_SET\('/)
-    assert.match(stepText, /COLOUR_RGB\('',0\.05,0\.32,0\.18\)/)
+    assert.match(stepText, /COLOUR_RGB\('',0\.247801,0\.601243,0\.461356\)/)
     assert.match(stepText, /STYLED_ITEM\('',\(#\d+\),#\d+\)/)
     assert.doesNotMatch(stepText, /MANIFOLD_SOLID_BREP\('/)
     assert.ok(stepText.length < 2_500_000)
+})
+
+test('PcbAssemblyStepWriter writes mesh colors as display sRGB values', () => {
+    const stepText = PcbAssemblyStepWriter.write({
+        name: 'colored-package',
+        meshes: [
+            PcbAssemblyMeshUtils.box('gold-body', {
+                width: 10,
+                depth: 10,
+                height: 10,
+                color: [0.95, 0.63, 0.22]
+            })
+        ]
+    })
+
+    assert.match(stepText, /COLOUR_RGB\('',0\.977692,0\.815251,0\.506386\)/)
+    assert.doesNotMatch(stepText, /COLOUR_RGB\('',0\.95,0\.63,0\.22\)/)
 })
 
 test('PcbAssemblyStepWriter tessellates concave board outlines without fill chords', () => {

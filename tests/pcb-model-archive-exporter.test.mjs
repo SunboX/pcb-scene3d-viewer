@@ -166,3 +166,233 @@ test('PcbModelArchiveExporter sanitizes path separators in pattern names', async
         ['CON-6.35-YKB21-5012SN.step']
     )
 })
+
+/**
+ * Verifies authored stacked components receive a generated per-component STEP
+ * in addition to the raw model files used by the browser scene.
+ */
+test('PcbModelArchiveExporter adds stitched STEP entries for component stacks', async () => {
+    const result = await PcbModelArchiveExporter.buildArchive({
+        archiveBaseName: 'stacked-demo',
+        modelMeshLoader(placement) {
+            return [
+                {
+                    name: 'child-' + placement.externalModel.name,
+                    vertices: [
+                        [0, 0, 0],
+                        [10, 0, 0],
+                        [0, 10, 0],
+                        [0, 0, 10]
+                    ],
+                    faces: [
+                        [0, 2, 1],
+                        [0, 1, 3],
+                        [1, 2, 3],
+                        [2, 0, 3]
+                    ],
+                    color: [0.1, 0.2, 0.3]
+                }
+            ]
+        },
+        sceneDescription: {
+            staticBodyPlacements: [
+                {
+                    designator: 'XO1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 100, y: 200, z: 40 },
+                    coLocatedVariantGroupKey: 'stack:xo',
+                    bodyColor: { rgb: { red: 128, green: 128, blue: 128 } },
+                    geometry: {
+                        kind: 'extruded-polygon',
+                        heightMil: 40,
+                        verticesMil: [
+                            { x: -50, y: -30 },
+                            { x: 50, y: -30 },
+                            { x: 50, y: 30 },
+                            { x: -50, y: 30 }
+                        ]
+                    }
+                }
+            ],
+            externalPlacements: [
+                {
+                    designator: 'XO1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 100, y: 200, z: 20 },
+                    coLocatedVariantGroupKey: 'stack:xo',
+                    modelTransform: {
+                        offsetMil: { x: -20, y: 10, z: 40 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'crystal.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;\nCRYSTAL',
+                        sourceStream: 'Models/crystal'
+                    }
+                },
+                {
+                    designator: 'XO1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 100, y: 200, z: 20 },
+                    coLocatedVariantGroupKey: 'stack:xo',
+                    modelTransform: {
+                        offsetMil: { x: 35, y: -15, z: 40 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'capacitor.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;\nCAPACITOR',
+                        sourceStream: 'Models/capacitor'
+                    }
+                }
+            ]
+        }
+    })
+
+    assert.deepEqual(
+        result.exportedEntries.map((entry) => entry.archivePath).sort(),
+        ['XO1--2.step', 'XO1.step', 'stitched-components/XO1.step']
+    )
+
+    const archive = unzipSync(result.archiveBytes)
+    const stitchedText = new TextDecoder().decode(
+        archive['stitched-components/XO1.step']
+    )
+    assert.match(stitchedText, /ISO-10303-21/)
+    assert.match(stitchedText, /static-XO1/)
+    assert.match(stitchedText, /child-crystal\.step/)
+    assert.match(stitchedText, /child-capacitor\.step/)
+})
+
+/**
+ * Verifies callers can request only generated stitched entries for selected
+ * designators without exporting the raw source model files.
+ */
+test('PcbModelArchiveExporter filters stitched entries by selected designator', async () => {
+    const result = await PcbModelArchiveExporter.buildArchive({
+        archiveBaseName: 'stacked-demo',
+        includeRawModels: false,
+        stitchedDesignators: ['XO2'],
+        modelMeshLoader(placement) {
+            return {
+                name: 'child-' + placement.externalModel.name,
+                vertices: [
+                    [0, 0, 0],
+                    [10, 0, 0],
+                    [0, 10, 0],
+                    [0, 0, 10]
+                ],
+                faces: [
+                    [0, 2, 1],
+                    [0, 1, 3],
+                    [1, 2, 3],
+                    [2, 0, 3]
+                ]
+            }
+        },
+        sceneDescription: {
+            staticBodyPlacements: ['XO1', 'XO2'].map((designator, index) => ({
+                designator,
+                mountSide: 'top',
+                positionMil: { x: index * 100, y: 0, z: 20 },
+                coLocatedVariantGroupKey: 'stack:' + designator,
+                geometry: {
+                    kind: 'extruded-polygon',
+                    heightMil: 40,
+                    verticesMil: [
+                        { x: -10, y: -10 },
+                        { x: 10, y: -10 },
+                        { x: 10, y: 10 },
+                        { x: -10, y: 10 }
+                    ]
+                }
+            })),
+            externalPlacements: ['XO1', 'XO2'].map((designator, index) => ({
+                designator,
+                coLocatedVariantGroupKey: 'stack:' + designator,
+                positionMil: { x: index * 100, y: 0, z: 60 },
+                externalModel: {
+                    origin: 'embedded',
+                    name: designator.toLowerCase() + '.step',
+                    format: 'step',
+                    payloadText: 'ISO-10303-21;\n' + designator,
+                    sourceStream: 'Models/' + designator
+                }
+            }))
+        }
+    })
+
+    assert.deepEqual(
+        result.exportedEntries.map((entry) => entry.archivePath),
+        ['stitched-components/XO2.step']
+    )
+
+    const archive = unzipSync(result.archiveBytes)
+    assert.deepEqual(Object.keys(archive), ['stitched-components/XO2.step'])
+    assert.match(
+        new TextDecoder().decode(archive['stitched-components/XO2.step']),
+        /child-xo2\.step/
+    )
+})
+
+/**
+ * Verifies a failed generated stitched model does not prevent the archive from
+ * returning the original source model files.
+ */
+test('PcbModelArchiveExporter skips failed stitched entries without dropping raw models', async () => {
+    const result = await PcbModelArchiveExporter.buildArchive({
+        archiveBaseName: 'stacked-demo',
+        modelMeshLoader() {
+            throw new Error('mesh conversion unavailable')
+        },
+        sceneDescription: {
+            staticBodyPlacements: [
+                {
+                    designator: 'XO1',
+                    mountSide: 'top',
+                    positionMil: { x: 0, y: 0, z: 20 },
+                    coLocatedVariantGroupKey: 'stack:xo',
+                    geometry: {
+                        kind: 'extruded-polygon',
+                        heightMil: 40,
+                        verticesMil: [
+                            { x: -10, y: -10 },
+                            { x: 10, y: -10 },
+                            { x: 10, y: 10 },
+                            { x: -10, y: 10 }
+                        ]
+                    }
+                }
+            ],
+            externalPlacements: [
+                {
+                    designator: 'XO1',
+                    coLocatedVariantGroupKey: 'stack:xo',
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'crystal.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;\nCRYSTAL',
+                        sourceStream: 'Models/crystal'
+                    }
+                }
+            ]
+        }
+    })
+
+    assert.deepEqual(
+        result.exportedEntries.map((entry) => entry.archivePath),
+        ['XO1.step']
+    )
+    assert.equal(result.skippedEntries.length, 1)
+    assert.equal(result.skippedEntries[0].designator, 'XO1')
+    assert.match(result.skippedEntries[0].reason, /mesh conversion unavailable/)
+
+    const archive = unzipSync(result.archiveBytes)
+    assert.deepEqual(Object.keys(archive), ['XO1.step'])
+})

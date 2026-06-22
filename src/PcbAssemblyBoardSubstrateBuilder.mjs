@@ -145,11 +145,13 @@ export class PcbAssemblyBoardSubstrateBuilder {
      * @returns {number[][][]}
      */
     static #boardHoleLoops(sceneDescription, outer) {
-        const contourLoops =
-            PcbAssemblyBoardSubstrateBuilder.#drillCutoutLoops(sceneDescription)
-        const rawLoops = contourLoops.length
-            ? contourLoops
-            : PcbAssemblyBoardSubstrateBuilder.#primitiveHoleLoops(
+        const primitiveLoops =
+            PcbAssemblyBoardSubstrateBuilder.#primitiveHoleLoops(
+                sceneDescription
+            )
+        const rawLoops = primitiveLoops.length
+            ? primitiveLoops
+            : PcbAssemblyBoardSubstrateBuilder.#drillCutoutLoops(
                   sceneDescription
               )
         const seen = new Set()

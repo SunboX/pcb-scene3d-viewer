@@ -1,5 +1,6 @@
 import { PcbAssemblyBoardSubstrateBuilder } from './PcbAssemblyBoardSubstrateBuilder.mjs'
 import { PcbAssemblyMeshUtils } from './PcbAssemblyMeshUtils.mjs'
+import { PcbAssemblyPadMeshBuilder } from './PcbAssemblyPadMeshBuilder.mjs'
 
 const COPPER_THICKNESS_MIL = 2.2
 const SILKSCREEN_THICKNESS_MIL = 0.8
@@ -166,19 +167,21 @@ export class PcbAssemblyGeometryBuilder {
         const pads = PcbAssemblyGeometryBuilder.#array(detail.pads)
         for (let index = 0; index < pads.length; index += 1) {
             const pad = pads[index]
-            const topMesh = PcbAssemblyGeometryBuilder.#padMesh(
+            const topMesh = PcbAssemblyPadMeshBuilder.build(
                 'pad-top-' + (index + 1),
                 pad,
                 'top',
                 topZ,
-                COPPER_THICKNESS_MIL
+                COPPER_THICKNESS_MIL,
+                COPPER_COLOR
             )
-            const bottomMesh = PcbAssemblyGeometryBuilder.#padMesh(
+            const bottomMesh = PcbAssemblyPadMeshBuilder.build(
                 'pad-bottom-' + (index + 1),
                 pad,
                 'bottom',
                 bottomZ,
-                COPPER_THICKNESS_MIL
+                COPPER_THICKNESS_MIL,
+                COPPER_COLOR
             )
             if (topMesh) meshes.push(topMesh)
             await progress?.advance?.(
@@ -580,136 +583,6 @@ export class PcbAssemblyGeometryBuilder {
             z,
             thickness,
             color
-        )
-    }
-
-    /**
-     * Builds one pad mesh.
-     * @param {string} name Mesh name.
-     * @param {object} pad Pad primitive.
-     * @param {'top' | 'bottom'} side Pad side.
-     * @param {number} z Center Z.
-     * @param {number} thickness Extrusion thickness.
-     * @returns {object | null}
-     */
-    static #padMesh(name, pad, side, z, thickness) {
-        const size = PcbAssemblyGeometryBuilder.#padSize(pad, side)
-        if (!size) {
-            return null
-        }
-
-        const offset = PcbAssemblyGeometryBuilder.#padOffset(pad, side)
-        const x = Number(pad?.x || 0) + offset.x
-        const y = Number(pad?.y || 0) + offset.y
-        const shape = PcbAssemblyGeometryBuilder.#padShape(pad, side)
-        const isCircle =
-            Math.abs(size.width - size.height) < 0.001 && shape !== 2
-        const mesh = isCircle
-            ? PcbAssemblyMeshUtils.cylinder(name, {
-                  x,
-                  y,
-                  z,
-                  radius: size.width / 2,
-                  height: thickness,
-                  color: COPPER_COLOR
-              })
-            : PcbAssemblyMeshUtils.box(name, {
-                  x,
-                  y,
-                  z,
-                  width: size.width,
-                  depth: size.height,
-                  height: thickness,
-                  color: COPPER_COLOR
-              })
-
-        return PcbAssemblyGeometryBuilder.#rotateMeshAroundZ(
-            mesh,
-            Number(pad?.rotation || 0),
-            x,
-            y
-        )
-    }
-
-    /**
-     * Resolves side-specific pad dimensions.
-     * @param {object} pad Pad primitive.
-     * @param {'top' | 'bottom'} side Pad side.
-     * @returns {{ width: number, height: number } | null}
-     */
-    static #padSize(pad, side) {
-        const prefix = side === 'bottom' ? 'Bottom' : 'Top'
-        let width = PcbAssemblyGeometryBuilder.#firstPositive([
-            pad?.['size' + prefix + 'X']
-        ])
-        let height = PcbAssemblyGeometryBuilder.#firstPositive([
-            pad?.['size' + prefix + 'Y']
-        ])
-
-        if (side === 'top' && !width) {
-            width = PcbAssemblyGeometryBuilder.#firstPositive([
-                pad?.width,
-                pad?.sizeX,
-                pad?.diameter,
-                pad?.sizeMidX,
-                pad?.sizeBottomX
-            ])
-        }
-        if (side === 'top' && !height) {
-            height = PcbAssemblyGeometryBuilder.#firstPositive([
-                pad?.height,
-                pad?.sizeY,
-                pad?.diameter,
-                pad?.sizeMidY,
-                pad?.sizeBottomY,
-                width
-            ])
-        }
-        if (width && !height) {
-            height = width
-        }
-
-        return width && height
-            ? {
-                  width: Math.max(width, 1),
-                  height: Math.max(height, 1)
-              }
-            : null
-    }
-
-    /**
-     * Resolves side-specific pad center offset.
-     * @param {object} pad Pad primitive.
-     * @param {'top' | 'bottom'} side Pad side.
-     * @returns {{ x: number, y: number }}
-     */
-    static #padOffset(pad, side) {
-        const prefix = side === 'bottom' ? 'Bottom' : 'Top'
-
-        return {
-            x: Number(pad?.['offset' + prefix + 'X'] || 0),
-            y: Number(pad?.['offset' + prefix + 'Y'] || 0)
-        }
-    }
-
-    /**
-     * Resolves the renderer pad shape code for one side.
-     * @param {object} pad Pad primitive.
-     * @param {'top' | 'bottom'} side Pad side.
-     * @returns {number}
-     */
-    static #padShape(pad, side) {
-        const prefix = side === 'bottom' ? 'Bottom' : 'Top'
-        const rounded = pad?.['roundedRectShape' + prefix]
-        if (Number.isInteger(Number(rounded))) {
-            return Number(rounded)
-        }
-
-        return Number(
-            pad?.['shape' + prefix] ||
-                pad?.shapeMid ||
-                (side === 'top' ? pad?.shapeBottom : pad?.shapeTop) ||
-                0
         )
     }
 

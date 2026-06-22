@@ -120,6 +120,89 @@ function createDrilledBoardScene() {
 }
 
 /**
+ * Builds a drilled board scene whose render masks include dense duplicate
+ * drill contours that should not drive STEP substrate triangulation.
+ * @returns {object}
+ */
+function createPrimitiveDrillWithDenseCutoutScene() {
+    const scene = createDrilledBoardScene()
+    scene.detail.vias = [{ x: 100, y: 100, holeDiameter: 40 }]
+    scene.detail.silkscreen.top.drillCutouts = [circlePoints(100, 100, 20, 96)]
+    scene.detail.silkscreen.bottom.drillCutouts = [
+        circlePoints(100, 100, 20, 96)
+    ]
+    return scene
+}
+
+/**
+ * Builds a scene with a through-hole pad whose copper should preserve the
+ * drill opening.
+ * @returns {object}
+ */
+function createDrilledPadScene() {
+    const scene = createCenteredScene()
+    scene.detail.pads = [
+        {
+            x: 600,
+            y: 260,
+            shapeTop: 2,
+            shapeBottom: 2,
+            sizeTopX: 80,
+            sizeTopY: 80,
+            sizeBottomX: 80,
+            sizeBottomY: 80,
+            holeDiameter: 40
+        }
+    ]
+    return scene
+}
+
+/**
+ * Builds a scene with a drill-only circular pad that has no copper annulus.
+ * @returns {object}
+ */
+function createDrillOnlyPadScene() {
+    const scene = createCenteredScene()
+    scene.detail.pads = [
+        {
+            x: 600,
+            y: 260,
+            shapeTop: 1,
+            shapeBottom: 1,
+            sizeTopX: 80,
+            sizeTopY: 80,
+            sizeBottomX: 80,
+            sizeBottomY: 80,
+            holeDiameter: 80
+        }
+    ]
+    return scene
+}
+
+/**
+ * Builds a scene with a long slotted drill that still leaves side copper.
+ * @returns {object}
+ */
+function createSlottedPadScene() {
+    const scene = createCenteredScene()
+    scene.detail.pads = [
+        {
+            x: 600,
+            y: 260,
+            shapeTop: 1,
+            shapeBottom: 1,
+            sizeTopX: 120,
+            sizeTopY: 120,
+            sizeBottomX: 120,
+            sizeBottomY: 120,
+            holeDiameter: 40,
+            holeSlotLength: 120
+        }
+    ]
+    return scene
+}
+
+/**
  * Builds evenly-spaced circle points.
  * @param {number} x Center X.
  * @param {number} y Center Y.
@@ -187,9 +270,10 @@ function meshBounds(mesh) {
  * Finds planar board face centroids within a given radius.
  * @param {{ vertices?: number[][], faces?: number[][] }} mesh Mesh data.
  * @param {number} radius Radius from the local origin.
+ * @param {number[]} [center]
  * @returns {number[][]}
  */
-function planarCentroidsInsideRadius(mesh, radius) {
+function planarCentroidsInsideRadius(mesh, radius, center = [0, 0]) {
     const vertices = mesh.vertices || []
     const zValues = vertices.map((vertex) => Number(vertex[2] || 0))
     const minZ = Math.min(...zValues)
@@ -212,7 +296,10 @@ function planarCentroidsInsideRadius(mesh, radius) {
                     points.length
             ]
         })
-        .filter((point) => Math.hypot(point[0], point[1]) < radius)
+        .filter(
+            (point) =>
+                Math.hypot(point[0] - center[0], point[1] - center[1]) < radius
+        )
 }
 
 test('PcbAssemblyGeometryBuilder exports PCB details in the component placement origin', async () => {
@@ -265,4 +352,53 @@ test('PcbAssemblyGeometryBuilder cuts drill holes through the board substrate', 
 
     assert.deepEqual(planarCentroidsInsideRadius(board, 19), [])
     assert.ok(board.vertices.length > 8)
+})
+
+test('PcbAssemblyGeometryBuilder prefers primitive drill loops over dense render cutouts', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createPrimitiveDrillWithDenseCutoutScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const board = findMesh(geometry.meshes, 'board')
+
+    assert.deepEqual(planarCentroidsInsideRadius(board, 19), [])
+    assert.equal(board.vertices.length, 56)
+})
+
+test('PcbAssemblyGeometryBuilder leaves drilled pad openings uncovered', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createDrilledPadScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const topPad = findMesh(geometry.meshes, 'pad-top-1')
+    const bottomPad = findMesh(geometry.meshes, 'pad-bottom-1')
+
+    assert.deepEqual(planarCentroidsInsideRadius(topPad, 10, [100, 10]), [])
+    assert.deepEqual(planarCentroidsInsideRadius(bottomPad, 10, [100, 10]), [])
+    assert.ok(topPad.vertices.length > 8)
+    assert.ok(bottomPad.vertices.length > 8)
+})
+
+test('PcbAssemblyGeometryBuilder omits drill-only circular pad copper', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createDrillOnlyPadScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+
+    assert.equal(findMesh(geometry.meshes, 'pad-top-1'), undefined)
+    assert.equal(findMesh(geometry.meshes, 'pad-bottom-1'), undefined)
+})
+
+test('PcbAssemblyGeometryBuilder keeps copper beside slotted circular pad drills', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createSlottedPadScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const topPad = findMesh(geometry.meshes, 'pad-top-1')
+    const bottomPad = findMesh(geometry.meshes, 'pad-bottom-1')
+
+    assert.ok(topPad)
+    assert.ok(bottomPad)
+    assert.deepEqual(planarCentroidsInsideRadius(topPad, 10, [100, 10]), [])
+    assert.deepEqual(planarCentroidsInsideRadius(bottomPad, 10, [100, 10]), [])
 })

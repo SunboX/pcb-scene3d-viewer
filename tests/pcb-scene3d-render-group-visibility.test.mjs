@@ -177,3 +177,36 @@ test('PcbScene3dRenderGroupVisibility hides only model-search external roots', (
 
     assert.equal(modelSearchRoot.visible, true)
 })
+
+test('PcbScene3dRenderGroupVisibility keeps fallback group for stitched external companions', () => {
+    const groups = new Map(
+        [
+            'board',
+            'silkscreen',
+            'copper',
+            'fallback-bodies',
+            'external-models'
+        ].map((name) => [name, new FakeGroup()])
+    )
+    const companionFallback = new FakeGroup()
+    companionFallback.userData = {
+        scene3dFallbackExternalCompanion: true
+    }
+    const fallbackBodyRoots = new Map([['XO1', new Set([companionFallback])]])
+    groups.get('fallback-bodies').add(companionFallback)
+
+    PcbScene3dRenderGroupVisibility.apply({
+        groups,
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': false,
+            copper: true
+        },
+        fallbackBodyRoots,
+        loadedExternalModelDesignators: new Set(['XO1']),
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(groups.get('fallback-bodies').visible, true)
+    assert.equal(companionFallback.visible, true)
+})

@@ -1,18 +1,19 @@
 import { PcbScene3dBoardSolderMaskFactory } from './PcbScene3dBoardSolderMaskFactory.mjs'
-import { PcbScene3dBodyColor } from './PcbScene3dBodyColor.mjs'
 import { PcbScene3dCameraRig } from './PcbScene3dCameraRig.mjs'
 import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs'
 import { PcbScene3dComponentVisibility } from './PcbScene3dComponentVisibility.mjs'
 import { PcbScene3dComponentAdjustment } from './PcbScene3dComponentAdjustment.mjs'
 import { PcbScene3dComponentAdjustmentRegistry } from './PcbScene3dComponentAdjustmentRegistry.mjs'
+import { PcbScene3dCompanionBasePlacementAdjuster } from './PcbScene3dCompanionBasePlacementAdjuster.mjs'
 import { PcbScene3dCopperDetailGroupBuilder } from './PcbScene3dCopperDetailGroupBuilder.mjs'
 import { PcbScene3dCopperFactory } from './PcbScene3dCopperFactory.mjs'
 import { PcbScene3dDetailCoordinateNormalizer } from './PcbScene3dDetailCoordinateNormalizer.mjs'
 import { PcbScene3dDrillVoidFactory } from './PcbScene3dDrillVoidFactory.mjs'
+import { PcbScene3dExternalCompanionFallback } from './PcbScene3dExternalCompanionFallback.mjs'
 import { PcbScene3dExternalModels } from './PcbScene3dExternalModels.mjs'
+import { PcbScene3dFallbackBodyFactory } from './PcbScene3dFallbackBodyFactory.mjs'
 import { PcbScene3dFallbackVisibility } from './PcbScene3dFallbackVisibility.mjs'
 import { PcbScene3dInteractionHints } from './PcbScene3dInteractionHints.mjs'
-import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 import { PcbScene3dModelSearchPlacement } from './PcbScene3dModelSearchPlacement.mjs'
 import { PcbScene3dPresetState } from './PcbScene3dPresetState.mjs'
 import { PcbScene3dRenderGroupVisibility } from './PcbScene3dRenderGroupVisibility.mjs'
@@ -22,6 +23,7 @@ import { PcbScene3dSilkscreenChunkedFactory } from './PcbScene3dSilkscreenChunke
 import { PcbScene3dTrueTypeTextFactory } from './PcbScene3dTrueTypeTextFactory.mjs'
 import { PcbScene3dSelectionResolver } from './PcbScene3dSelectionResolver.mjs'
 import { PcbScene3dSelectionStyler } from './PcbScene3dSelectionStyler.mjs'
+import { PcbScene3dStaticBodyFactory } from './PcbScene3dStaticBodyFactory.mjs'
 import { PcbScene3dViewportResize } from './PcbScene3dViewportResize.mjs'
 import { PcbScene3dViewScale } from './PcbScene3dViewScale.mjs'
 const SILKSCREEN_COPPER_CLEARANCE_MIL = 0.12
@@ -37,6 +39,7 @@ const Z_MIL = {
 export class PcbScene3dRuntime {
     #viewportNode
     #sceneDescription
+    #placementSceneDescription
     #hooks
     #toggles
     #groups
@@ -78,6 +81,8 @@ export class PcbScene3dRuntime {
             PcbScene3dRuntime.#normalizeSceneDescription(sceneDescription)
         this.#viewportNode = viewportNode
         this.#sceneDescription = renderModel
+        this.#placementSceneDescription =
+            PcbScene3dCompanionBasePlacementAdjuster.adjust(renderModel)
         this.#hooks = hooks
         this.#toggles = {
             'external-models': true,
@@ -385,19 +390,60 @@ export class PcbScene3dRuntime {
         this.#groups.set('copper', copperGroup)
         this.#rootGroup.add(copperGroup)
         const fallbackBodiesGroup = new THREE.Group()
+        const staticBodiesGroup = new THREE.Group()
         const externalModelsGroup = new THREE.Group()
         this.#sceneDescription.components.forEach((component) => {
-            const fallbackBody = this.#buildFallbackBody(component)
-            fallbackBodiesGroup.add(fallbackBody)
+            if (component?.renderFallbackBody === false) {
+                return
+            }
+
+            const isCompanionBase =
+                PcbScene3dExternalCompanionFallback.shouldKeepFallback(
+                    this.#sceneDescription,
+                    component
+                )
+            const fallbackBody = PcbScene3dFallbackBodyFactory.build(
+                THREE,
+                component,
+                { companionBase: isCompanionBase }
+            )
+            if (isCompanionBase) {
+                fallbackBody.rootGroup.userData.scene3dFallbackExternalCompanion = true
+            }
+            fallbackBodiesGroup.add(fallbackBody.rootGroup)
             PcbScene3dFallbackVisibility.registerFallbackRoot(
                 this.#fallbackBodyRoots,
                 component?.designator,
-                fallbackBody
+                fallbackBody.rootGroup
+            )
+            this.#registerSelectionRoot(
+                component?.designator,
+                fallbackBody.rootGroup
+            )
+            this.#componentAdjustmentRegistry.register(
+                component?.designator,
+                fallbackBody.adjustmentGroup
+            )
+        })
+        PcbScene3dStaticBodyFactory.buildMany(
+            THREE,
+            this.#placementSceneDescription.staticBodyPlacements
+        ).forEach((staticBody) => {
+            staticBodiesGroup.add(staticBody.rootGroup)
+            this.#registerSelectionRoot(
+                staticBody.placement?.designator,
+                staticBody.rootGroup
+            )
+            this.#componentAdjustmentRegistry.register(
+                staticBody.placement?.designator,
+                staticBody.adjustmentGroup
             )
         })
         this.#groups.set('fallback-bodies', fallbackBodiesGroup)
+        this.#groups.set('static-bodies', staticBodiesGroup)
         this.#groups.set('external-models', externalModelsGroup)
         this.#rootGroup.add(fallbackBodiesGroup)
+        this.#rootGroup.add(staticBodiesGroup)
         this.#rootGroup.add(externalModelsGroup)
         const boardSpan = Math.max(board.widthMil, board.heightMil, 1)
         this.#scene.fog = new THREE.Fog(
@@ -537,63 +583,6 @@ export class PcbScene3dRuntime {
     }
 
     /**
-     * Builds one procedural fallback body mesh.
-     * @param {{ positionMil: { x: number, y: number, z: number }, rotationDeg: number, mountSide: string, body: { family: string, sizeMil: { width: number, depth: number, height: number } } }} component
-     * @returns {any}
-     */
-    #buildFallbackBody(component) {
-        const THREE = this.#three
-        const family = component.body.family
-        const size = component.body.sizeMil
-        const material = new THREE.MeshStandardMaterial({
-            color: PcbScene3dBodyColor.resolve(family),
-            roughness: 0.72,
-            metalness: family === 'chip' ? 0.12 : 0.08
-        })
-
-        let mesh
-        if (family === 'radial-capacitor' || family === 'test-point') {
-            mesh = new THREE.Mesh(
-                new THREE.CylinderGeometry(
-                    size.width / 2,
-                    size.width / 2,
-                    size.height,
-                    28
-                ),
-                material
-            )
-        } else {
-            mesh = new THREE.Mesh(
-                new THREE.BoxGeometry(size.width, size.depth, size.height),
-                material
-            )
-        }
-
-        const mountRig = PcbScene3dMountRig.create(THREE, component)
-        const rootGroup = mountRig.rootGroup
-        const adjustmentGroup = new THREE.Group()
-
-        rootGroup.userData.scene3dSelection = {
-            designator: String(component?.designator || 'component'),
-            sourceType: 'component'
-        }
-        adjustmentGroup.userData.scene3dAdjustmentTarget = true
-        adjustmentGroup.userData.scene3dAdjustmentDesignator = String(
-            component?.designator || 'component'
-        )
-        adjustmentGroup.userData.scene3dAdjustmentBaseline =
-            PcbScene3dComponentAdjustment.neutral()
-        this.#registerSelectionRoot(component?.designator, rootGroup)
-        this.#componentAdjustmentRegistry.register(
-            component?.designator,
-            adjustmentGroup
-        )
-        adjustmentGroup.add(mesh)
-        mountRig.faceGroup.add(adjustmentGroup)
-        return rootGroup
-    }
-
-    /**
      * Attempts to load any resolved external 3D models.
      * @returns {Promise<void>}
      */
@@ -605,7 +594,7 @@ export class PcbScene3dRuntime {
 
         const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
             three: this.#three,
-            sceneDescription: this.#sceneDescription,
+            sceneDescription: this.#placementSceneDescription,
             externalModelsGroup,
             modelViewScale: PcbScene3dRuntime.resolveViewScale(
                 this.#presetState.get(),
@@ -770,6 +759,7 @@ export class PcbScene3dRuntime {
         })
         PcbScene3dComponentVisibility.apply({
             selectionRoots: this.#selectionRoots,
+            selectedDesignator: this.#selectedDesignator,
             hiddenDesignators: this.#hiddenComponentDesignators,
             fallbackBodyRoots: this.#fallbackBodyRoots,
             loadedExternalModelDesignators:
@@ -891,6 +881,7 @@ export class PcbScene3dRuntime {
 
         const selectableRoots = [
             this.#groups.get('external-models'),
+            this.#groups.get('static-bodies'),
             this.#groups.get('fallback-bodies')
         ].filter((group) => group && group.visible !== false)
         const intersections = this.#raycaster.intersectObjects(

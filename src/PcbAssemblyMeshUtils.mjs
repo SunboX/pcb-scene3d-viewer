@@ -1,3 +1,5 @@
+import earcut from 'earcut'
+
 const FULL_CIRCLE_DEGREES = 360
 
 /**
@@ -78,6 +80,100 @@ export class PcbAssemblyMeshUtils {
                 nextIndex + topOffset,
                 index + topOffset
             ])
+        }
+
+        return {
+            name,
+            vertices,
+            faces,
+            ...(Array.isArray(color) ? { color } : {})
+        }
+    }
+
+    /**
+     * Builds an extruded polygon mesh with inner cutout loops.
+     * @param {string} name Mesh name.
+     * @param {number[][]} outerPoints Outer polygon points in mils.
+     * @param {number[][][]} holeLoops Inner cutout loops in mils.
+     * @param {number} z Center Z in mils.
+     * @param {number} thickness Extrusion thickness in mils.
+     * @param {number[] | undefined} color Optional RGB color.
+     * @returns {{ name: string, vertices: number[][], faces: number[][], color?: number[] } | null}
+     */
+    static prismWithHoles(
+        name,
+        outerPoints,
+        holeLoops,
+        z,
+        thickness,
+        color = undefined
+    ) {
+        const outer = PcbAssemblyMeshUtils.cleanLoop(outerPoints)
+        const holes = (Array.isArray(holeLoops) ? holeLoops : [])
+            .map((loop) => PcbAssemblyMeshUtils.cleanLoop(loop))
+            .filter((loop) => loop.length >= 3)
+        if (outer.length < 3) {
+            return null
+        }
+        if (!holes.length) {
+            return PcbAssemblyMeshUtils.prism(name, outer, z, thickness, color)
+        }
+
+        const loops = [outer, ...holes]
+        const holeIndexes = []
+        const points = []
+        const flat = []
+        for (const loop of loops) {
+            if (points.length) {
+                holeIndexes.push(points.length)
+            }
+            for (const point of loop) {
+                points.push(point)
+                flat.push(point[0], point[1])
+            }
+        }
+
+        const triangles = earcut(flat, holeIndexes, 2)
+        if (!triangles.length) {
+            return PcbAssemblyMeshUtils.prism(name, outer, z, thickness, color)
+        }
+
+        const halfThickness = Math.max(Number(thickness || 0), 0.001) / 2
+        const bottomZ = Number(z || 0) - halfThickness
+        const topZ = Number(z || 0) + halfThickness
+        const topOffset = points.length
+        const vertices = [
+            ...points.map((point) => [point[0], point[1], bottomZ]),
+            ...points.map((point) => [point[0], point[1], topZ])
+        ]
+        const faces = []
+
+        for (let index = 0; index + 2 < triangles.length; index += 3) {
+            const a = triangles[index]
+            const b = triangles[index + 1]
+            const c = triangles[index + 2]
+            faces.push([c, b, a])
+            faces.push([a + topOffset, b + topOffset, c + topOffset])
+        }
+
+        let loopStart = 0
+        PcbAssemblyMeshUtils.#appendLoopWalls(
+            faces,
+            loopStart,
+            outer.length,
+            topOffset,
+            false
+        )
+        loopStart += outer.length
+        for (const hole of holes) {
+            PcbAssemblyMeshUtils.#appendLoopWalls(
+                faces,
+                loopStart,
+                hole.length,
+                topOffset,
+                true
+            )
+            loopStart += hole.length
         }
 
         return {
@@ -537,5 +633,26 @@ export class PcbAssemblyMeshUtils {
             .replace(/[^A-Za-z0-9_.-]+/gu, '-')
             .replace(/^-+|-+$/gu, '')
             .slice(0, 80)
+    }
+
+    /**
+     * Appends side-wall faces for one loop.
+     * @param {number[][]} faces Mutable face list.
+     * @param {number} start Loop start index.
+     * @param {number} length Loop length.
+     * @param {number} topOffset Top vertex offset.
+     * @param {boolean} reverse Whether to reverse wall orientation.
+     * @returns {void}
+     */
+    static #appendLoopWalls(faces, start, length, topOffset, reverse) {
+        for (let index = 0; index < length; index += 1) {
+            const current = start + index
+            const next = start + ((index + 1) % length)
+            faces.push(
+                reverse
+                    ? [next, current, current + topOffset, next + topOffset]
+                    : [current, next, next + topOffset, current + topOffset]
+            )
+        }
     }
 }

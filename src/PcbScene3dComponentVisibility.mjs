@@ -1,3 +1,5 @@
+import { PcbScene3dFallbackVisibility } from './PcbScene3dFallbackVisibility.mjs'
+
 /**
  * Applies per-component hidden state on top of existing 3D visibility toggles.
  */
@@ -46,7 +48,7 @@ export class PcbScene3dComponentVisibility {
 
     /**
      * Applies component visibility to all selectable render roots.
-     * @param {{ selectionRoots?: Map<string, Set<any>>, hiddenDesignators?: Set<string>, fallbackBodyRoots?: Map<string, Set<any>>, loadedExternalModelDesignators?: Set<string>, modelSearchExternalModelRoots?: Set<any>, toggles?: { 'external-models'?: boolean, 'fallback-bodies'?: boolean, 'model-search-models'?: boolean }, hasLoadedBoardAssemblyModel?: boolean }} state Visibility state.
+     * @param {{ selectionRoots?: Map<string, Set<any>>, selectedDesignator?: string, hiddenDesignators?: Set<string>, fallbackBodyRoots?: Map<string, Set<any>>, loadedExternalModelDesignators?: Set<string>, modelSearchExternalModelRoots?: Set<any>, toggles?: { 'external-models'?: boolean, 'fallback-bodies'?: boolean, 'model-search-models'?: boolean }, hasLoadedBoardAssemblyModel?: boolean }} state Visibility state.
      * @returns {void}
      */
     static apply(state) {
@@ -55,6 +57,11 @@ export class PcbScene3dComponentVisibility {
             return
         }
 
+        const selectedVariantGroupKeys =
+            PcbScene3dComponentVisibility.#selectedVariantGroupKeys(
+                selectionRoots,
+                state?.selectedDesignator
+            )
         selectionRoots.forEach((roots, designator) => {
             roots?.forEach?.((rootObject) => {
                 if (!rootObject) {
@@ -66,6 +73,12 @@ export class PcbScene3dComponentVisibility {
                         state?.hiddenDesignators,
                         designator
                     ) &&
+                    !PcbScene3dComponentVisibility.#isUnselectedVariantSibling(
+                        rootObject,
+                        designator,
+                        state?.selectedDesignator,
+                        selectedVariantGroupKeys
+                    ) &&
                     PcbScene3dComponentVisibility.#resolveRootVisible(
                         state,
                         designator,
@@ -73,6 +86,75 @@ export class PcbScene3dComponentVisibility {
                     )
             })
         })
+    }
+
+    /**
+     * Resolves variant groups represented by the selected component roots.
+     * @param {Map<string, Set<any>>} selectionRoots Registered selectable roots.
+     * @param {string | undefined} selectedDesignator Current selection.
+     * @returns {Set<string>}
+     */
+    static #selectedVariantGroupKeys(selectionRoots, selectedDesignator) {
+        const selectedKey =
+            PcbScene3dComponentVisibility.#normalizeDesignator(
+                selectedDesignator
+            )
+        const groups = new Set()
+        if (!selectedKey) {
+            return groups
+        }
+
+        selectionRoots.get(selectedKey)?.forEach?.((rootObject) => {
+            const groupKey =
+                PcbScene3dComponentVisibility.#variantGroupKey(rootObject)
+            if (groupKey) {
+                groups.add(groupKey)
+            }
+        })
+        return groups
+    }
+
+    /**
+     * Checks whether one selectable root is an alternate of the selection.
+     * @param {any} rootObject Selectable root.
+     * @param {string} designator Root designator.
+     * @param {string | undefined} selectedDesignator Current selection.
+     * @param {Set<string>} selectedVariantGroupKeys Selected variant groups.
+     * @returns {boolean}
+     */
+    static #isUnselectedVariantSibling(
+        rootObject,
+        designator,
+        selectedDesignator,
+        selectedVariantGroupKeys
+    ) {
+        const selectedKey =
+            PcbScene3dComponentVisibility.#normalizeDesignator(
+                selectedDesignator
+            )
+        if (!selectedKey || !selectedVariantGroupKeys.size) {
+            return false
+        }
+
+        if (
+            PcbScene3dComponentVisibility.#normalizeDesignator(designator) ===
+            selectedKey
+        ) {
+            return false
+        }
+
+        const groupKey =
+            PcbScene3dComponentVisibility.#variantGroupKey(rootObject)
+        return Boolean(groupKey && selectedVariantGroupKeys.has(groupKey))
+    }
+
+    /**
+     * Reads the authored co-located variant group key from a render root.
+     * @param {any} rootObject Render root.
+     * @returns {string}
+     */
+    static #variantGroupKey(rootObject) {
+        return String(rootObject?.userData?.scene3dVariantGroupKey || '').trim()
     }
 
     /**
@@ -92,7 +174,8 @@ export class PcbScene3dComponentVisibility {
         ) {
             return PcbScene3dComponentVisibility.#resolveFallbackVisible(
                 state,
-                designator
+                designator,
+                rootObject
             )
         }
 
@@ -110,14 +193,27 @@ export class PcbScene3dComponentVisibility {
      * Resolves fallback root visibility from current detail toggles.
      * @param {{ loadedExternalModelDesignators?: Set<string>, toggles?: { 'external-models'?: boolean, 'fallback-bodies'?: boolean }, hasLoadedBoardAssemblyModel?: boolean }} state Visibility state.
      * @param {string} designator Component designator.
+     * @param {any} rootObject Render root.
      * @returns {boolean}
      */
-    static #resolveFallbackVisible(state, designator) {
+    static #resolveFallbackVisible(state, designator, rootObject) {
         const boardAssemblyActive =
             Boolean(state?.hasLoadedBoardAssemblyModel) &&
             Boolean(state?.toggles?.['external-models'])
-        const showFallbackBodies =
-            Boolean(state?.toggles?.['fallback-bodies']) && !boardAssemblyActive
+        if (boardAssemblyActive) {
+            return false
+        }
+
+        if (
+            PcbScene3dFallbackVisibility.shouldKeepExternalCompanion(
+                rootObject,
+                state?.toggles
+            )
+        ) {
+            return true
+        }
+
+        const showFallbackBodies = Boolean(state?.toggles?.['fallback-bodies'])
         const hideForLoadedExternal =
             Boolean(state?.toggles?.['external-models']) &&
             state?.loadedExternalModelDesignators?.has?.(
