@@ -424,6 +424,56 @@ function findAdjustmentTarget(root = resolveRootGroup()) {
 }
 
 /**
+ * Finds one selectable render root by designator in the fake scene.
+ * @param {string} designator Component designator.
+ * @param {any} root Root object.
+ * @returns {FakeGroup | undefined}
+ */
+function findSelectionRoot(designator, root = resolveRootGroup()) {
+    if (!root) {
+        return undefined
+    }
+
+    if (root?.userData?.scene3dSelection?.designator === designator) {
+        return root
+    }
+
+    for (const child of root?.children || []) {
+        const target = findSelectionRoot(designator, child)
+        if (target) {
+            return target
+        }
+    }
+
+    return undefined
+}
+
+/**
+ * Finds one rendered selection marker by designator in the fake scene.
+ * @param {string} designator Component designator.
+ * @param {any} root Root object.
+ * @returns {FakeGroup | undefined}
+ */
+function findSelectionMarker(designator, root = resolveRootGroup()) {
+    if (!root) {
+        return undefined
+    }
+
+    if (root?.userData?.scene3dSelectionMarker?.designator === designator) {
+        return root
+    }
+
+    for (const child of root?.children || []) {
+        const target = findSelectionMarker(designator, child)
+        if (target) {
+            return target
+        }
+    }
+
+    return undefined
+}
+
+/**
  * Flushes promise turns so async runtime stages can advance.
  * @param {number} turns Turns to flush.
  * @returns {Promise<void>}
@@ -654,6 +704,139 @@ test('PcbScene3dRuntime applies live transform adjustments to fallback body targ
         assert.equal(target.rotation.x, (-10 * Math.PI) / 180)
         assert.equal(target.rotation.y, (-20 * Math.PI) / 180)
         assert.equal(target.rotation.z, (-30 * Math.PI) / 180)
+    } finally {
+        runtime.dispose()
+        PcbScene3dExternalModels.loadIntoScene = originalLoadIntoScene
+        globalThis.window = originalWindow
+        globalThis.document = originalDocument
+    }
+})
+
+test('PcbScene3dRuntime shows selected co-located body on alternate selection', async () => {
+    const originalWindow = globalThis.window
+    const originalDocument = globalThis.document
+    const originalLoadIntoScene = PcbScene3dExternalModels.loadIntoScene
+
+    globalThis.window = {
+        devicePixelRatio: 1,
+        requestAnimationFrame(callback) {
+            callback()
+        },
+        addEventListener() {},
+        removeEventListener() {}
+    }
+    globalThis.document = {}
+    lastCreatedScene = null
+    PcbScene3dExternalModels.loadIntoScene = async () => []
+
+    const runtime = new PcbScene3dRuntime(
+        new FakeViewportNode(),
+        {
+            board: {
+                widthMil: 1200,
+                heightMil: 800,
+                centerX: 0,
+                centerY: 0,
+                thicknessMil: 62,
+                segments: []
+            },
+            components: [
+                {
+                    componentIndex: 1,
+                    designator: 'XO1',
+                    renderFallbackBody: false,
+                    body: {
+                        family: 'chip',
+                        sizeMil: { width: 40, depth: 40, height: 10 }
+                    },
+                    positionMil: { x: 0, y: 0, z: 36 },
+                    mountSide: 'top',
+                    rotationDeg: 0
+                },
+                {
+                    componentIndex: 2,
+                    designator: 'XO2',
+                    renderFallbackBody: false,
+                    body: {
+                        family: 'chip',
+                        sizeMil: { width: 40, depth: 40, height: 22 }
+                    },
+                    positionMil: { x: 0, y: 0, z: 42 },
+                    mountSide: 'top',
+                    rotationDeg: 0
+                }
+            ],
+            staticBodyPlacements: [
+                {
+                    designator: 'XO1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 36 },
+                    coLocatedVariantGroupKey: 'stack:xo',
+                    geometry: {
+                        kind: 'extruded-polygon',
+                        heightMil: 10,
+                        verticesMil: [
+                            { x: -20, y: -20 },
+                            { x: 20, y: -20 },
+                            { x: 20, y: 20 },
+                            { x: -20, y: 20 }
+                        ]
+                    }
+                },
+                {
+                    designator: 'XO2',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 42 },
+                    coLocatedVariantGroupKey: 'stack:xo',
+                    geometry: {
+                        kind: 'extruded-polygon',
+                        heightMil: 22,
+                        verticesMil: [
+                            { x: -20, y: -20 },
+                            { x: 20, y: -20 },
+                            { x: 20, y: 20 },
+                            { x: -20, y: 20 }
+                        ]
+                    }
+                }
+            ],
+            detail: {
+                silkscreen: {},
+                tracks: [],
+                arcs: [],
+                pads: [
+                    {
+                        componentIndex: 2,
+                        x: 0,
+                        y: 0,
+                        sizeTopX: 30,
+                        sizeTopY: 30
+                    }
+                ],
+                vias: []
+            },
+            externalPlacements: []
+        },
+        {
+            loadRuntimeModules: async () => createFakeRuntimeModules()
+        }
+    )
+
+    try {
+        await runtime.whenReady()
+
+        const firstVariantRoot = findSelectionRoot('XO1')
+        const secondVariantRoot = findSelectionRoot('XO2')
+        assert.equal(firstVariantRoot?.visible, true)
+        assert.equal(secondVariantRoot?.visible, true)
+
+        runtime.setSelectedDesignator('XO2')
+
+        assert.equal(firstVariantRoot?.visible, false)
+        assert.equal(secondVariantRoot?.visible, true)
+        assert.ok(findSelectionMarker('XO2'))
     } finally {
         runtime.dispose()
         PcbScene3dExternalModels.loadIntoScene = originalLoadIntoScene

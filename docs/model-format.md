@@ -66,7 +66,7 @@ Components describe fallback package bodies and selection metadata:
 
 ## External Placements
 
-External placements describe STEP or WRL model instances:
+External placements describe STEP, WRL, GLB, GLTF, STL, or OBJ model instances:
 
 ```js
 {
@@ -78,8 +78,15 @@ External placements describe STEP or WRL model instances:
     bodyRotationDeg: 0,
     modelTransform: {
         rotationDeg: { x: 90, y: 0, z: 0 },
-        dzMil: 0
+        offsetMil: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        originPositionMil: { x: 0, y: 0, z: 0 },
+        originAlignment: 'center_of_component_on_board_surface',
+        objectFit: 'fill_bounds',
+        boardNormalDirection: 'z+',
+        targetSizeMil: { x: 200, y: 300, z: 60 }
     },
+    bodyOpacity: 0.5,
     externalModel: {
         origin: 'session',
         name: 'soic-8.step',
@@ -89,6 +96,10 @@ External placements describe STEP or WRL model instances:
     }
 }
 ```
+
+OBJ models can carry sidecar material libraries in `resources`, `relatedFiles`,
+`assets`, or similar metadata collections. GLTF/GLB material alpha and mesh
+opacity are preserved in exported GLTF/GLB materials.
 
 Embedded STEP models can use:
 

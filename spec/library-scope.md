@@ -8,12 +8,12 @@ scene descriptions.
 - Three.js runtime orchestration for PCB scenes.
 - Board, copper, via, drill, silkscreen, solder-mask, and fallback package mesh
   factories.
-- STEP and WRL model loading and placement.
+- STEP, WRL, GLB, GLTF, STL, and OBJ model loading and placement.
 - Camera presets, view compensation, selection styling, picking, and visibility
   toggles.
 - Optional DOM shell/controller helpers for hosts that want ready-made scene
   chrome.
-- ZIP export of resolved STEP and WRL model assets.
+- ZIP export of resolved component model assets.
 - CSS for the optional scene shell.
 
 ## Out of Scope

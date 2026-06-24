@@ -30,9 +30,21 @@ export class PcbScene3dCopperLayerFilter {
     }
 
     /**
+     * Filters one filled copper list to one outer copper face.
+     * @param {any[] | undefined} fills Filled copper primitives.
+     * @param {'top' | 'bottom'} side Board side.
+     * @returns {any[]}
+     */
+    static fills(fills, side) {
+        return (fills || []).filter((fill) =>
+            PcbScene3dCopperLayerFilter.#matchesCopperLayer(fill, side)
+        )
+    }
+
+    /**
      * Returns true when one primitive belongs to the requested outer copper
      * face.
-     * @param {{ layerId?: number, layerCode?: number }} primitive Primitive.
+     * @param {{ layerId?: number, layerCode?: number, layer?: string, layerName?: string, side?: string, layerSide?: string, mountSide?: string }} primitive Primitive.
      * @param {'top' | 'bottom'} side Board side.
      * @returns {boolean}
      */
@@ -40,9 +52,26 @@ export class PcbScene3dCopperLayerFilter {
         const layerId = Number(
             primitive?.layerId ?? primitive?.layerCode ?? NaN
         )
+        if (Number.isFinite(layerId)) {
+            return side === 'bottom'
+                ? layerId ===
+                      PcbScene3dCopperLayerFilter.#BOTTOM_COPPER_LAYER_ID
+                : layerId === PcbScene3dCopperLayerFilter.#TOP_COPPER_LAYER_ID
+        }
+
+        const layerName = String(
+            primitive?.layer ||
+                primitive?.layerName ||
+                primitive?.side ||
+                primitive?.layerSide ||
+                primitive?.mountSide ||
+                ''
+        )
+            .trim()
+            .toLowerCase()
 
         return side === 'bottom'
-            ? layerId === PcbScene3dCopperLayerFilter.#BOTTOM_COPPER_LAYER_ID
-            : layerId === PcbScene3dCopperLayerFilter.#TOP_COPPER_LAYER_ID
+            ? ['b.cu', 'bottom', 'back'].includes(layerName)
+            : ['f.cu', 'top', 'front'].includes(layerName)
     }
 }

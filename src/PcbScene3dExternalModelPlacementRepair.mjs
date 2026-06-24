@@ -1,3 +1,5 @@
+import { PcbScene3dExternalModelCenteringPolicy } from './PcbScene3dExternalModelCenteringPolicy.mjs'
+
 /**
  * Repairs loaded external-model placements using normalized scene metadata.
  */
@@ -352,8 +354,9 @@ export class PcbScene3dExternalModelPlacementRepair {
         if (
             !component ||
             !placementGroup?.position ||
-            String(placement?.projection?.source || '').toLowerCase() !==
-                'pad-fallback' ||
+            !PcbScene3dExternalModelCenteringPolicy.shouldCenterOnOwner(
+                placement
+            ) ||
             !THREE?.Box3
         ) {
             return

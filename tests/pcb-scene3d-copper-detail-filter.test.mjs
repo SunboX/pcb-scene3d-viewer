@@ -15,12 +15,25 @@ test('PcbScene3dCopperDetailFilter hides KiCad copper covered by solder mask', (
                 { id: 'covered-arc' },
                 { id: 'open-arc', solderMaskExpansion: 2 }
             ],
+            fills: [
+                { id: 'covered-fill' },
+                { id: 'open-fill', solderMaskOpening: true }
+            ],
+            polygons: [
+                { id: 'covered-zone' },
+                { id: 'open-zone', solderMaskExpansion: 2 }
+            ],
             copperTexts: [
                 { id: 'covered-text' },
                 { id: 'open-text', solderMaskOpening: true }
             ],
             vias: [
-                { id: 'tented-via' },
+                { id: 'default-covered-via' },
+                {
+                    id: 'tented-via',
+                    isTentingTop: true,
+                    isTentingBottom: true
+                },
                 { id: 'open-via', isTentingBottom: false }
             ]
         }
@@ -34,6 +47,14 @@ test('PcbScene3dCopperDetailFilter hides KiCad copper covered by solder mask', (
     assert.deepEqual(
         filtered.arcs.map((arc) => arc.id),
         ['open-arc']
+    )
+    assert.deepEqual(
+        filtered.fills.map((fill) => fill.id),
+        ['open-fill']
+    )
+    assert.deepEqual(
+        filtered.polygons.map((polygon) => polygon.id),
+        ['open-zone']
     )
     assert.deepEqual(
         filtered.copperTexts.map((text) => text.id),
@@ -53,22 +74,66 @@ test('PcbScene3dCopperDetailFilter hides KiCad copper covered by solder mask', (
         PcbScene3dCopperDetailFilter.shouldRenderStandaloneVias({
             sourceFormat: 'kicad',
             detail: {
-                vias: [{ id: 'open-via', isTentingBottom: false }]
+                vias: [{ id: 'default-covered-via' }]
             }
         }),
-        true
+        false
     )
     assert.deepEqual(
         PcbScene3dCopperDetailFilter.resolveStandaloneVias({
             sourceFormat: 'kicad',
             detail: {
                 vias: [
-                    { id: 'tented-via' },
+                    { id: 'default-covered-via' },
+                    {
+                        id: 'tented-via',
+                        isTentingTop: true,
+                        isTentingBottom: true
+                    },
                     { id: 'open-via', isTentingBottom: false }
                 ]
             }
         }).map((via) => via.id),
         ['open-via']
+    )
+    assert.deepEqual(
+        PcbScene3dCopperDetailFilter.resolveCoveredStandaloneVias({
+            sourceFormat: 'kicad',
+            detail: {
+                vias: [
+                    { id: 'default-covered-via' },
+                    {
+                        id: 'tented-via',
+                        isTentingTop: true,
+                        isTentingBottom: true
+                    },
+                    { id: 'open-via', isTentingBottom: false }
+                ]
+            }
+        }).map((via) => via.id),
+        ['default-covered-via', 'tented-via']
+    )
+
+    const covered = PcbScene3dCopperDetailFilter.resolveCoveredByMask({
+        sourceFormat: 'kicad',
+        detail: {
+            fills: [
+                { id: 'covered-fill' },
+                { id: 'open-fill', solderMaskOpening: true }
+            ],
+            polygons: [
+                { id: 'covered-zone' },
+                { id: 'open-zone', solderMaskExpansion: 2 }
+            ]
+        }
+    })
+    assert.deepEqual(
+        covered.fills.map((fill) => fill.id),
+        ['covered-fill']
+    )
+    assert.deepEqual(
+        covered.polygons.map((polygon) => polygon.id),
+        ['covered-zone']
     )
 })
 
@@ -274,6 +339,14 @@ test('PcbScene3dCopperDetailFilter hides Gerber copper covered by solder mask', 
                 { id: 'covered-arc', hasSolderMask: true },
                 { id: 'open-arc', solderMaskExpansion: 2 }
             ],
+            fills: [
+                { id: 'covered-fill', hasSolderMask: true },
+                { id: 'open-fill', solderMaskOpening: true }
+            ],
+            polygons: [
+                { id: 'covered-zone', hasSolderMask: true },
+                { id: 'open-zone', solderMaskExpansion: 2 }
+            ],
             copperTexts: [
                 { id: 'covered-text', hasSolderMask: true },
                 { id: 'open-text', solderMaskOpening: true }
@@ -322,6 +395,14 @@ test('PcbScene3dCopperDetailFilter exposes Gerber mask-covered traces separately
                 { id: 'covered-arc', hasSolderMask: true },
                 { id: 'open-arc', solderMaskExpansion: 2 }
             ],
+            fills: [
+                { id: 'covered-fill', hasSolderMask: true },
+                { id: 'open-fill', solderMaskOpening: true }
+            ],
+            polygons: [
+                { id: 'covered-zone', hasSolderMask: true },
+                { id: 'open-zone', solderMaskExpansion: 2 }
+            ],
             copperTexts: [
                 { id: 'covered-text', hasSolderMask: true },
                 { id: 'open-text', solderMaskOpening: true }
@@ -340,6 +421,14 @@ test('PcbScene3dCopperDetailFilter exposes Gerber mask-covered traces separately
     assert.deepEqual(
         covered.arcs.map((arc) => arc.id),
         ['covered-arc']
+    )
+    assert.deepEqual(
+        covered.fills.map((fill) => fill.id),
+        ['covered-fill']
+    )
+    assert.deepEqual(
+        covered.polygons.map((polygon) => polygon.id),
+        ['covered-zone']
     )
     assert.deepEqual(covered.copperTexts, [])
     assert.deepEqual(covered.vias, [])

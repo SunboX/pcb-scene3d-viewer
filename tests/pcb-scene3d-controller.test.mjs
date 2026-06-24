@@ -405,8 +405,8 @@ test('PcbScene3dController forwards presets, toggles, and diagnostics', () => {
     })
     rootNode.getToggles()[0].checked = false
     rootNode.getToggles()[0].dispatch('change')
-    controller.setAutoSearchMissingModels(false)
-    controller.setAutoSearchMissingModels(true)
+    for (const enabled of [false, false, true, true])
+        controller.setAutoSearchMissingModels(enabled)
 
     assert.deepEqual(runtimeCalls.presets, ['top', 'bottom', 'isometric'])
     assert.equal(rootNode.getButtons()[0].getAttribute('aria-pressed'), 'false')

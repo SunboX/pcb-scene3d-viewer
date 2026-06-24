@@ -129,17 +129,16 @@ export class PcbScene3dComponentVisibility {
         selectedVariantGroupKeys
     ) {
         const selectedKey =
+            PcbScene3dComponentVisibility.#normalizeDesignator(designator)
+        const activeKey =
             PcbScene3dComponentVisibility.#normalizeDesignator(
                 selectedDesignator
             )
-        if (!selectedKey || !selectedVariantGroupKeys.size) {
+        if (!activeKey || !selectedVariantGroupKeys.size) {
             return false
         }
 
-        if (
-            PcbScene3dComponentVisibility.#normalizeDesignator(designator) ===
-            selectedKey
-        ) {
+        if (selectedKey === activeKey) {
             return false
         }
 

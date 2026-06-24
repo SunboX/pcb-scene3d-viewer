@@ -1,6 +1,8 @@
 import { PcbScene3dBoardMaterialPalette } from './PcbScene3dBoardMaterialPalette.mjs'
 import { PcbScene3dCopperDetailFilter } from './PcbScene3dCopperDetailFilter.mjs'
+import { PcbScene3dCopperDrillCutoutBuilder } from './PcbScene3dCopperDrillCutoutBuilder.mjs'
 import { PcbScene3dCopperFactory } from './PcbScene3dCopperFactory.mjs'
+import { PcbScene3dMaskCoveredCopperMaterial } from './PcbScene3dMaskCoveredCopperMaterial.mjs'
 import { PcbScene3dPadFactory } from './PcbScene3dPadFactory.mjs'
 import { PcbScene3dViaFactory } from './PcbScene3dViaFactory.mjs'
 
@@ -9,6 +11,8 @@ import { PcbScene3dViaFactory } from './PcbScene3dViaFactory.mjs'
  */
 export class PcbScene3dCopperDetailGroupBuilder {
     static #CIRCLE_SEGMENTS = 64
+    static #COVERED_COPPER_UNDERLAP_MIL = 6
+    static #MAX_SILKSCREEN_OCCLUSION_SPAN_MIL = 500
     static #ROUNDED_CORNER_SEGMENTS = 12
 
     /**
@@ -21,11 +25,21 @@ export class PcbScene3dCopperDetailGroupBuilder {
      */
     static build(THREE, sceneDescription, topZ, normalizePoint) {
         const group = new THREE.Group()
+        const drillCutouts = PcbScene3dCopperDrillCutoutBuilder.resolve(
+            sceneDescription?.detail
+        )
         const coveredGroup =
             PcbScene3dCopperDetailGroupBuilder.#buildCoveredGroup(
                 THREE,
                 sceneDescription,
                 topZ,
+                normalizePoint,
+                drillCutouts
+            )
+        const coveredViaGroup =
+            PcbScene3dCopperDetailGroupBuilder.#buildCoveredViaGroup(
+                THREE,
+                sceneDescription,
                 normalizePoint
             )
         const exposedGroup =
@@ -33,7 +47,8 @@ export class PcbScene3dCopperDetailGroupBuilder {
                 THREE,
                 sceneDescription,
                 topZ,
-                normalizePoint
+                normalizePoint,
+                drillCutouts
             )
         const viaGroup = PcbScene3dCopperDetailGroupBuilder.#buildViaGroup(
             THREE,
@@ -41,7 +56,7 @@ export class PcbScene3dCopperDetailGroupBuilder {
             normalizePoint
         )
 
-        ;[coveredGroup, exposedGroup, viaGroup]
+        ;[coveredGroup, coveredViaGroup, exposedGroup, viaGroup]
             .filter((child) => child.children.length)
             .forEach((child) => group.add(child))
 
@@ -54,9 +69,16 @@ export class PcbScene3dCopperDetailGroupBuilder {
      * @param {object} sceneDescription Scene description.
      * @param {number} topZ Top copper center Z.
      * @param {(x: number, y: number) => { x: number, y: number }} normalizePoint
+     * @param {{ x: number, y: number }[][]} drillCutouts Board drill cutouts.
      * @returns {any}
      */
-    static #buildCoveredGroup(THREE, sceneDescription, topZ, normalizePoint) {
+    static #buildCoveredGroup(
+        THREE,
+        sceneDescription,
+        topZ,
+        normalizePoint,
+        drillCutouts
+    ) {
         return PcbScene3dCopperFactory.buildMaskCoveredGroup(
             THREE,
             PcbScene3dCopperDetailFilter.resolveCoveredByMask(sceneDescription),
@@ -64,19 +86,47 @@ export class PcbScene3dCopperDetailGroupBuilder {
             -topZ,
             normalizePoint,
             {
-                solderMaskColor:
-                    PcbScene3dBoardMaterialPalette.resolveSurfaceColor(
-                        sceneDescription?.board,
-                        {
-                            hasBoardAssemblyModel: Boolean(
-                                sceneDescription?.boardAssemblyModel
-                            )
-                        }
-                    ),
+                ...PcbScene3dCopperDetailGroupBuilder.#coveredCopperMaterialOptions(
+                    sceneDescription
+                ),
+                drillCutouts,
+                drillDetail: sceneDescription?.detail,
                 occlusionCutouts:
                     PcbScene3dCopperDetailGroupBuilder.#resolveCoveredCopperOcclusions(
                         sceneDescription?.detail
                     )
+            }
+        )
+    }
+
+    /**
+     * Builds solder-mask-covered via annuli.
+     * @param {any} THREE Three.js namespace.
+     * @param {object} sceneDescription Scene description.
+     * @param {(x: number, y: number) => { x: number, y: number }} normalizePoint
+     * @returns {any}
+     */
+    static #buildCoveredViaGroup(THREE, sceneDescription, normalizePoint) {
+        const vias =
+            PcbScene3dCopperDetailFilter.resolveCoveredStandaloneVias(
+                sceneDescription
+            )
+        if (!vias.length) {
+            return new THREE.Group()
+        }
+
+        return PcbScene3dViaFactory.buildGroup(
+            THREE,
+            vias,
+            sceneDescription?.board?.thicknessMil,
+            normalizePoint,
+            {
+                material: PcbScene3dMaskCoveredCopperMaterial.build(
+                    THREE,
+                    PcbScene3dCopperDetailGroupBuilder.#coveredCopperMaterialOptions(
+                        sceneDescription
+                    )
+                )
             }
         )
     }
@@ -87,16 +137,27 @@ export class PcbScene3dCopperDetailGroupBuilder {
      * @param {object} sceneDescription Scene description.
      * @param {number} topZ Top copper center Z.
      * @param {(x: number, y: number) => { x: number, y: number }} normalizePoint
+     * @param {{ x: number, y: number }[][]} drillCutouts Board drill cutouts.
      * @returns {any}
      */
-    static #buildExposedGroup(THREE, sceneDescription, topZ, normalizePoint) {
+    static #buildExposedGroup(
+        THREE,
+        sceneDescription,
+        topZ,
+        normalizePoint,
+        drillCutouts
+    ) {
         return PcbScene3dCopperFactory.buildGroup(
             THREE,
             PcbScene3dCopperDetailFilter.resolve(sceneDescription),
             topZ,
             -topZ,
             normalizePoint,
-            { coordinateSystem: sceneDescription?.coordinateSystem }
+            {
+                coordinateSystem: sceneDescription?.coordinateSystem,
+                drillCutouts,
+                drillDetail: sceneDescription?.detail
+            }
         )
     }
 
@@ -124,6 +185,24 @@ export class PcbScene3dCopperDetailGroupBuilder {
             sceneDescription?.board?.thicknessMil,
             normalizePoint
         )
+    }
+
+    /**
+     * Resolves solder-mask material options for covered copper relief.
+     * @param {object} sceneDescription Scene description.
+     * @returns {{ solderMaskColor: number }}
+     */
+    static #coveredCopperMaterialOptions(sceneDescription) {
+        return {
+            solderMaskColor: PcbScene3dBoardMaterialPalette.resolveSurfaceColor(
+                sceneDescription?.board,
+                {
+                    hasBoardAssemblyModel: Boolean(
+                        sceneDescription?.boardAssemblyModel
+                    )
+                }
+            )
+        }
     }
 
     /**
@@ -168,6 +247,11 @@ export class PcbScene3dCopperDetailGroupBuilder {
                     )
             )
             .filter((points) => points.length >= 3)
+            .filter((points) =>
+                PcbScene3dCopperDetailGroupBuilder.#isBoundedSilkscreenOcclusion(
+                    points
+                )
+            )
     }
 
     /**
@@ -196,6 +280,44 @@ export class PcbScene3dCopperDetailGroupBuilder {
             { x: x2, y: y2 },
             { x: x1, y: y2 }
         ]
+    }
+
+    /**
+     * Checks whether a silkscreen fill is small enough for copper clipping.
+     * @param {{ x: number, y: number }[]} points Fill contour points.
+     * @returns {boolean}
+     */
+    static #isBoundedSilkscreenOcclusion(points) {
+        const bounds =
+            PcbScene3dCopperDetailGroupBuilder.#resolveSilkscreenBounds(points)
+        const span = Math.max(
+            bounds.maxX - bounds.minX,
+            bounds.maxY - bounds.minY
+        )
+
+        return (
+            Number.isFinite(span) &&
+            span <=
+                PcbScene3dCopperDetailGroupBuilder
+                    .#MAX_SILKSCREEN_OCCLUSION_SPAN_MIL
+        )
+    }
+
+    /**
+     * Resolves the bounds for one silkscreen fill contour.
+     * @param {{ x: number, y: number }[]} points Fill contour points.
+     * @returns {{ minX: number, maxX: number, minY: number, maxY: number }}
+     */
+    static #resolveSilkscreenBounds(points) {
+        return points.reduce(
+            (bounds, point) => ({
+                minX: Math.min(bounds.minX, point.x),
+                maxX: Math.max(bounds.maxX, point.x),
+                minY: Math.min(bounds.minY, point.y),
+                maxY: Math.max(bounds.maxY, point.y)
+            }),
+            { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
+        )
     }
 
     /**
@@ -318,15 +440,64 @@ export class PcbScene3dCopperDetailGroupBuilder {
      */
     static #resolvePadSurfacePolygon(pad, side) {
         const spec = PcbScene3dPadFactory.resolvePadSurfaceSpec(pad, side)
+        const occlusionSpec =
+            PcbScene3dCopperDetailGroupBuilder.#insetPadSurfaceSpec(spec)
         const center = {
             x: Number(pad?.x || 0) + spec.offsetX,
             y: Number(pad?.y || 0) + spec.offsetY
         }
 
+        if (!occlusionSpec) {
+            return []
+        }
+
         return PcbScene3dCopperDetailGroupBuilder.#transformPoints(
-            PcbScene3dCopperDetailGroupBuilder.#buildPadLocalPoints(spec),
+            PcbScene3dCopperDetailGroupBuilder.#buildPadLocalPoints(
+                occlusionSpec
+            ),
             center,
             Number(pad?.rotation || 0)
+        )
+    }
+
+    /**
+     * Insets a pad occlusion so mask-covered traces can visually tuck below
+     * exposed copper sidewalls instead of ending at the same vertical plane.
+     * @param {{ width: number, height: number, kind: string, cornerRadius: number }} spec Pad surface spec.
+     * @returns {{ width: number, height: number, kind: string, cornerRadius: number } | null}
+     */
+    static #insetPadSurfaceSpec(spec) {
+        const inset = PcbScene3dCopperDetailGroupBuilder.#resolvePadInset(spec)
+        const width = Math.max(Number(spec?.width || 0) - inset * 2, 0)
+        const height = Math.max(Number(spec?.height || 0) - inset * 2, 0)
+
+        if (width <= 0 || height <= 0) {
+            return null
+        }
+
+        return {
+            ...spec,
+            width,
+            height,
+            radius: Math.max(width, height) / 2,
+            cornerRadius: Math.max(Number(spec?.cornerRadius || 0) - inset, 0)
+        }
+    }
+
+    /**
+     * Resolves a bounded pad occlusion inset.
+     * @param {{ width: number, height: number }} spec Pad surface spec.
+     * @returns {number}
+     */
+    static #resolvePadInset(spec) {
+        return Math.min(
+            PcbScene3dCopperDetailGroupBuilder.#COVERED_COPPER_UNDERLAP_MIL,
+            Math.max(
+                Math.min(Number(spec?.width || 0), Number(spec?.height || 0)) /
+                    2 -
+                    0.001,
+                0
+            )
         )
     }
 

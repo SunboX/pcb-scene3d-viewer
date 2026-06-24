@@ -31,18 +31,27 @@ export class PcbScene3dCopperDetailFilter {
             arcs: PcbScene3dCopperDetailFilter.#filterMaskOpenPrimitives(
                 detail.arcs
             ),
+            fills: PcbScene3dCopperDetailFilter.#filterMaskOpenPrimitives(
+                detail.fills
+            ),
+            polygons: PcbScene3dCopperDetailFilter.#filterMaskOpenPrimitives(
+                detail.polygons
+            ),
             copperTexts: PcbScene3dCopperDetailFilter.#filterMaskOpenPrimitives(
                 detail.copperTexts,
                 copperTextMaskMatcher
             ),
-            vias: PcbScene3dCopperDetailFilter.#filterExposedVias(detail.vias)
+            vias: PcbScene3dCopperDetailFilter.#filterExposedVias(
+                detail.vias,
+                sceneDescription
+            )
         }
     }
 
     /**
      * Resolves trace-like copper that should be visible through solder mask.
      * @param {object} sceneDescription 3D scene description.
-     * @returns {{ tracks: any[], arcs: any[], copperTexts: any[], vias: any[] }}
+     * @returns {{ tracks: any[], arcs: any[], fills: any[], polygons: any[], copperTexts: any[], vias: any[] }}
      */
     static resolveCoveredByMask(sceneDescription) {
         const detail = sceneDescription?.detail || {}
@@ -52,7 +61,14 @@ export class PcbScene3dCopperDetailFilter {
                 sceneDescription
             )
         ) {
-            return { tracks: [], arcs: [], copperTexts: [], vias: [] }
+            return {
+                tracks: [],
+                arcs: [],
+                fills: [],
+                polygons: [],
+                copperTexts: [],
+                vias: []
+            }
         }
 
         const defaultCovered =
@@ -67,6 +83,14 @@ export class PcbScene3dCopperDetailFilter {
             ),
             arcs: PcbScene3dCopperDetailFilter.#filterMaskCoveredPrimitives(
                 detail.arcs,
+                defaultCovered
+            ),
+            fills: PcbScene3dCopperDetailFilter.#filterMaskCoveredPrimitives(
+                detail.fills,
+                defaultCovered
+            ),
+            polygons: PcbScene3dCopperDetailFilter.#filterMaskCoveredPrimitives(
+                detail.polygons,
                 defaultCovered
             ),
             copperTexts: [],
@@ -104,12 +128,37 @@ export class PcbScene3dCopperDetailFilter {
         const vias = PcbScene3dCopperDetailFilter.#usesRealisticMasking(
             sceneDescription
         )
-            ? PcbScene3dCopperDetailFilter.#filterExposedVias(detail.vias)
+            ? PcbScene3dCopperDetailFilter.#filterExposedVias(
+                  detail.vias,
+                  sceneDescription
+              )
             : detail.vias || []
 
         return PcbScene3dCopperDetailFilter.#appendPadBarrelSpecs(
             vias,
             detail.pads
+        )
+    }
+
+    /**
+     * Resolves via annuli that should be visible through solder mask.
+     * @param {object} sceneDescription 3D scene description.
+     * @returns {any[]}
+     */
+    static resolveCoveredStandaloneVias(sceneDescription) {
+        const detail = sceneDescription?.detail || {}
+
+        if (
+            !PcbScene3dCopperDetailFilter.#usesRealisticMasking(
+                sceneDescription
+            )
+        ) {
+            return []
+        }
+
+        return PcbScene3dCopperDetailFilter.#filterMaskCoveredVias(
+            detail.vias,
+            sceneDescription
         )
     }
 
@@ -163,6 +212,8 @@ export class PcbScene3dCopperDetailFilter {
         return [
             detail?.tracks,
             detail?.arcs,
+            detail?.fills,
+            detail?.polygons,
             detail?.copperTexts,
             detail?.vias,
             detail?.pads
@@ -205,14 +256,40 @@ export class PcbScene3dCopperDetailFilter {
     }
 
     /**
-     * Keeps vias only when they are explicitly not tented.
+     * Keeps vias that should expose copper annuli in the 3D view.
      * @param {any[] | undefined} vias Via list.
+     * @param {object} sceneDescription 3D scene description.
      * @returns {any[]}
      */
-    static #filterExposedVias(vias) {
-        return (vias || []).filter((via) => {
-            return via?.isTentingTop === false || via?.isTentingBottom === false
-        })
+    static #filterExposedVias(vias, sceneDescription) {
+        return (vias || []).filter((via) =>
+            PcbScene3dCopperDetailFilter.#isViaExplicitlyOpen(via)
+        )
+    }
+
+    /**
+     * Keeps KiCad via annuli that are covered by solder mask.
+     * @param {any[] | undefined} vias Via list.
+     * @param {object} sceneDescription 3D scene description.
+     * @returns {any[]}
+     */
+    static #filterMaskCoveredVias(vias, sceneDescription) {
+        if (!PcbScene3dCopperDetailFilter.#isKiCadScene(sceneDescription)) {
+            return []
+        }
+
+        return (vias || []).filter(
+            (via) => !PcbScene3dCopperDetailFilter.#isViaExplicitlyOpen(via)
+        )
+    }
+
+    /**
+     * Checks whether one via explicitly exposes copper on either side.
+     * @param {object} via Via primitive.
+     * @returns {boolean}
+     */
+    static #isViaExplicitlyOpen(via) {
+        return via?.isTentingTop === false || via?.isTentingBottom === false
     }
 
     /**

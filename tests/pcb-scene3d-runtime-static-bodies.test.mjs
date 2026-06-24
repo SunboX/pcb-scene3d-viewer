@@ -463,10 +463,12 @@ test('PcbScene3dRuntime renders authored static body placements', async () => {
             components: [],
             staticBodyPlacements: [
                 {
-                    designator: 'U1',
+                    designator: 'FAKE_STATIC_CLIP',
+                    selectionKey: 'FAKE_STATIC_CLIP@20,30',
                     mountSide: 'top',
                     rotationDeg: 90,
                     positionMil: { x: 20, y: 30, z: 50 },
+                    bodyOpacity: 0.42,
                     geometry: {
                         kind: 'extruded-polygon',
                         status: 'complete',
@@ -505,9 +507,16 @@ test('PcbScene3dRuntime renders authored static body placements', async () => {
 
         assert.equal(staticBodyMesh?.geometry?.type, 'ExtrudeGeometry')
         assert.equal(staticBodyMesh?.material?.options?.color, 0x808080)
+        assert.equal(staticBodyMesh?.material?.options?.transparent, true)
+        assert.equal(staticBodyMesh?.material?.options?.opacity, 0.42)
+        assert.equal(staticBodyMesh?.material?.options?.depthWrite, false)
         assert.equal(
             staticBodyRoot?.userData?.scene3dSelection?.designator,
-            'U1'
+            'FAKE_STATIC_CLIP@20,30'
+        )
+        assert.equal(
+            staticBodyRoot?.userData?.scene3dSelection?.displayDesignator,
+            'FAKE_STATIC_CLIP'
         )
     } finally {
         runtime.dispose()

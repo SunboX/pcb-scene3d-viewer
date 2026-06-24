@@ -4,6 +4,7 @@ import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs
 import { PcbScene3dInteractionHints } from './PcbScene3dInteractionHints.mjs'
 import { PcbScene3dRuntime } from './PcbScene3dRuntime.mjs'
 import { PcbScene3dSelectionInspectorRenderer } from './PcbScene3dSelectionInspectorRenderer.mjs'
+import { PcbScene3dSelectionIndexBuilder } from './PcbScene3dSelectionIndexBuilder.mjs'
 import { PcbScene3dSelectionVisibilityBinder } from './PcbScene3dSelectionVisibilityBinder.mjs'
 import { PcbScene3dText } from './PcbScene3dText.mjs'
 
@@ -37,7 +38,7 @@ export class PcbScene3dController {
     /** @type {Array<{ node: EventTarget, type: string, listener: (event: any) => void }>} */
     #listeners
 
-    /** @type {Map<string, { component: any | null, externalPlacement: any | null }>} */
+    /** @type {Map<string, { component: any | null, externalPlacement: any | null, staticBodyPlacement: any | null }>} */
     #selectionIndex
 
     /** @type {Map<string, { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }>} */
@@ -259,7 +260,12 @@ export class PcbScene3dController {
      * @returns {void}
      */
     setAutoSearchMissingModels(enabled) {
-        this.#autoSearchMissingModels = enabled === true
+        const nextEnabled = enabled === true
+        if (this.#autoSearchMissingModels === nextEnabled) {
+            return
+        }
+
+        this.#autoSearchMissingModels = nextEnabled
         this.#runtime?.setToggle?.(
             'model-search-models',
             this.#autoSearchMissingModels
@@ -451,7 +457,7 @@ export class PcbScene3dController {
             PcbScene3dController.#normalizeSceneDescription(sceneDescription)
         this.#sceneDescription = renderModel
         this.#selectionIndex =
-            PcbScene3dController.#buildSelectionIndex(renderModel)
+            PcbScene3dSelectionIndexBuilder.build(renderModel)
         const createRuntime =
             options.createRuntime ||
             ((nextViewportNode, nextSceneDescription, hooks) =>
@@ -716,7 +722,9 @@ export class PcbScene3dController {
             this.#selectedComponentKey
                 ? {
                       designator: this.#selectedComponentKey,
-                      sourceType: 'sidebar'
+                      sourceType: this.#resolveSelectionSourceType(
+                          this.#selectedComponentKey
+                      )
                   }
                 : null
         )
@@ -783,7 +791,7 @@ export class PcbScene3dController {
 
     /**
      * Renders selected component transform controls into the external host.
-     * @param {{ designator?: string, selection?: { sourceType?: string } | null, selectionEntry?: { component: any | null, externalPlacement: any | null } | null, adjustment?: { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } } } | null} state Selection state.
+     * @param {{ designator?: string, selection?: { sourceType?: string } | null, selectionEntry?: { component: any | null, externalPlacement: any | null, staticBodyPlacement?: any | null } | null, adjustment?: { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } } } | null} state Selection state.
      * @returns {void}
      */
     #renderAdjustmentHost(state = null) {
@@ -855,9 +863,18 @@ export class PcbScene3dController {
      * @returns {string}
      */
     #resolveSelectionSourceType(designator) {
-        return this.#selectionIndex.get(designator)?.externalPlacement
-            ? 'external-model'
-            : 'component'
+        const selectionEntry = this.#selectionIndex.get(designator)
+        if (selectionEntry?.externalPlacement) {
+            return 'external-model'
+        }
+        if (selectionEntry?.component) {
+            return 'component'
+        }
+        if (selectionEntry?.staticBodyPlacement) {
+            return 'static-body'
+        }
+
+        return 'component'
     }
 
     /**
@@ -891,53 +908,6 @@ export class PcbScene3dController {
         )
             ? PcbScene3dCircuitJsonAdapter.build(sceneDescription)
             : sceneDescription
-    }
-
-    /**
-     * Builds one designator-keyed inspector lookup from the scene
-     * description.
-     * @param {{ components?: any[], externalPlacements?: any[] }} sceneDescription
-     * @returns {Map<string, { component: any | null, externalPlacement: any | null }>}
-     */
-    static #buildSelectionIndex(sceneDescription) {
-        const index = new Map()
-        const components = Array.isArray(sceneDescription?.components)
-            ? sceneDescription.components
-            : []
-        const externalPlacements = Array.isArray(
-            sceneDescription?.externalPlacements
-        )
-            ? sceneDescription.externalPlacements
-            : []
-
-        components.forEach((component) => {
-            const designator = String(component?.designator || '').trim()
-            if (!designator) {
-                return
-            }
-
-            index.set(designator, {
-                component,
-                externalPlacement:
-                    index.get(designator)?.externalPlacement || null
-            })
-        })
-
-        externalPlacements.forEach((externalPlacement) => {
-            const designator = String(
-                externalPlacement?.designator || ''
-            ).trim()
-            if (!designator) {
-                return
-            }
-
-            index.set(designator, {
-                component: index.get(designator)?.component || null,
-                externalPlacement
-            })
-        })
-
-        return index
     }
 
     /**

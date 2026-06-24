@@ -109,6 +109,21 @@ if (PcbScene3dCircuitJsonAdapter.isCircuitJsonModel(circuitJson)) {
 }
 ```
 
+Hosts that need URL policy control can pass a synchronous `modelUrlResolver`.
+The adapter records the returned metadata on each external model but does not
+fetch the referenced file:
+
+```js
+const sceneDescription = PcbScene3dCircuitJsonAdapter.build(circuitJson, {
+    modelUrlResolver(url, context) {
+        return {
+            resolvedUrl: sameOriginProxyUrl(url),
+            sameOrigin: context.format === 'step'
+        }
+    }
+})
+```
+
 `isDirectCircuitJsonModel(value)` returns `false` for compatibility arrays that
 also carry legacy parser fields such as `pcb`, `schematic`, or `bom`. Those
 arrays continue through the host-provided `buildScene` callback so existing
@@ -120,9 +135,10 @@ CircuitJSON input uses millimeters. The adapter converts all board, component,
 pad, via, trace, and silkscreen dimensions into mils before handing the scene to
 the Three.js runtime.
 
-The board center defaults to `{ x: 0, y: 0 }` when omitted. If no `pcb_board`
-element is present, the adapter creates a 25.4 mm by 25.4 mm board with a
-1.6 mm thickness so incomplete test or preview models still render.
+The board center defaults to `{ x: 0, y: 0 }` when omitted. If no `pcb_panel`
+or `pcb_board` element is present, the adapter creates a 25.4 mm by 25.4 mm
+board with a 1.6 mm thickness so incomplete test or preview models still
+render.
 
 Layer values resolve as follows:
 
@@ -135,18 +151,28 @@ Layer values resolve as follows:
 The adapter focuses on renderer-ready PCB geometry and ignores unsupported
 CircuitJSON elements instead of failing the whole scene.
 
-| Element type          | Rendered as                                         |
-| --------------------- | --------------------------------------------------- |
-| `pcb_board`           | Board size, thickness, center, and optional outline |
-| `source_component`    | Component designator and package metadata           |
-| `pcb_component`       | Fallback component body and selection target        |
-| `pcb_smtpad`          | Top or bottom SMT pad copper                        |
-| `pcb_plated_hole`     | Through-hole pad copper and drill                   |
-| `pcb_hole`            | Non-plated drill opening                            |
-| `pcb_via`             | Via copper and drill                                |
-| `pcb_trace`           | Routed copper track segments                        |
-| `pcb_silkscreen_line` | Top or bottom silkscreen stroke                     |
-| `pcb_silkscreen_text` | Top or bottom silkscreen text placeholder           |
+| Element type          | Rendered as                                                         |
+| --------------------- | ------------------------------------------------------------------- |
+| `pcb_panel`           | Preferred board/panel size, thickness, center, and optional outline |
+| `pcb_board`           | Board size, thickness, center, and optional outline                 |
+| `pcb_cutout`          | Through-board cutout loop                                           |
+| `source_component`    | Component designator and package metadata                           |
+| `pcb_component`       | Fallback component body and selection target                        |
+| `cad_component`       | External model URL metadata and placement data                      |
+| `pcb_smtpad`          | Top or bottom SMT pad copper                                        |
+| `pcb_plated_hole`     | Through-hole pad copper and drill                                   |
+| `pcb_hole`            | Non-plated drill opening                                            |
+| `pcb_via`             | Via copper and drill                                                |
+| `pcb_trace`           | Routed copper track segments                                        |
+| `pcb_silkscreen_line` | Top or bottom silkscreen stroke                                     |
+| `pcb_silkscreen_text` | Top or bottom silkscreen text placeholder                           |
+
+`cad_component` entries can provide external model URLs and model-local
+placement hints. The adapter maps `model_unit_to_mm_scale_factor`,
+`model_origin_position`, `model_offset`, `model_origin_alignment`,
+`model_object_fit`, `model_board_normal_direction`, and `size` into normalized
+model transforms, and maps `show_as_translucent_model` into export/display
+opacity metadata.
 
 Board outlines can be supplied as `pcb_board.outline`, using an array of points:
 
@@ -161,6 +187,24 @@ Board outlines can be supplied as `pcb_board.outline`, using an array of points:
     ]
 }
 ```
+
+Through-board cutouts can be supplied as polygon, rectangle, or circle
+`pcb_cutout` elements:
+
+```js
+{
+    type: 'pcb_cutout',
+    shape: 'rect',
+    center: { x: 25, y: 15 },
+    width: 4,
+    height: 2
+}
+```
+
+Component model metadata can be supplied on `cad_component` elements with
+`model_step_url`, `model_wrl_url`, `model_glb_url`, `model_gltf_url`,
+`model_stl_url`, or `model_obj_url`. The adapter emits external placement
+metadata for the host runtime or export pipeline to resolve.
 
 Traces can be supplied as a `route` array. Each adjacent point pair becomes one
 track segment:
@@ -185,6 +229,7 @@ model conversion. Use `PcbScene3dCircuitJsonAdapter.isCircuitJsonModel(value)`
 for a cheap guard when accepting untrusted JSON from users, and catch conversion
 errors around `build(value)` when you need to show a custom diagnostic.
 
-The viewer does not fetch external assets for CircuitJSON input. STEP and WRL
-model matching remains the responsibility of source-specific toolkits or host
-applications that create normalized scene descriptions.
+The viewer does not fetch external assets for CircuitJSON input by itself.
+Model URL matching, same-origin checks, proxying, and file loading remain the
+responsibility of source-specific toolkits or host applications that create or
+post-process normalized scene descriptions.

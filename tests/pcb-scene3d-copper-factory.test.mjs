@@ -504,6 +504,46 @@ test('PcbScene3dCopperFactory keeps mask-covered traces below exposed copper', (
     assert.ok(coveredBounds.maxZ < exposedBounds.maxZ)
 })
 
+test('PcbScene3dCopperFactory renders mask-covered copper fills with solder-mask tint', () => {
+    const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
+        THREE,
+        {
+            tracks: [],
+            arcs: [],
+            fills: [
+                {
+                    layerId: 1,
+                    points: [
+                        { x: 0, y: 0 },
+                        { x: 80, y: 0 },
+                        { x: 80, y: 50 },
+                        { x: 0, y: 50 }
+                    ]
+                }
+            ]
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y }),
+        { solderMaskColor: 0x2a5f27 }
+    )
+
+    assert.equal(group.children.length, 1)
+    const fillMesh = findObjectByName(group, 'mask-covered-copper-fills')
+    assert.ok(fillMesh)
+
+    const bounds = resolveBounds(fillMesh.geometry.attributes.position.array)
+    assert.equal(fillMesh.material.color.getHex(), 0x4d6d25)
+    assert.equal(fillMesh.material.metalness, 0)
+    assert.equal(fillMesh.material.roughness, 0.56)
+    assert.ok(bounds.minX <= 0)
+    assert.ok(bounds.maxX >= 80)
+    assert.ok(bounds.minY <= 0)
+    assert.ok(bounds.maxY >= 50)
+    assert.ok(bounds.maxZ > 5)
+    assert.ok(bounds.maxZ < 6.1)
+})
+
 test('PcbScene3dCopperFactory clips mask-covered traces below silkscreen fills', () => {
     const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
         THREE,
@@ -542,6 +582,57 @@ test('PcbScene3dCopperFactory clips mask-covered traces below silkscreen fills',
     )
 })
 
+test('PcbScene3dCopperFactory clips mask-covered fills below silkscreen fills', () => {
+    const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
+        THREE,
+        {
+            tracks: [],
+            arcs: [],
+            fills: [
+                {
+                    layerId: 1,
+                    points: [
+                        { x: 0, y: 0 },
+                        { x: 100, y: 0 },
+                        { x: 100, y: 100 },
+                        { x: 0, y: 100 }
+                    ]
+                }
+            ]
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y }),
+        {
+            occlusionCutouts: {
+                top: [
+                    [
+                        { x: 20, y: 20 },
+                        { x: 80, y: 20 },
+                        { x: 80, y: 80 },
+                        { x: 20, y: 80 }
+                    ]
+                ]
+            }
+        }
+    )
+
+    const fillMesh = findObjectByName(group, 'mask-covered-copper-fills')
+    assert.ok(fillMesh)
+    assert.equal(
+        hasTriangleCentroidInsideBounds(
+            fillMesh.geometry.attributes.position.array,
+            {
+                minX: 20,
+                maxX: 80,
+                minY: 20,
+                maxY: 80
+            }
+        ),
+        false
+    )
+})
+
 test('PcbScene3dCopperFactory removes mask-covered trace slivers at circular pad cutouts', () => {
     const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
         THREE,
@@ -563,6 +654,183 @@ test('PcbScene3dCopperFactory removes mask-covered trace slivers at circular pad
 
     assert.equal(
         hasTriangleOverlappingCircle(trackMesh.geometry, { x: 0, y: 0 }, 8),
+        false
+    )
+})
+
+test('PcbScene3dCopperFactory renders saved copper fills with holes', () => {
+    const group = PcbScene3dCopperFactory.buildGroup(
+        THREE,
+        {
+            tracks: [],
+            arcs: [],
+            pads: [],
+            vias: [],
+            fills: [
+                {
+                    layerId: 1,
+                    points: [
+                        { x: 0, y: 0 },
+                        { x: 100, y: 0 },
+                        { x: 100, y: 100 },
+                        { x: 0, y: 100 }
+                    ],
+                    holes: [
+                        [
+                            { x: 40, y: 40 },
+                            { x: 60, y: 40 },
+                            { x: 60, y: 60 },
+                            { x: 40, y: 60 }
+                        ]
+                    ]
+                }
+            ]
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y })
+    )
+
+    const fillMesh = findObjectByName(group, 'copper-fills')
+
+    assert.ok(fillMesh)
+    const positions = fillMesh.geometry.attributes.position.array
+    const bounds = resolveBounds(positions)
+
+    assert.ok(bounds.minX <= 0)
+    assert.ok(bounds.maxX >= 100)
+    assert.ok(bounds.minY <= 0)
+    assert.ok(bounds.maxY >= 100)
+    assert.ok(bounds.minZ < 5)
+    assert.ok(bounds.maxZ > 5)
+    assert.equal(
+        hasTriangleCentroidInsideBounds(positions, {
+            minX: 45,
+            maxX: 55,
+            minY: 45,
+            maxY: 55
+        }),
+        false
+    )
+})
+
+test('PcbScene3dCopperFactory renders saved copper zones from layer names', () => {
+    const group = PcbScene3dCopperFactory.buildGroup(
+        THREE,
+        {
+            tracks: [],
+            arcs: [],
+            pads: [],
+            vias: [],
+            polygons: [
+                {
+                    layer: 'B.Cu',
+                    points: [
+                        { x: 0, y: 0 },
+                        { x: 30, y: 0 },
+                        { x: 30, y: 20 },
+                        { x: 0, y: 20 }
+                    ]
+                }
+            ]
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y })
+    )
+
+    assert.equal(group.children.length, 1)
+    assert.equal(group.children[0].rotation.x, Math.PI)
+
+    const fillMesh = findObjectByName(group, 'copper-fills')
+    assert.ok(fillMesh)
+
+    const bounds = resolveBounds(fillMesh.geometry.attributes.position.array)
+
+    assert.ok(bounds.minY <= -20)
+    assert.ok(bounds.maxY <= 0)
+})
+
+test('PcbScene3dCopperFactory renders B-Rep shape array islands', () => {
+    const group = PcbScene3dCopperFactory.buildGroup(
+        THREE,
+        {
+            tracks: [],
+            arcs: [],
+            pads: [],
+            vias: [],
+            polygons: [
+                {
+                    layer: 'F.Cu',
+                    brep_shapes: [
+                        {
+                            outer_ring: {
+                                vertices: [
+                                    { x: 0, y: 0 },
+                                    { x: 30, y: 0 },
+                                    { x: 30, y: 30 },
+                                    { x: 0, y: 30 }
+                                ]
+                            }
+                        },
+                        {
+                            outer_ring: {
+                                vertices: [
+                                    { x: 60, y: 0 },
+                                    { x: 100, y: 0 },
+                                    { x: 100, y: 40 },
+                                    { x: 60, y: 40 }
+                                ]
+                            },
+                            inner_rings: [
+                                {
+                                    vertices: [
+                                        { x: 74, y: 14 },
+                                        { x: 86, y: 14 },
+                                        { x: 86, y: 26 },
+                                        { x: 74, y: 26 }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y })
+    )
+
+    const fillMesh = findObjectByName(group, 'copper-fills')
+
+    assert.ok(fillMesh)
+    const positions = fillMesh.geometry.attributes.position.array
+    assert.equal(
+        hasTriangleCentroidInsideBounds(positions, {
+            minX: 5,
+            maxX: 25,
+            minY: 5,
+            maxY: 25
+        }),
+        true
+    )
+    assert.equal(
+        hasTriangleCentroidInsideBounds(positions, {
+            minX: 88,
+            maxX: 98,
+            minY: 10,
+            maxY: 25
+        }),
+        true
+    )
+    assert.equal(
+        hasTriangleCentroidInsideBounds(positions, {
+            minX: 76,
+            maxX: 84,
+            minY: 16,
+            maxY: 24
+        }),
         false
     )
 })

@@ -1,3 +1,5 @@
+import { PcbAssemblyGltfModelMeshParser } from './PcbAssemblyGltfModelMeshParser.mjs'
+import { PcbAssemblyTextModelMeshParser } from './PcbAssemblyTextModelMeshParser.mjs'
 import { PcbScene3dStepLoader } from './PcbScene3dStepLoader.mjs'
 
 /**
@@ -29,6 +31,22 @@ export class PcbAssemblyModelMeshLoader {
 
         if (format === 'wrl' || format === 'vrml') {
             return this.#loadWrlMeshes(model)
+        }
+
+        if (format === 'stl') {
+            return await PcbAssemblyTextModelMeshParser.parseStlModel(model)
+        }
+
+        if (format === 'obj') {
+            return await PcbAssemblyTextModelMeshParser.parseObjModel(model)
+        }
+
+        if (format === 'gltf') {
+            return await PcbAssemblyGltfModelMeshParser.parseGltfModel(model)
+        }
+
+        if (format === 'glb') {
+            return await PcbAssemblyGltfModelMeshParser.parseGlbModel(model)
         }
 
         throw new Error('Unsupported model format: ' + (format || 'unknown'))

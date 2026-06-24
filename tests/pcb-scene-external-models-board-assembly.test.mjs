@@ -296,6 +296,197 @@ test('PcbScene3dExternalModels reuses STEP typed arrays for render geometry', as
     assert.equal(importedMesh.material.length, 2)
 })
 
+test('PcbScene3dExternalModels applies placement opacity to STEP materials', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            externalPlacements: [
+                {
+                    designator: 'MECH1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 0 },
+                    bodyOpacity: 0.24,
+                    modelTransform: {},
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'transparent-cover.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/0'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'transparent cover',
+                            color: [0.8, 0.8, 0.8],
+                            positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+                            normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+                            indices: [0, 1, 2],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    let importedMesh = null
+    externalModelsGroup.traverse((object) => {
+        if (object?.geometry) {
+            importedMesh = object
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+    assert.ok(importedMesh)
+    assert.equal(importedMesh.material.transparent, true)
+    assert.equal(importedMesh.material.opacity, 0.24)
+    assert.equal(importedMesh.material.depthWrite, false)
+})
+
+test('PcbScene3dExternalModels splits translucent STEP meshes into sortable chunks', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            externalPlacements: [
+                {
+                    designator: 'MECH1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 0 },
+                    bodyOpacity: 0.24,
+                    modelTransform: {},
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'translucent-panel.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/0'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'wide translucent panel',
+                            color: [0.8, 0.8, 0.8],
+                            positions: [
+                                0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 0, 5, 11, 0, 5,
+                                10, 1, 5
+                            ],
+                            normals: [
+                                0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
+                                0, 1
+                            ],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    const importedMeshes = []
+    externalModelsGroup.traverse((object) => {
+        if (object?.geometry) {
+            importedMeshes.push(object)
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+    assert.equal(importedMeshes.length, 2)
+    assert.ok(
+        importedMeshes.every(
+            (mesh) => mesh.userData.scene3dTransparentMeshChunk === true
+        )
+    )
+    assert.ok(
+        new Set(importedMeshes.map((mesh) => mesh.position.z.toFixed(3))).size >
+            1
+    )
+    assert.ok(
+        importedMeshes.every((mesh) => mesh.material.transparent === true)
+    )
+    assert.ok(importedMeshes.every((mesh) => mesh.material.opacity === 0.24))
+    assert.ok(
+        importedMeshes.every((mesh) => mesh.material.depthWrite === false)
+    )
+})
+
+test('PcbScene3dExternalModels keeps coplanar translucent STEP faces in one sortable chunk', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            externalPlacements: [
+                {
+                    designator: 'MECH1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 0 },
+                    bodyOpacity: 0.24,
+                    modelTransform: {},
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'translucent-rectangle.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/0'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'flat translucent rectangle',
+                            color: [0.8, 0.8, 0.8],
+                            positions: [0, 0, 0, 4, 0, 0, 0, 2, 0, 4, 2, 0],
+                            normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
+                            indices: [0, 1, 2, 2, 1, 3],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    const importedMeshes = []
+    externalModelsGroup.traverse((object) => {
+        if (object?.geometry) {
+            importedMeshes.push(object)
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+    assert.equal(importedMeshes.length, 1)
+    assert.equal(importedMeshes[0].userData.scene3dTransparentMeshChunk, true)
+    assert.deepEqual(
+        importedMeshes[0].geometry.getAttribute('position').array.length,
+        18
+    )
+    assert.ok(Math.abs(importedMeshes[0].position.x - 2) < 0.001)
+    assert.ok(Math.abs(importedMeshes[0].position.y - 1) < 0.001)
+})
+
 test('PcbScene3dExternalModels renders flat STEP face markings double-sided', async () => {
     const externalModelsGroup = new THREE.Group()
     const diagnostics = await PcbScene3dExternalModels.loadIntoScene({

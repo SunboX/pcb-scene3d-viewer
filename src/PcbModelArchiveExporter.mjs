@@ -731,8 +731,23 @@ export class PcbModelArchiveExporter {
         const normalizedFormat = String(format || '')
             .trim()
             .toLowerCase()
-        if (normalizedFormat === 'wrl') {
-            return 'wrl'
+        if (
+            [
+                'step',
+                'stp',
+                'wrl',
+                'vrml',
+                'glb',
+                'gltf',
+                'stl',
+                'obj'
+            ].includes(normalizedFormat)
+        ) {
+            return normalizedFormat === 'stp'
+                ? 'step'
+                : normalizedFormat === 'vrml'
+                  ? 'wrl'
+                  : normalizedFormat
         }
 
         return 'step'

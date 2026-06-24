@@ -314,12 +314,12 @@ export class PcbScene3dPadFactory {
 
     /**
      * Returns true when one pad has visible copper on the requested face.
-     * @param {{ sizeTopX?: number, sizeTopY?: number, sizeMidX?: number, sizeMidY?: number, sizeBottomX?: number, sizeBottomY?: number, holeDiameter?: number, hasTopSolderMaskOpening?: boolean, hasBottomSolderMaskOpening?: boolean }} pad
+     * @param {{ sizeTopX?: number, sizeTopY?: number, sizeMidX?: number, sizeMidY?: number, sizeBottomX?: number, sizeBottomY?: number, holeDiameter?: number, hasTopSolderMaskOpening?: boolean, hasBottomSolderMaskOpening?: boolean, hasTopPasteMaskOpening?: boolean, hasBottomPasteMaskOpening?: boolean }} pad
      * @param {'top' | 'bottom'} side
      * @returns {boolean}
      */
     static #hasVisibleSurface(pad, side) {
-        const maskOpening = PcbScene3dPadFactory.#resolveSolderMaskOpening(
+        const maskOpening = PcbScene3dPadFactory.#resolveSurfaceOpening(
             pad,
             side
         )
@@ -348,6 +348,39 @@ export class PcbScene3dPadFactory {
                 !midHasSize &&
                 Number(pad?.holeDiameter || 0) > 0)
         )
+    }
+
+    /**
+     * Resolves an explicit side-specific surface opening flag.
+     * @param {{ hasTopSolderMaskOpening?: boolean, hasBottomSolderMaskOpening?: boolean, hasTopPasteMaskOpening?: boolean, hasBottomPasteMaskOpening?: boolean }} pad
+     * @param {'top' | 'bottom'} side
+     * @returns {boolean | null}
+     */
+    static #resolveSurfaceOpening(pad, side) {
+        const solderMaskOpening =
+            PcbScene3dPadFactory.#resolveSolderMaskOpening(pad, side)
+        if (solderMaskOpening !== null) {
+            return solderMaskOpening
+        }
+
+        const pasteFieldName =
+            side === 'bottom'
+                ? 'hasBottomPasteMaskOpening'
+                : 'hasTopPasteMaskOpening'
+        const alternatePasteFieldName =
+            side === 'bottom'
+                ? 'hasTopPasteMaskOpening'
+                : 'hasBottomPasteMaskOpening'
+
+        if (typeof pad?.[pasteFieldName] === 'boolean') {
+            if (pad[pasteFieldName]) {
+                return true
+            }
+
+            return pad?.[alternatePasteFieldName] === true ? false : null
+        }
+
+        return null
     }
 
     /**

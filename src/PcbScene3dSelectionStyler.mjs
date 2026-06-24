@@ -138,7 +138,12 @@ export class PcbScene3dSelectionStyler {
             if (PcbScene3dSelectionStyler.#canWriteColor(material.color)) {
                 PcbScene3dSelectionStyler.#writeColor(
                     material.color,
-                    highlighted ? 0x000000 : baseState.colorHex
+                    highlighted
+                        ? PcbScene3dSelectionStyler.#highlightedColorHex(
+                              material,
+                              baseState
+                          )
+                        : baseState.colorHex
                 )
             }
             PcbScene3dSelectionStyler.#writeColor(
@@ -146,7 +151,9 @@ export class PcbScene3dSelectionStyler {
                 highlighted ? highlightColor : baseState.emissiveHex
             )
             material.emissiveIntensity = highlighted
-                ? 1
+                ? PcbScene3dSelectionStyler.#highlightedEmissiveIntensity(
+                      material
+                  )
                 : baseState.emissiveIntensity
             material.needsUpdate = true
             return
@@ -182,6 +189,49 @@ export class PcbScene3dSelectionStyler {
         }
 
         return material.userData.scene3dHighlightBase
+    }
+
+    /**
+     * Resolves the selected-state base color for one material.
+     * @param {any} material Material to highlight.
+     * @param {{ colorHex: number | null }} baseState Stored base state.
+     * @returns {number | null}
+     */
+    static #highlightedColorHex(material, baseState) {
+        if (PcbScene3dSelectionStyler.#isTransparentMaterial(material)) {
+            return baseState.colorHex
+        }
+
+        return 0x000000
+    }
+
+    /**
+     * Returns true when selection should preserve the source color for stacking.
+     * @param {any} material Material to inspect.
+     * @returns {boolean}
+     */
+    static #isTransparentMaterial(material) {
+        return (
+            material?.transparent === true && Number(material?.opacity ?? 1) < 1
+        )
+    }
+
+    /**
+     * Resolves the selected-state emissive strength for one material.
+     * @param {any} material Material to highlight.
+     * @returns {number}
+     */
+    static #highlightedEmissiveIntensity(material) {
+        if (!PcbScene3dSelectionStyler.#isTransparentMaterial(material)) {
+            return 1
+        }
+
+        const opacity = Number(material?.opacity)
+        if (!Number.isFinite(opacity)) {
+            return 1
+        }
+
+        return Math.max(0, Math.min(1, opacity))
     }
 
     /**

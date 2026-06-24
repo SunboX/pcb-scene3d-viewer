@@ -162,3 +162,60 @@ test('PcbScene3dComponentVisibility hides co-located stack alternates when one i
     assert.equal(alternateRoot.visible, false)
     assert.equal(unrelatedRoot.visible, true)
 })
+
+test('PcbScene3dComponentVisibility leaves co-located stack variants visible without stack selection', () => {
+    const firstVariantRoot = new FakeRoot()
+    firstVariantRoot.userData = { scene3dVariantGroupKey: 'stack:10:20' }
+    const secondVariantRoot = new FakeRoot()
+    secondVariantRoot.userData = { scene3dVariantGroupKey: 'stack:10:20' }
+    const unrelatedRoot = new FakeRoot()
+    const selectionRoots = new Map([
+        ['XO1', new Set([firstVariantRoot])],
+        ['XO2', new Set([secondVariantRoot])],
+        ['X8', new Set([unrelatedRoot])]
+    ])
+
+    PcbScene3dComponentVisibility.apply({
+        selectionRoots,
+        selectedDesignator: 'X8',
+        hiddenDesignators: new Set(),
+        fallbackBodyRoots: new Map(),
+        loadedExternalModelDesignators: new Set(),
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': false
+        },
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(firstVariantRoot.visible, true)
+    assert.equal(secondVariantRoot.visible, true)
+    assert.equal(unrelatedRoot.visible, true)
+})
+
+test('PcbScene3dComponentVisibility shows the selected co-located stack variant', () => {
+    const firstVariantRoot = new FakeRoot()
+    firstVariantRoot.userData = { scene3dVariantGroupKey: 'stack:10:20' }
+    const secondVariantRoot = new FakeRoot()
+    secondVariantRoot.userData = { scene3dVariantGroupKey: 'stack:10:20' }
+    const selectionRoots = new Map([
+        ['XO1', new Set([firstVariantRoot])],
+        ['XO2', new Set([secondVariantRoot])]
+    ])
+
+    PcbScene3dComponentVisibility.apply({
+        selectionRoots,
+        selectedDesignator: 'XO2',
+        hiddenDesignators: new Set(),
+        fallbackBodyRoots: new Map(),
+        loadedExternalModelDesignators: new Set(),
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': false
+        },
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(firstVariantRoot.visible, false)
+    assert.equal(secondVariantRoot.visible, true)
+})

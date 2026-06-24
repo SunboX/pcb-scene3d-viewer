@@ -49,6 +49,7 @@ const FALLBACK_MESSAGES = {
     'scene3d.skipped': 'Skipped',
     'scene3d.source': 'Source',
     'scene3d.startFailed': '3D preview could not start:',
+    'scene3d.staticBody': 'Static body',
     'scene3d.stillPreparing': '3D scene is still preparing.',
     'scene3d.title': '3D preview',
     'scene3d.to': 'to',

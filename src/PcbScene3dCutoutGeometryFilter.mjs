@@ -92,7 +92,6 @@ export class PcbScene3dCutoutGeometryFilter {
                 : PcbScene3dCutoutGeometryFilter.#DEFAULT_MAX_EDGE_LENGTH,
             PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
         )
-
         return {
             maxDepth: Math.max(
                 Number.isFinite(Number(options?.maxDepth))
@@ -116,7 +115,6 @@ export class PcbScene3dCutoutGeometryFilter {
             .map((cutout) => {
                 const circularCutout =
                     PcbScene3dCutoutCircleDetector.resolve(cutout)
-
                 return {
                     points: cutout,
                     segments:
@@ -137,13 +135,11 @@ export class PcbScene3dCutoutGeometryFilter {
      */
     static #buildCutoutSegments(points) {
         const segments = []
-
         for (let index = 0; index < points.length; index += 1) {
             const start = points[index]
             const end = points[(index + 1) % points.length]
             const dx = end.x - start.x
             const dy = end.y - start.y
-
             segments.push({
                 start,
                 end,
@@ -158,7 +154,6 @@ export class PcbScene3dCutoutGeometryFilter {
                 }
             })
         }
-
         return segments
     }
     /**
@@ -204,12 +199,28 @@ export class PcbScene3dCutoutGeometryFilter {
                 overlappingCutouts.push(cutout)
             }
         }
-
         if (!overlappingCutouts.length) {
             PcbScene3dCutoutGeometryFilter.#appendTriangle(positions, triangle)
             return
         }
         state.changed = true
+        if (
+            overlappingCutouts.some(
+                (cutout) =>
+                    triangle.every((point) =>
+                        PcbScene3dCutoutGeometryFilter.#isPointInsideOrOnCutout(
+                            point,
+                            cutout
+                        )
+                    ) &&
+                    !PcbScene3dCutoutGeometryFilter.#hasIntersectingEdges(
+                        triangle,
+                        cutout
+                    )
+            )
+        ) {
+            return
+        }
         if (
             depth >= settings.maxDepth ||
             PcbScene3dCutoutGeometryFilter.#maxEdgeLengthSquared(triangle) <=
@@ -250,7 +261,6 @@ export class PcbScene3dCutoutGeometryFilter {
             PcbScene3dCutoutGeometryFilter.#resolveSpatialCellSize(cutouts)
         const cells = new Map()
         const overflowIndexes = []
-
         cutouts.forEach((cutout, index) => {
             const range = PcbScene3dCutoutGeometryFilter.#resolveCellRange(
                 cutout.bounds,
@@ -258,7 +268,6 @@ export class PcbScene3dCutoutGeometryFilter {
             )
             const cellCount =
                 (range.maxX - range.minX + 1) * (range.maxY - range.minY + 1)
-
             if (
                 cellCount >
                 PcbScene3dCutoutGeometryFilter
@@ -267,7 +276,6 @@ export class PcbScene3dCutoutGeometryFilter {
                 overflowIndexes.push(index)
                 return
             }
-
             for (let cellX = range.minX; cellX <= range.maxX; cellX += 1) {
                 for (let cellY = range.minY; cellY <= range.maxY; cellY += 1) {
                     const key = PcbScene3dCutoutGeometryFilter.#cellKey(
@@ -275,7 +283,6 @@ export class PcbScene3dCutoutGeometryFilter {
                         cellY
                     )
                     const bucket = cells.get(key)
-
                     if (bucket) {
                         bucket.push(index)
                     } else {
@@ -284,7 +291,6 @@ export class PcbScene3dCutoutGeometryFilter {
                 }
             }
         })
-
         return {
             cutouts,
             cellSize,
@@ -307,19 +313,16 @@ export class PcbScene3dCutoutGeometryFilter {
             bounds,
             cutoutIndex.cellSize
         )
-
         cutoutIndex.mark += 1
         if (cutoutIndex.mark >= 0xffffffff) {
             cutoutIndex.marks.fill(0)
             cutoutIndex.mark = 1
         }
-
         for (let cellX = range.minX; cellX <= range.maxX; cellX += 1) {
             for (let cellY = range.minY; cellY <= range.maxY; cellY += 1) {
                 const bucket = cutoutIndex.cells.get(
                     PcbScene3dCutoutGeometryFilter.#cellKey(cellX, cellY)
                 )
-
                 if (bucket) {
                     for (const index of bucket) {
                         PcbScene3dCutoutGeometryFilter.#appendCutoutCandidate(

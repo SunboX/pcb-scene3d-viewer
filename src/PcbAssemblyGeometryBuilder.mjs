@@ -1,4 +1,6 @@
 import { PcbAssemblyBoardSubstrateBuilder } from './PcbAssemblyBoardSubstrateBuilder.mjs'
+import { PcbAssemblyComponentMeshBuilder } from './PcbAssemblyComponentMeshBuilder.mjs'
+import { PcbAssemblyFillGeometryResolver } from './PcbAssemblyFillGeometryResolver.mjs'
 import { PcbAssemblyMeshUtils } from './PcbAssemblyMeshUtils.mjs'
 import { PcbAssemblyPadMeshBuilder } from './PcbAssemblyPadMeshBuilder.mjs'
 
@@ -7,7 +9,6 @@ const SILKSCREEN_THICKNESS_MIL = 0.8
 const BOARD_COLOR = [0.05, 0.32, 0.18]
 const COPPER_COLOR = [0.85, 0.62, 0.12]
 const SILKSCREEN_COLOR = [0.96, 0.95, 0.9]
-const COMPONENT_COLOR = [0.55, 0.56, 0.58]
 
 /**
  * Converts a prepared 3D scene description into exportable faceted meshes.
@@ -16,7 +17,7 @@ export class PcbAssemblyGeometryBuilder {
     /**
      * Builds assembly meshes and diagnostics.
      * @param {{ board?: object, detail?: object, components?: object[], externalPlacements?: object[] }} sceneDescription Prepared scene description.
-     * @param {{ modelMeshLoader?: (placement: object) => Promise<object | object[]>, progress?: { advance?: (units: number, message: string) => Promise<void>, finish?: (message: string) => Promise<void> } }} [options] Build options.
+     * @param {{ modelMeshLoader?: (placement: object) => Promise<object | object[]>, includeModels?: boolean, renderFallbackBodies?: boolean, progress?: { advance?: (units: number, message: string) => Promise<void>, finish?: (message: string) => Promise<void> } }} [options] Build options.
      * @returns {Promise<{ meshes: object[], diagnostics: object[] }>}
      */
     static async build(sceneDescription, options = {}) {
@@ -36,23 +37,20 @@ export class PcbAssemblyGeometryBuilder {
                 progress
             )
         const pcbMeshes = [...boardMeshes, ...copperMeshes, ...silkscreenMeshes]
+        const componentResult = await PcbAssemblyComponentMeshBuilder.build(
+            sceneDescription,
+            options,
+            progress
+        )
+        diagnostics.push(...componentResult.diagnostics)
         const meshes = [
             ...PcbAssemblyGeometryBuilder.#translateMeshes(
                 pcbMeshes,
                 PcbAssemblyGeometryBuilder.#boardLocalOffset(sceneDescription)
             ),
-            ...(await PcbAssemblyGeometryBuilder.#buildComponentMeshes(
-                sceneDescription,
-                options,
-                diagnostics,
-                progress
-            ))
+            ...componentResult.meshes
         ]
 
-        PcbAssemblyGeometryBuilder.#appendMissingModelDiagnostics(
-            sceneDescription,
-            diagnostics
-        )
         await progress?.finish?.('Geometry meshes ready')
         return {
             meshes: meshes.filter((mesh) => mesh?.vertices?.length),
@@ -150,14 +148,14 @@ export class PcbAssemblyGeometryBuilder {
         for (let index = 0; index < fills.length; index += 1) {
             const fill = fills[index]
             const side = PcbAssemblyGeometryBuilder.#resolveSide(fill)
-            const mesh = PcbAssemblyMeshUtils.prism(
+            const fillMeshes = PcbAssemblyGeometryBuilder.#fillMeshes(
                 'copper-' + side + '-fill-' + (index + 1),
-                PcbAssemblyGeometryBuilder.#points(fill),
+                fill,
                 side === 'bottom' ? bottomZ : topZ,
                 COPPER_THICKNESS_MIL,
                 COPPER_COLOR
             )
-            if (mesh) meshes.push(mesh)
+            meshes.push(...fillMeshes)
             await progress?.advance?.(
                 1,
                 'Building copper fills ' + (index + 1) + '/' + fills.length
@@ -393,164 +391,6 @@ export class PcbAssemblyGeometryBuilder {
     }
 
     /**
-     * Builds component model meshes.
-     * @param {{ externalPlacements?: object[] }} sceneDescription Prepared scene description.
-     * @param {{ modelMeshLoader?: (placement: object) => Promise<object | object[]> }} options Build options.
-     * @param {object[]} diagnostics Mutable diagnostics list.
-     * @param {{ advance?: (units: number, message: string) => Promise<void> } | null} progress Progress tracker.
-     * @returns {Promise<object[]>}
-     */
-    static async #buildComponentMeshes(
-        sceneDescription,
-        options,
-        diagnostics,
-        progress = null
-    ) {
-        const loader =
-            typeof options.modelMeshLoader === 'function'
-                ? options.modelMeshLoader
-                : null
-        if (!loader) {
-            return []
-        }
-
-        const meshes = []
-        const placements = PcbAssemblyGeometryBuilder.#array(
-            sceneDescription?.externalPlacements
-        ).filter((placement) => placement?.externalModel)
-        for (
-            let placementIndex = 0;
-            placementIndex < placements.length;
-            placementIndex += 1
-        ) {
-            const placement = placements[placementIndex]
-
-            try {
-                const loaded = await loader(placement)
-                const loadedMeshes = Array.isArray(loaded) ? loaded : [loaded]
-                loadedMeshes.filter(Boolean).forEach((mesh, index) => {
-                    const designator = PcbAssemblyMeshUtils.safeName(
-                        placement?.designator || 'component'
-                    )
-                    const transformed = PcbAssemblyMeshUtils.transformMesh(
-                        {
-                            ...mesh,
-                            name:
-                                'component-' +
-                                designator +
-                                (loadedMeshes.length > 1
-                                    ? '-' + (index + 1)
-                                    : ''),
-                            color: mesh.color || COMPONENT_COLOR
-                        },
-                        placement
-                    )
-                    meshes.push(transformed)
-                })
-                PcbAssemblyGeometryBuilder.#appendModelDiagnostic(
-                    placement,
-                    diagnostics
-                )
-            } catch (error) {
-                diagnostics.push(
-                    PcbAssemblyGeometryBuilder.#diagnostic(
-                        'warning',
-                        'component_model_conversion_failed',
-                        'Could not convert 3D model for ' +
-                            String(placement?.designator || 'component') +
-                            ': ' +
-                            String(error?.message || error)
-                    )
-                )
-            }
-            await progress?.advance?.(
-                1,
-                'Loading component models ' +
-                    (placementIndex + 1) +
-                    '/' +
-                    placements.length
-            )
-        }
-
-        return meshes
-    }
-
-    /**
-     * Adds a format-specific component model diagnostic.
-     * @param {object} placement Component placement.
-     * @param {object[]} diagnostics Mutable diagnostics list.
-     * @returns {void}
-     */
-    static #appendModelDiagnostic(placement, diagnostics) {
-        const format = String(
-            placement?.externalModel?.format || ''
-        ).toLowerCase()
-        if (format === 'wrl' || format === 'vrml') {
-            diagnostics.push(
-                PcbAssemblyGeometryBuilder.#diagnostic(
-                    'info',
-                    'component_wrl_faceted_step',
-                    'Converted WRL model for ' +
-                        String(placement?.designator || 'component') +
-                        ' as faceted geometry.'
-                )
-            )
-            return
-        }
-
-        if (format === 'step' || format === 'stp') {
-            diagnostics.push(
-                PcbAssemblyGeometryBuilder.#diagnostic(
-                    'info',
-                    'component_step_faceted_export',
-                    'Included STEP model for ' +
-                        String(placement?.designator || 'component') +
-                        ' through export mesh geometry.'
-                )
-            )
-        }
-    }
-
-    /**
-     * Adds diagnostics for components without resolved external models.
-     * @param {{ components?: object[], externalPlacements?: object[] }} sceneDescription Scene description.
-     * @param {object[]} diagnostics Mutable diagnostics list.
-     * @returns {void}
-     */
-    static #appendMissingModelDiagnostics(sceneDescription, diagnostics) {
-        const placementDesignators = new Set(
-            PcbAssemblyGeometryBuilder.#array(
-                sceneDescription?.externalPlacements
-            )
-                .map((placement) => String(placement?.designator || '').trim())
-                .filter(Boolean)
-        )
-
-        PcbAssemblyGeometryBuilder.#array(sceneDescription?.components).forEach(
-            (component) => {
-                const designator = String(component?.designator || '').trim()
-                if (
-                    !designator ||
-                    component?.externalModel ||
-                    placementDesignators.has(designator)
-                ) {
-                    return
-                }
-
-                diagnostics.push(
-                    PcbAssemblyGeometryBuilder.#diagnostic(
-                        'warning',
-                        'component_model_missing',
-                        'No resolved 3D model was available for ' +
-                            designator +
-                            '.'
-                    )
-                )
-            }
-        )
-    }
-
-    /**
      * Builds one widened track mesh.
      * @param {string} name Mesh name.
      * @param {object} track Track primitive.
@@ -584,6 +424,33 @@ export class PcbAssemblyGeometryBuilder {
             thickness,
             color
         )
+    }
+
+    /**
+     * Builds filled polygon meshes.
+     * @param {string} name Mesh name.
+     * @param {object} fill Filled primitive.
+     * @param {number} z Center Z.
+     * @param {number} thickness Mesh thickness.
+     * @param {number[]} color Mesh color.
+     * @returns {object[]}
+     */
+    static #fillMeshes(name, fill, z, thickness, color) {
+        const loopSets = PcbAssemblyFillGeometryResolver.resolveAll(fill)
+        return loopSets
+            .map((loops, index) =>
+                PcbAssemblyMeshUtils.prismWithHoles(
+                    loopSets.length > 1
+                        ? name + '-island-' + (index + 1)
+                        : name,
+                    loops.outer,
+                    loops.holes,
+                    z,
+                    thickness,
+                    color
+                )
+            )
+            .filter(Boolean)
     }
 
     /**

@@ -211,6 +211,226 @@ test('PcbScene3dExternalModels preserves dominant embedded source-Z edge extensi
     assert.equal(orientationGroup.rotation.z, Math.PI / 2)
 })
 
+test('PcbScene3dExternalModels does not re-bias explicit owner-anchor offsets', async () => {
+    const externalModelsGroup = new THREE.Group()
+
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            externalPlacements: [
+                {
+                    designator: 'M1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 650, y: 0, z: 31.5 },
+                    modelTransform: {
+                        rotationDeg: { x: -90, y: 0, z: 0 },
+                        offsetMil: { x: -325, y: 325, z: 0 },
+                        ownerAnchorOffsetMil: { x: -325, y: 325 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'owner-anchored-box.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/owner-anchored-box'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.6, 0.7, 0.9],
+                            positions: [
+                                0, 0, 0, 0.65, 0, 0, 0.65, 0.06, 0.65, 0, 0, 0,
+                                0.65, 0.06, 0.65, 0, 0.06, 0.65
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assert.equal(modelGroup.position.x, -325)
+    assert.equal(modelGroup.position.y, 325)
+    assert.equal(modelGroup.position.z, 0)
+    assert.ok(Math.abs(modelGroup.rotation.x - Math.PI / 2) < 0.000001)
+    assert.equal(modelGroup.rotation.z, -0)
+})
+
+test('PcbScene3dExternalModels centers owner model-anchor fallbacks after load', async () => {
+    const externalModelsGroup = new THREE.Group()
+
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            components: [
+                {
+                    designator: 'J1',
+                    positionMil: { x: 0, y: 0, z: -55.5 },
+                    body: {
+                        family: 'generic',
+                        sizeMil: { width: 180, depth: 220, height: 48 }
+                    }
+                }
+            ],
+            externalPlacements: [
+                {
+                    designator: 'J1',
+                    mountSide: 'bottom',
+                    rotationDeg: 90,
+                    positionMil: { x: 0, y: 0, z: -31.5 },
+                    projection: {
+                        source: 'model-anchor-fallback',
+                        boundsMil: { width: 0, depth: 0, height: 0 }
+                    },
+                    modelTransform: {
+                        rotationDeg: { x: -180, y: 0, z: 0 },
+                        offsetMil: { x: 16.5, y: -89.5, z: 0 },
+                        ownerAnchorOffsetMil: { x: -89.5, y: -16.5 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'owner-anchor-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/owner-anchor-body'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        modelViewScale: { x: 1, y: -1, z: 1 },
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [
+                                -0.078, -0.01, 0, 0.111, -0.01, 0, 0.111, 0.187,
+                                0.079, -0.078, -0.01, 0, 0.111, 0.187, 0.079,
+                                -0.078, 0.187, 0.079
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    externalModelsGroup.updateMatrixWorld(true)
+    const center = new THREE.Box3()
+        .setFromObject(wrapperGroup)
+        .getCenter(new THREE.Vector3())
+
+    assert.ok(Math.abs(center.x) < 0.001)
+    assert.ok(Math.abs(center.y) < 0.001)
+    assert.equal(wrapperGroup.userData.scene3dPadFallbackCenterRepair, true)
+})
+
+test('PcbScene3dExternalModels corrects transparent owner-anchored cover source origins', async () => {
+    const externalModelsGroup = new THREE.Group()
+
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium-pcbdoc',
+            externalPlacements: [
+                {
+                    designator: 'M1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 650, y: 0, z: 31.5 },
+                    bodyOpacity: 0.24,
+                    projection: {
+                        source: 'pad-fallback',
+                        boundsMil: { width: 330, depth: 320, height: 63 }
+                    },
+                    modelTransform: {
+                        rotationDeg: { x: -90, y: 0, z: 0 },
+                        offsetMil: { x: -325, y: 325, z: 0 },
+                        ownerAnchorOffsetMil: { x: -325, y: 325 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'transparent-cover-corner-origin.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/transparent-cover'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'cover',
+                            color: [0.6, 0.7, 0.9],
+                            positions: [
+                                0, 0, 0, 0.65, 0, 0, 0.65, 0.06, 0.65, 0, 0, 0,
+                                0.65, 0.06, 0.65, 0, 0.06, 0.65
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assert.equal(modelGroup.position.x, -325)
+    assert.equal(modelGroup.position.y, 325)
+    assert.ok(
+        Math.abs(Math.abs(modelGroup.rotation.x) - Math.PI / 2) < 0.000001
+    )
+    assert.ok(Math.abs(Math.abs(modelGroup.rotation.z) - Math.PI) < 0.000001)
+})
+
 test('PcbScene3dExternalModels keeps embedded source-origin offsets while switching views', async () => {
     const externalModelsGroup = new THREE.Group()
 

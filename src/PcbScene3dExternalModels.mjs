@@ -2,8 +2,10 @@ import { PcbScene3dBoardAssemblyPresentation } from './PcbScene3dBoardAssemblyPr
 import { PcbScene3dBoardAssemblyPlacement } from './PcbScene3dBoardAssemblyPlacement.mjs'
 import { PcbScene3dBoardAssemblyTransform } from './PcbScene3dBoardAssemblyTransform.mjs'
 import { PcbScene3dBufferAttributeFactory } from './PcbScene3dBufferAttributeFactory.mjs'
+import { PcbScene3dExternalModelOpacity } from './PcbScene3dExternalModelOpacity.mjs'
 import { PcbScene3dExternalModelPlacementRepair } from './PcbScene3dExternalModelPlacementRepair.mjs'
 import { PcbScene3dExternalModelLoadOrder } from './PcbScene3dExternalModelLoadOrder.mjs'
+import { PcbScene3dExternalModelSourceOriginPolicy } from './PcbScene3dExternalModelSourceOriginPolicy.mjs'
 import { PcbScene3dModelBounds } from './PcbScene3dModelBounds.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 import { PcbScene3dStepLoader } from './PcbScene3dStepLoader.mjs'
@@ -54,7 +56,6 @@ export class PcbScene3dExternalModels {
                     if (!loadedGroup || options?.isDisposed?.()) {
                         continue
                     }
-
                     externalModelsGroup.add(loadedGroup)
                     PcbScene3dExternalModelPlacementRepair.apply(
                         options.three,
@@ -63,6 +64,11 @@ export class PcbScene3dExternalModels {
                         loadedGroup
                     )
                     PcbScene3dExternalModelPlacementRepair.isolatePlacementMaterials(
+                        loadedGroup
+                    )
+                    PcbScene3dExternalModelOpacity.apply(
+                        options.three,
+                        placement,
                         loadedGroup
                     )
                     options?.onPlacementGroup?.(placement, loadedGroup)
@@ -503,6 +509,9 @@ export class PcbScene3dExternalModels {
         if (
             String(placement?.externalModel?.origin || '').toLowerCase() !==
                 'embedded' ||
+            PcbScene3dExternalModelSourceOriginPolicy.shouldSkipOwnerAnchoredAdjustment(
+                placement
+            ) ||
             PcbScene3dExternalModels.#normalizeAngle(modelRotation?.x) !==
                 270 ||
             !Number.isFinite(centerX) ||
@@ -923,15 +932,12 @@ export class PcbScene3dExternalModels {
         const triangleCount = Math.floor(Number(indices?.length || 0) / 3)
         let triangleIndex = 0
         let faceColorIndex = 0
-
         while (triangleIndex < triangleCount) {
             const firstIndex = triangleIndex
             let lastIndex = triangleCount
             let materialIndex = 0
-
             if (faceColorIndex < faceColors.length) {
                 const currentFaceColor = faceColors[faceColorIndex]
-
                 if (triangleIndex < currentFaceColor.first) {
                     lastIndex = currentFaceColor.first
                 } else {
@@ -943,7 +949,6 @@ export class PcbScene3dExternalModels {
                     faceColorIndex += 1
                 }
             }
-
             geometry.addGroup(
                 firstIndex * 3,
                 Math.max(lastIndex - firstIndex, 0) * 3,
@@ -963,7 +968,6 @@ export class PcbScene3dExternalModels {
         const first = Number(faceColor?.first)
         const last = Number(faceColor?.last)
         const triangleCount = Math.floor(Number(indices?.length || 0) / 3)
-
         return (
             Number.isInteger(first) &&
             Number.isInteger(last) &&
@@ -983,7 +987,6 @@ export class PcbScene3dExternalModels {
         if (!Array.isArray(color) || color.length < 3) {
             return 0xc8c8c8
         }
-
         return new THREE.Color(
             Number(color[0] || 0),
             Number(color[1] || 0),

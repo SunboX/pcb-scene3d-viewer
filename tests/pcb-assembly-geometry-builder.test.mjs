@@ -72,6 +72,46 @@ function createCenteredScene() {
 }
 
 /**
+ * Builds a centered board scene with one component that has no resolved
+ * external model.
+ * @returns {object}
+ */
+function createFallbackComponentScene() {
+    const scene = createCenteredScene()
+    scene.externalPlacements = []
+    scene.components = [
+        {
+            designator: 'R1',
+            mountSide: 'top',
+            rotationDeg: 0,
+            positionMil: { x: 50, y: -20, z: 41 },
+            body: {
+                sizeMil: {
+                    width: 80,
+                    depth: 40,
+                    height: 20
+                }
+            }
+        },
+        {
+            designator: 'J1',
+            mountSide: 'top',
+            rotationDeg: 0,
+            positionMil: { x: -60, y: 30, z: 41 },
+            renderFallbackBody: false,
+            body: {
+                sizeMil: {
+                    width: 100,
+                    depth: 50,
+                    height: 20
+                }
+            }
+        }
+    ]
+    return scene
+}
+
+/**
  * Builds a centered rectangular board scene with one generated drill cutout.
  * @returns {object}
  */
@@ -117,6 +157,22 @@ function createDrilledBoardScene() {
         },
         externalPlacements: []
     }
+}
+
+/**
+ * Builds a centered rectangular board scene with an explicit board cutout.
+ * @returns {object}
+ */
+function createExplicitCutoutScene() {
+    const scene = createDrilledBoardScene()
+    scene.detail.silkscreen.top.drillCutouts = []
+    scene.detail.silkscreen.bottom.drillCutouts = []
+    scene.board.cutouts = [
+        {
+            points: rectanglePoints(80, 80, 120, 120)
+        }
+    ]
+    return scene
 }
 
 /**
@@ -200,6 +256,152 @@ function createSlottedPadScene() {
         }
     ]
     return scene
+}
+
+/**
+ * Builds a scene with one top-side copper fill that declares an inner hole.
+ * @returns {object}
+ */
+function createCopperFillHoleScene() {
+    const scene = createCenteredScene()
+    scene.detail.tracks = []
+    scene.detail.pads = []
+    scene.detail.fills = [
+        {
+            layer: 'top',
+            points: rectanglePoints(520, 220, 680, 340),
+            holes: [rectanglePoints(580, 260, 620, 300)]
+        }
+    ]
+    return scene
+}
+
+/**
+ * Builds a scene with one rectangular bottom-side copper fill.
+ * @returns {object}
+ */
+function createRectangularCopperFillScene() {
+    const scene = createCenteredScene()
+    scene.detail.tracks = []
+    scene.detail.pads = []
+    scene.detail.fills = [
+        {
+            layer: 'bottom',
+            x1: 520,
+            y1: 220,
+            x2: 680,
+            y2: 340
+        }
+    ]
+    return scene
+}
+
+/**
+ * Builds a scene with one zone-style copper polygon carrying multiple contours.
+ * @returns {object}
+ */
+function createCopperContourScene() {
+    const scene = createCenteredScene()
+    scene.detail.tracks = []
+    scene.detail.pads = []
+    scene.detail.polygons = [
+        {
+            layer: 'top',
+            contours: [
+                segmentsFromPoints(rectanglePoints(520, 220, 680, 340)),
+                segmentsFromPoints(rectanglePoints(580, 260, 620, 300))
+            ]
+        }
+    ]
+    return scene
+}
+
+/**
+ * Builds a scene with one bottom-side copper polygon using ring geometry.
+ * @returns {object}
+ */
+function createCopperRingScene() {
+    const scene = createCenteredScene()
+    scene.detail.tracks = []
+    scene.detail.pads = []
+    scene.detail.polygons = [
+        {
+            layer: 'bottom',
+            brep_shape: {
+                outer_ring: { vertices: rectanglePoints(520, 220, 680, 340) },
+                inner_rings: [{ vertices: rectanglePoints(580, 260, 620, 300) }]
+            }
+        }
+    ]
+    return scene
+}
+
+/**
+ * Builds a scene with one copper polygon split into saved B-Rep islands.
+ * @returns {object}
+ */
+function createCopperRingArrayScene() {
+    const scene = createCenteredScene()
+    scene.detail.tracks = []
+    scene.detail.pads = []
+    scene.detail.polygons = [
+        {
+            layer: 'top',
+            brep_shapes: [
+                {
+                    outer_ring: {
+                        vertices: rectanglePoints(520, 220, 560, 260)
+                    }
+                },
+                {
+                    outer_ring: {
+                        vertices: rectanglePoints(620, 220, 680, 280)
+                    },
+                    inner_rings: [
+                        {
+                            vertices: rectanglePoints(640, 240, 660, 260)
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+    return scene
+}
+
+/**
+ * Builds rectangle corner points.
+ * @param {number} minX Minimum X.
+ * @param {number} minY Minimum Y.
+ * @param {number} maxX Maximum X.
+ * @param {number} maxY Maximum Y.
+ * @returns {{ x: number, y: number }[]}
+ */
+function rectanglePoints(minX, minY, maxX, maxY) {
+    return [
+        { x: minX, y: minY },
+        { x: maxX, y: minY },
+        { x: maxX, y: maxY },
+        { x: minX, y: maxY }
+    ]
+}
+
+/**
+ * Converts a closed point loop into line segments.
+ * @param {{ x: number, y: number }[]} points Source points.
+ * @returns {object[]}
+ */
+function segmentsFromPoints(points) {
+    return points.map((point, index) => {
+        const next = points[(index + 1) % points.length]
+        return {
+            type: 'line',
+            x1: point.x,
+            y1: point.y,
+            x2: next.x,
+            y2: next.y
+        }
+    })
 }
 
 /**
@@ -330,6 +532,29 @@ test('PcbAssemblyGeometryBuilder exports PCB details in the component placement 
     assert.equal(componentBounds.maxX, 105)
 })
 
+test('PcbAssemblyGeometryBuilder emits fallback component bodies for missing models', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createFallbackComponentScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const fallback = findMesh(geometry.meshes, 'component-R1-body')
+
+    assert.ok(fallback)
+    assert.deepEqual(meshBounds(fallback), {
+        minX: 10,
+        maxX: 90,
+        minY: -40,
+        maxY: 0
+    })
+    assert.equal(findMesh(geometry.meshes, 'component-J1-body'), undefined)
+    assert.equal(
+        geometry.diagnostics.some(
+            (diagnostic) => diagnostic.code === 'component_model_missing'
+        ),
+        true
+    )
+})
+
 test('PcbAssemblyGeometryBuilder exports PCB tracks with rounded end caps', async () => {
     const geometry = await PcbAssemblyGeometryBuilder.build(
         createCenteredScene(),
@@ -351,6 +576,17 @@ test('PcbAssemblyGeometryBuilder cuts drill holes through the board substrate', 
     const board = findMesh(geometry.meshes, 'board')
 
     assert.deepEqual(planarCentroidsInsideRadius(board, 19), [])
+    assert.ok(board.vertices.length > 8)
+})
+
+test('PcbAssemblyGeometryBuilder cuts explicit board cutouts through the substrate', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createExplicitCutoutScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const board = findMesh(geometry.meshes, 'board')
+
+    assert.deepEqual(planarCentroidsInsideRadius(board, 18), [])
     assert.ok(board.vertices.length > 8)
 })
 
@@ -401,4 +637,76 @@ test('PcbAssemblyGeometryBuilder keeps copper beside slotted circular pad drills
     assert.ok(bottomPad)
     assert.deepEqual(planarCentroidsInsideRadius(topPad, 10, [100, 10]), [])
     assert.deepEqual(planarCentroidsInsideRadius(bottomPad, 10, [100, 10]), [])
+})
+
+test('PcbAssemblyGeometryBuilder preserves authored holes in copper fill meshes', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createCopperFillHoleScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const fill = findMesh(geometry.meshes, 'copper-top-fill-1')
+
+    assert.ok(fill)
+    assert.deepEqual(planarCentroidsInsideRadius(fill, 18, [100, 30]), [])
+    assert.ok(fill.vertices.length > 8)
+})
+
+test('PcbAssemblyGeometryBuilder exports rectangular copper fills', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createRectangularCopperFillScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const fill = findMesh(geometry.meshes, 'copper-bottom-fill-1')
+
+    assert.ok(fill)
+    const bounds = meshBounds(fill)
+    assert.deepEqual(bounds, {
+        minX: 20,
+        maxX: 180,
+        minY: -30,
+        maxY: 90
+    })
+})
+
+test('PcbAssemblyGeometryBuilder preserves multi-contour copper polygon holes', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createCopperContourScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const fill = findMesh(geometry.meshes, 'copper-top-fill-1')
+
+    assert.ok(fill)
+    assert.deepEqual(planarCentroidsInsideRadius(fill, 18, [100, 30]), [])
+    assert.ok(fill.vertices.length > 8)
+})
+
+test('PcbAssemblyGeometryBuilder exports ring-based copper polygon holes', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createCopperRingScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const fill = findMesh(geometry.meshes, 'copper-bottom-fill-1')
+
+    assert.ok(fill)
+    assert.deepEqual(planarCentroidsInsideRadius(fill, 18, [100, 30]), [])
+    assert.ok(fill.vertices.length > 8)
+})
+
+test('PcbAssemblyGeometryBuilder exports B-Rep shape array islands', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createCopperRingArrayScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const firstIsland = findMesh(geometry.meshes, 'copper-top-fill-1-island-1')
+    const secondIsland = findMesh(geometry.meshes, 'copper-top-fill-1-island-2')
+
+    assert.ok(firstIsland)
+    assert.ok(secondIsland)
+    assert.deepEqual(meshBounds(firstIsland), {
+        minX: 20,
+        maxX: 60,
+        minY: -30,
+        maxY: 10
+    })
+    assert.deepEqual(planarCentroidsInsideRadius(secondIsland, 9, [150, 0]), [])
 })

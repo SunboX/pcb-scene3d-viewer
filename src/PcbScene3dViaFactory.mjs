@@ -14,16 +14,18 @@ export class PcbScene3dViaFactory {
      * @param {{ diameter?: number, holeDiameter?: number, x?: number, y?: number, barrelOnly?: boolean }[]} vias
      * @param {number} thicknessMil
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
+     * @param {{ material?: any }} [options]
      * @returns {any}
      */
-    static buildGroup(THREE, vias, thicknessMil, normalizeBoardPoint) {
+    static buildGroup(
+        THREE,
+        vias,
+        thicknessMil,
+        normalizeBoardPoint,
+        options = {}
+    ) {
         const group = new THREE.Group()
-        const material = new THREE.MeshStandardMaterial({
-            color: 0xcaa24e,
-            roughness: 0.48,
-            metalness: 0.42,
-            side: THREE.DoubleSide
-        })
+        const material = PcbScene3dViaFactory.#resolveMaterial(THREE, options)
         const geometryCache = new Map()
 
         ;(vias || []).forEach((via) => {
@@ -46,6 +48,24 @@ export class PcbScene3dViaFactory {
         })
 
         return group
+    }
+
+    /**
+     * Resolves the via material.
+     * @param {any} THREE
+     * @param {{ material?: any }} options
+     * @returns {any}
+     */
+    static #resolveMaterial(THREE, options) {
+        return (
+            options?.material ||
+            new THREE.MeshStandardMaterial({
+                color: 0xcaa24e,
+                roughness: 0.48,
+                metalness: 0.42,
+                side: THREE.DoubleSide
+            })
+        )
     }
 
     /**

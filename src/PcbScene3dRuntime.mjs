@@ -19,9 +19,11 @@ import { PcbScene3dPresetState } from './PcbScene3dPresetState.mjs'
 import { PcbScene3dRenderGroupVisibility } from './PcbScene3dRenderGroupVisibility.mjs'
 import { PcbScene3dRenderScheduler } from './PcbScene3dRenderScheduler.mjs'
 import { PcbScene3dRuntimeBoardMeshes } from './PcbScene3dRuntimeBoardMeshes.mjs'
+import { PcbScene3dRuntimeHelpers } from './PcbScene3dRuntimeHelpers.mjs'
 import { PcbScene3dSilkscreenChunkedFactory } from './PcbScene3dSilkscreenChunkedFactory.mjs'
 import { PcbScene3dTrueTypeTextFactory } from './PcbScene3dTrueTypeTextFactory.mjs'
 import { PcbScene3dSelectionResolver } from './PcbScene3dSelectionResolver.mjs'
+import { PcbScene3dSelectionMarkerOverlay } from './PcbScene3dSelectionMarkerOverlay.mjs'
 import { PcbScene3dSelectionStyler } from './PcbScene3dSelectionStyler.mjs'
 import { PcbScene3dStaticBodyFactory } from './PcbScene3dStaticBodyFactory.mjs'
 import { PcbScene3dViewportResize } from './PcbScene3dViewportResize.mjs'
@@ -62,6 +64,7 @@ export class PcbScene3dRuntime {
     #fallbackBodyRoots
     #loadedExternalModelDesignators
     #modelSearchExternalModelRoots
+    #selectionMarkerOverlay
     #hasLoadedBoardAssemblyModel
     #selectedDesignator
     #initialRadius
@@ -111,6 +114,7 @@ export class PcbScene3dRuntime {
         this.#fallbackBodyRoots = new Map()
         this.#loadedExternalModelDesignators = new Set()
         this.#modelSearchExternalModelRoots = new Set()
+        this.#selectionMarkerOverlay = null
         this.#hasLoadedBoardAssemblyModel = false
         this.#selectedDesignator = ''
         this.#initialRadius =
@@ -180,6 +184,7 @@ export class PcbScene3dRuntime {
             return
         }
         this.#applyToggleVisibility()
+        this.#updateSelectionMarker()
         this.#render()
     }
     /** @param {string} designator @returns {boolean} */
@@ -241,6 +246,7 @@ export class PcbScene3dRuntime {
         this.#fallbackBodyRoots.clear()
         this.#loadedExternalModelDesignators.clear()
         this.#modelSearchExternalModelRoots.clear()
+        this.#selectionMarkerOverlay = null
         this.#hasLoadedBoardAssemblyModel = false
         this.#selectedDesignator = ''
         this.#groups.clear()
@@ -392,6 +398,7 @@ export class PcbScene3dRuntime {
         const fallbackBodiesGroup = new THREE.Group()
         const staticBodiesGroup = new THREE.Group()
         const externalModelsGroup = new THREE.Group()
+        const selectionMarkerGroup = new THREE.Group()
         this.#sceneDescription.components.forEach((component) => {
             if (component?.renderFallbackBody === false) {
                 return
@@ -429,22 +436,29 @@ export class PcbScene3dRuntime {
             THREE,
             this.#placementSceneDescription.staticBodyPlacements
         ).forEach((staticBody) => {
+            const selectionKey =
+                PcbScene3dStaticBodyFactory.resolveSelectionKey(
+                    staticBody.placement
+                )
             staticBodiesGroup.add(staticBody.rootGroup)
-            this.#registerSelectionRoot(
-                staticBody.placement?.designator,
-                staticBody.rootGroup
-            )
+            this.#registerSelectionRoot(selectionKey, staticBody.rootGroup)
             this.#componentAdjustmentRegistry.register(
-                staticBody.placement?.designator,
+                selectionKey,
                 staticBody.adjustmentGroup
             )
         })
         this.#groups.set('fallback-bodies', fallbackBodiesGroup)
         this.#groups.set('static-bodies', staticBodiesGroup)
         this.#groups.set('external-models', externalModelsGroup)
+        this.#groups.set('selection-marker', selectionMarkerGroup)
+        this.#selectionMarkerOverlay = new PcbScene3dSelectionMarkerOverlay(
+            selectionMarkerGroup
+        )
         this.#rootGroup.add(fallbackBodiesGroup)
         this.#rootGroup.add(staticBodiesGroup)
         this.#rootGroup.add(externalModelsGroup)
+        this.#rootGroup.add(selectionMarkerGroup)
+        this.#updateSelectionMarker()
         const boardSpan = Math.max(board.widthMil, board.heightMil, 1)
         this.#scene.fog = new THREE.Fog(
             0xf4f0ea,
@@ -488,7 +502,7 @@ export class PcbScene3dRuntime {
      */
     async #loadDeferredDetail() {
         try {
-            await PcbScene3dRuntime.#yieldToNextFrame()
+            await PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
             if (this.#isDisposed) {
                 return
             }
@@ -496,7 +510,7 @@ export class PcbScene3dRuntime {
             await this.#loadDeferredSilkscreen()
             this.#render()
 
-            await PcbScene3dRuntime.#yieldToNextFrame()
+            await PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
             if (this.#isDisposed) {
                 return
             }
@@ -505,7 +519,7 @@ export class PcbScene3dRuntime {
             this.#applyToggleVisibility()
             this.#render()
             this.#settleReady()
-            await PcbScene3dRuntime.#yieldToNextFrame()
+            await PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
             if (this.#isDisposed) {
                 return
             }
@@ -549,7 +563,8 @@ export class PcbScene3dRuntime {
             (x, y) => this.#normalizeDetailPoint(x, y),
             {
                 shouldContinue: () => !this.#isDisposed,
-                yieldToMain: () => PcbScene3dRuntime.#yieldToNextFrame()
+                yieldToMain: () =>
+                    PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
             }
         )
         if (this.#isDisposed) return
@@ -715,7 +730,7 @@ export class PcbScene3dRuntime {
 
             if (
                 !this.#pointerDownPosition ||
-                PcbScene3dRuntime.#resolvePointerTravel(
+                PcbScene3dRuntimeHelpers.pointerTravel(
                     this.#pointerDownPosition,
                     {
                         x: Number(event?.clientX || 0),
@@ -770,6 +785,24 @@ export class PcbScene3dRuntime {
         })
     }
 
+    /**
+     * Rebuilds the flat selected-component marker overlay.
+     * @returns {void}
+     */
+    #updateSelectionMarker() {
+        this.#selectionMarkerOverlay?.update(
+            this.#three,
+            this.#sceneDescription,
+            this.#selectedDesignator,
+            PcbScene3dComponentVisibility.isHidden(
+                this.#hiddenComponentDesignators,
+                this.#selectedDesignator
+            ),
+            (x, y) => this.#normalizeDetailPoint(x, y),
+            { color: PcbScene3dRuntime.#resolveSelectionHighlightColor() }
+        )
+    }
+
     /** @returns {void} */
     #render() {
         if (!this.#renderer || !this.#scene || !this.#camera) {
@@ -790,26 +823,6 @@ export class PcbScene3dRuntime {
         this.#hasSettledReady = true
         this.#resolveReadyPromise?.()
         this.#resolveReadyPromise = null
-    }
-
-    /**
-     * Yields one turn so the browser can present the initial rendered frame
-     * before deferred detail work continues.
-     * @returns {Promise<void>}
-     */
-    static async #yieldToNextFrame() {
-        if (
-            typeof window !== 'undefined' &&
-            typeof window.requestAnimationFrame === 'function'
-        ) {
-            await new Promise((resolve) => {
-                window.requestAnimationFrame(() => resolve())
-            })
-            return
-        }
-        await new Promise((resolve) => {
-            globalThis.setTimeout(resolve, 0)
-        })
     }
 
     /**
@@ -926,6 +939,8 @@ export class PcbScene3dRuntime {
             PcbScene3dRuntime.#resolveSelectionHighlightColor()
         )
         this.#selectedDesignator = normalizedDesignator
+        this.#applyToggleVisibility()
+        this.#updateSelectionMarker()
         this.#render()
     }
 
@@ -972,17 +987,5 @@ export class PcbScene3dRuntime {
     /** @returns {number} */
     static #resolveSelectionHighlightColor() {
         return 0x14c5e6
-    }
-
-    /**
-     * Resolves the drag travel between two pointer positions.
-     * @param {{ x: number, y: number }} start
-     * @param {{ x: number, y: number }} end
-     * @returns {number}
-     */
-    static #resolvePointerTravel(start, end) {
-        const dx = Number(end?.x || 0) - Number(start?.x || 0)
-        const dy = Number(end?.y || 0) - Number(start?.y || 0)
-        return Math.hypot(dx, dy)
     }
 }

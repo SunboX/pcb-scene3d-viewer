@@ -42,6 +42,17 @@ test('PcbModelArchiveExporter builds a deduplicated archive from resolved model 
                         format: 'wrl',
                         file: new Blob(['#VRML V2.0 utf8'])
                     }
+                },
+                {
+                    designator: 'U3',
+                    pattern: 'SENSOR-MODULE',
+                    externalModel: {
+                        origin: 'session',
+                        name: 'sensor.glb',
+                        relativePath: 'models/sensor.glb',
+                        format: 'glb',
+                        file: new Blob([new Uint8Array([1, 2, 3, 4])])
+                    }
                 }
             ],
             externalPlacements: [
@@ -70,16 +81,17 @@ test('PcbModelArchiveExporter builds a deduplicated archive from resolved model 
     })
 
     assert.equal(result.archiveName, 'forge-demo-models.zip')
-    assert.equal(result.exportedEntries.length, 2)
+    assert.equal(result.exportedEntries.length, 3)
     assert.deepEqual(
         result.exportedEntries.map((entry) => entry.archivePath).sort(),
-        ['CK-6.35-636-6P.step', 'CONN-HEADER.wrl']
+        ['CK-6.35-636-6P.step', 'CONN-HEADER.wrl', 'SENSOR-MODULE.glb']
     )
 
     const archive = unzipSync(result.archiveBytes)
     assert.deepEqual(Object.keys(archive).sort(), [
         'CK-6.35-636-6P.step',
-        'CONN-HEADER.wrl'
+        'CONN-HEADER.wrl',
+        'SENSOR-MODULE.glb'
     ])
     assert.match(
         new TextDecoder().decode(archive['CK-6.35-636-6P.step']),

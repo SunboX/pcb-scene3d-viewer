@@ -1,5 +1,6 @@
 import { PcbScene3dComponentAdjustment } from './PcbScene3dComponentAdjustment.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
+import { PcbScene3dTransparentMeshSplitter } from './PcbScene3dTransparentMeshSplitter.mjs'
 
 /**
  * Builds authored static component-body render roots.
@@ -24,7 +25,7 @@ export class PcbScene3dStaticBodyFactory {
     /**
      * Builds one authored static body root.
      * @param {any} THREE Three.js namespace.
-     * @param {{ designator?: string, mountSide?: string, rotationDeg?: number, positionMil?: { x?: number, y?: number, z?: number }, geometry?: object, bodyColor?: object, bodyOpacity?: number }} placement Static body placement.
+     * @param {{ designator?: string, selectionKey?: string, mountSide?: string, rotationDeg?: number, positionMil?: { x?: number, y?: number, z?: number }, geometry?: object, bodyColor?: object, bodyOpacity?: number }} placement Static body placement.
      * @returns {{ rootGroup: any, adjustmentGroup: any, placement: object } | null}
      */
     static build(THREE, placement) {
@@ -36,28 +37,38 @@ export class PcbScene3dStaticBodyFactory {
             return null
         }
 
+        const opacity = PcbScene3dStaticBodyFactory.#resolveOpacity(placement)
+        const transparent = opacity < 1
         const material = new THREE.MeshStandardMaterial({
             color: PcbScene3dStaticBodyFactory.#resolveColor(placement),
             roughness: 0.7,
             metalness: 0.08,
-            transparent:
-                PcbScene3dStaticBodyFactory.#resolveOpacity(placement) < 1,
-            opacity: PcbScene3dStaticBodyFactory.#resolveOpacity(placement)
+            transparent,
+            opacity,
+            depthWrite: !transparent
         })
         const mesh = new THREE.Mesh(geometry, material)
+        const renderObject = transparent
+            ? PcbScene3dTransparentMeshSplitter.build(THREE, mesh)
+            : mesh
         const mountRig = PcbScene3dMountRig.create(THREE, placement)
         const adjustmentGroup =
             PcbScene3dStaticBodyFactory.#buildAdjustmentGroup(THREE, placement)
+        const selectionKey =
+            PcbScene3dStaticBodyFactory.resolveSelectionKey(placement)
 
         mountRig.rootGroup.userData.scene3dSelection = {
-            designator: String(placement?.designator || 'static-body'),
+            designator: selectionKey,
+            displayDesignator: String(
+                placement?.designator || selectionKey || 'static-body'
+            ),
             sourceType: 'static-body'
         }
         PcbScene3dStaticBodyFactory.#applyVariantMetadata(
             mountRig.rootGroup,
             placement
         )
-        adjustmentGroup.add(mesh)
+        adjustmentGroup.add(renderObject)
         mountRig.faceGroup.add(adjustmentGroup)
 
         return {
@@ -65,6 +76,17 @@ export class PcbScene3dStaticBodyFactory {
             adjustmentGroup,
             placement
         }
+    }
+
+    /**
+     * Resolves the selectable key for one static body placement.
+     * @param {{ designator?: string, selectionKey?: string }} placement Static body placement.
+     * @returns {string}
+     */
+    static resolveSelectionKey(placement) {
+        return String(
+            placement?.selectionKey || placement?.designator || 'static-body'
+        ).trim()
     }
 
     /**
@@ -178,14 +200,14 @@ export class PcbScene3dStaticBodyFactory {
     /**
      * Builds the transform node used by live component adjustments.
      * @param {any} THREE Three.js namespace.
-     * @param {{ designator?: string }} placement Static body placement.
+     * @param {{ designator?: string, selectionKey?: string }} placement Static body placement.
      * @returns {any}
      */
     static #buildAdjustmentGroup(THREE, placement) {
         const adjustmentGroup = new THREE.Group()
         adjustmentGroup.userData.scene3dAdjustmentTarget = true
         adjustmentGroup.userData.scene3dAdjustmentDesignator = String(
-            placement?.designator || 'static-body'
+            PcbScene3dStaticBodyFactory.resolveSelectionKey(placement)
         )
         adjustmentGroup.userData.scene3dAdjustmentBaseline =
             PcbScene3dComponentAdjustment.neutral()

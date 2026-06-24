@@ -59,3 +59,36 @@ test('PcbScene3dSelectionInspectorRenderer renders selected component hide toggl
     assert.match(hiddenMarkup, /aria-pressed="true"/)
     assert.match(hiddenMarkup, /scene-3d__selection-eye-off-icon/)
 })
+
+test('PcbScene3dSelectionInspectorRenderer renders selected static body metadata', () => {
+    const markup = PcbScene3dSelectionInspectorRenderer.renderSelected({
+        designator: 'FAKE_CLIP_ASSEMBLY@-600,0',
+        hidden: false,
+        selection: {
+            sourceType: 'static-body'
+        },
+        selectionEntry: {
+            component: null,
+            externalPlacement: null,
+            staticBodyPlacement: {
+                designator: 'FAKE_CLIP_ASSEMBLY',
+                mountSide: 'top',
+                rotationDeg: 0,
+                positionMil: { x: -600, y: 0, z: 42 },
+                bodyPositionMil: { x: 400, y: 500 }
+            }
+        },
+        adjustment: {
+            scale: { x: 1, y: 1, z: 1 },
+            rotationDeg: { x: 0, y: 0, z: 0 },
+            offsetMil: { x: 0, y: 0, z: 0 }
+        },
+        includeControls: false,
+        translate: (key) => PcbScene3dText.fallback(key)
+    })
+
+    assert.match(markup, /Static body/)
+    assert.match(markup, /<dt>Designator<\/dt><dd>FAKE_CLIP_ASSEMBLY<\/dd>/)
+    assert.match(markup, /X -600/)
+    assert.match(markup, /X 400/)
+})

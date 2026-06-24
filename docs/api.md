@@ -63,7 +63,9 @@ Methods:
 - `isCircuitJsonModel(value)`: returns true for serialized CircuitJSON arrays.
 - `isDirectCircuitJsonModel(value)`: returns true when the array should bypass
   host `buildScene` callbacks.
-- `build(circuitJson)`: returns a runtime-ready scene description.
+- `build(circuitJson, options?)`: returns a runtime-ready scene description.
+  `options.modelUrlResolver` can attach caller-owned URL resolution metadata to
+  `cad_component` external models without fetching them.
 
 `PcbScene3dController` and `PcbScene3dRuntime` call this adapter automatically
 when they receive direct CircuitJSON input. See
@@ -120,6 +122,30 @@ worker.postMessage({
 
 Workers respond with `scene3d:success` and `sceneDescription`, or
 `scene3d:error` and `message`.
+
+## Assembly Geometry Export
+
+### `PcbAssemblyGeometryBuilder.build(sceneDescription, options?)`
+
+Builds export meshes from a prepared scene description. `options.modelMeshLoader`
+can provide external model meshes, `options.includeModels: false` skips external
+model loading, and `options.renderFallbackBodies: false` disables procedural
+component bodies for unresolved models.
+
+### `PcbAssemblyGltfWriter.write(options?)`
+
+Writes faceted assembly meshes as GLTF 2.0 JSON or binary GLB.
+
+Options:
+
+- `name`: scene name.
+- `meshes`: export meshes with `vertices`, `faces`, optional RGB or RGBA
+  `color`, optional `opacity`, and optional board `texture` data URIs.
+- `format`: `gltf` or `glb`.
+- `binary`: optional boolean equivalent to `format: 'glb'`.
+
+Returns a GLTF JSON object for `gltf` and a `Uint8Array` for `glb`. RGBA colors
+or opacity values below `1` are emitted as blended GLTF materials.
 
 ## Model Archive Export
 

@@ -145,15 +145,20 @@ export class PcbAssemblyBoardSubstrateBuilder {
      * @returns {number[][][]}
      */
     static #boardHoleLoops(sceneDescription, outer) {
+        const explicitLoops =
+            PcbAssemblyBoardSubstrateBuilder.#explicitCutoutLoops(
+                sceneDescription
+            )
         const primitiveLoops =
             PcbAssemblyBoardSubstrateBuilder.#primitiveHoleLoops(
                 sceneDescription
             )
-        const rawLoops = primitiveLoops.length
+        const fallbackLoops = primitiveLoops.length
             ? primitiveLoops
             : PcbAssemblyBoardSubstrateBuilder.#drillCutoutLoops(
                   sceneDescription
               )
+        const rawLoops = [...explicitLoops, ...fallbackLoops]
         const seen = new Set()
         const holes = []
 
@@ -187,6 +192,19 @@ export class PcbAssemblyBoardSubstrateBuilder {
         }
 
         return holes
+    }
+
+    /**
+     * Reads explicit board cutout contours from the scene board metadata.
+     * @param {object} sceneDescription Prepared scene description.
+     * @returns {Array<Array<object | number[]>>}
+     */
+    static #explicitCutoutLoops(sceneDescription) {
+        return PcbAssemblyBoardSubstrateBuilder.#array(
+            sceneDescription?.board?.cutouts
+        )
+            .map((cutout) => cutout?.points || cutout?.vertices || cutout)
+            .filter((loop) => Array.isArray(loop))
     }
 
     /**

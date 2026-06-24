@@ -76,6 +76,19 @@ test('PcbScene3dViaFactory renders through-hole pad barrels as annular liners', 
     )
 })
 
+test('PcbScene3dViaFactory uses supplied material for masked via annuli', () => {
+    const material = new THREE.MeshStandardMaterial({ color: 0x2f6b2b })
+    const group = PcbScene3dViaFactory.buildGroup(
+        THREE,
+        [{ x: 20, y: 30, diameter: 24, holeDiameter: 10 }],
+        63,
+        (x, y) => ({ x, y }),
+        { material }
+    )
+
+    assert.equal(group.children[0].material, material)
+})
+
 /**
  * Counts side-wall triangles that lie on a circular drill contour.
  * @param {any} geometry

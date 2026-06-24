@@ -48,10 +48,17 @@ class FakeMaterial {
     /** @type {Record<string, any>} */
     userData
 
-    constructor() {
+    /**
+     * @param {{ transparent?: boolean, opacity?: number }} options
+     */
+    constructor(options = {}) {
         this.color = new FakeColor(0x222222)
         this.emissive = new FakeColor(0x000000)
         this.emissiveIntensity = 0
+        this.transparent = options.transparent === true
+        this.opacity = Number.isFinite(Number(options.opacity))
+            ? Number(options.opacity)
+            : 1
         this.userData = {}
     }
 }
@@ -132,4 +139,41 @@ test('PcbScene3dSelectionStyler highlights every root registered for one designa
     assert.equal(externalPinsMaterial.emissive.getHex(), 0x000000)
     assert.equal(fallbackMaterial.emissiveIntensity, 0)
     assert.equal(externalBodyMaterial.emissiveIntensity, 0)
+})
+
+test('PcbScene3dSelectionStyler preserves transparent material color while highlighting', () => {
+    const selectionRoots = new Map()
+    const transparentMaterial = new FakeMaterial({
+        transparent: true,
+        opacity: 0.24
+    })
+    const transparentRoot = new FakeNode(transparentMaterial)
+
+    PcbScene3dSelectionStyler.registerSelectionRoot(
+        selectionRoots,
+        'MECH2',
+        transparentRoot
+    )
+
+    PcbScene3dSelectionStyler.applySelection(
+        selectionRoots,
+        '',
+        'MECH2',
+        0x14c5e6
+    )
+
+    assert.equal(transparentMaterial.color.getHex(), 0x222222)
+    assert.equal(transparentMaterial.emissive.getHex(), 0x14c5e6)
+    assert.equal(transparentMaterial.emissiveIntensity, 0.24)
+
+    PcbScene3dSelectionStyler.applySelection(
+        selectionRoots,
+        'MECH2',
+        '',
+        0x14c5e6
+    )
+
+    assert.equal(transparentMaterial.color.getHex(), 0x222222)
+    assert.equal(transparentMaterial.emissive.getHex(), 0x000000)
+    assert.equal(transparentMaterial.emissiveIntensity, 0)
 })

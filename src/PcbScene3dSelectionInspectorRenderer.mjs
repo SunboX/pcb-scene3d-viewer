@@ -46,37 +46,49 @@ export class PcbScene3dSelectionInspectorRenderer {
 
     /**
      * Renders selected component details and optional editable transform controls.
-     * @param {{ designator: string, hidden?: boolean, selection?: { sourceType?: string } | null, selectionEntry: { component: any | null, externalPlacement: any | null }, adjustment: { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }, includeControls?: boolean, translate: (key: string) => string }} options Render options.
+     * @param {{ designator: string, hidden?: boolean, selection?: { sourceType?: string } | null, selectionEntry: { component: any | null, externalPlacement: any | null, staticBodyPlacement?: any | null }, adjustment: { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }, includeControls?: boolean, translate: (key: string) => string }} options Render options.
      * @returns {string}
      */
     static renderSelected(options) {
         const component = options.selectionEntry.component
         const externalPlacement = options.selectionEntry.externalPlacement
+        const staticBodyPlacement =
+            options.selectionEntry.staticBodyPlacement || null
+        const displayDesignator =
+            staticBodyPlacement?.designator || options.designator
         const hidden = options.hidden === true
         const fields = [
-            [options.translate('scene3d.designator'), options.designator],
+            [options.translate('scene3d.designator'), displayDesignator],
             [
                 options.translate('scene3d.picked'),
-                options.selection?.sourceType === 'external-model'
-                    ? options.translate('scene3d.externalModel')
-                    : options.translate('scene3d.fallbackBody')
+                PcbScene3dSelectionInspectorRenderer.#formatSourceType(
+                    options.selection,
+                    options.selectionEntry,
+                    options.translate
+                )
             ],
             [
                 options.translate('scene3d.mountSide'),
-                externalPlacement?.mountSide || component?.mountSide || ''
+                externalPlacement?.mountSide ||
+                    component?.mountSide ||
+                    staticBodyPlacement?.mountSide ||
+                    ''
             ],
             [
                 options.translate('scene3d.rotation'),
                 PcbScene3dSelectionInspectorRenderer.#formatValue(
-                    component?.rotationDeg ?? externalPlacement?.rotationDeg,
+                    component?.rotationDeg ??
+                        externalPlacement?.rotationDeg ??
+                        staticBodyPlacement?.rotationDeg,
                     'deg'
                 )
             ],
             [
                 options.translate('scene3d.boardPosition'),
-                component?.boardPositionMil
+                component?.boardPositionMil || staticBodyPlacement?.positionMil
                     ? PcbScene3dSelectionInspectorRenderer.#formatPoint(
-                          component.boardPositionMil,
+                          component?.boardPositionMil ||
+                              staticBodyPlacement?.positionMil,
                           true
                       )
                     : ''
@@ -98,9 +110,11 @@ export class PcbScene3dSelectionInspectorRenderer {
             ],
             [
                 options.translate('scene3d.bodyPosition'),
-                externalPlacement?.bodyPositionMil
+                externalPlacement?.bodyPositionMil ||
+                staticBodyPlacement?.bodyPositionMil
                     ? PcbScene3dSelectionInspectorRenderer.#formatPoint(
-                          externalPlacement.bodyPositionMil,
+                          externalPlacement?.bodyPositionMil ||
+                              staticBodyPlacement?.bodyPositionMil,
                           false
                       )
                     : ''
@@ -534,6 +548,31 @@ export class PcbScene3dSelectionInspectorRenderer {
         return model
             ? String(model.name || '') + ' (' + String(model.format || '') + ')'
             : ''
+    }
+
+    /**
+     * Formats one selection source type label.
+     * @param {{ sourceType?: string } | null | undefined} selection Selection payload.
+     * @param {{ externalPlacement?: any | null, staticBodyPlacement?: any | null }} selectionEntry Selection metadata.
+     * @param {(key: string) => string} translate Translation lookup.
+     * @returns {string}
+     */
+    static #formatSourceType(selection, selectionEntry, translate) {
+        if (
+            selection?.sourceType === 'external-model' ||
+            selectionEntry?.externalPlacement
+        ) {
+            return translate('scene3d.externalModel')
+        }
+
+        if (
+            selection?.sourceType === 'static-body' ||
+            selectionEntry?.staticBodyPlacement
+        ) {
+            return translate('scene3d.staticBody')
+        }
+
+        return translate('scene3d.fallbackBody')
     }
 
     /**

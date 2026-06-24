@@ -17,8 +17,9 @@ runtime.
 
 The package was extracted from [ECAD Forge](https://ecadforge.app/), where it
 is used for browser-based PCB 3D scene rendering. Its runtime, geometry
-factories, model loading, component picking, view presets, archive export, and
-optional DOM shell can be reused by other browser-based ECAD tools.
+factories, model loading, component picking, view presets, archive export,
+GLTF/GLB assembly writing, and optional DOM shell can be reused by other
+browser-based ECAD tools.
 
 ## Install
 

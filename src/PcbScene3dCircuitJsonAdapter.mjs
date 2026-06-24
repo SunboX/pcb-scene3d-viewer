@@ -3,6 +3,7 @@ import {
     CircuitJsonIndexer,
     CircuitJsonUnits
 } from 'circuitjson-toolkit'
+import { PcbScene3dCircuitJsonModelTransform } from './PcbScene3dCircuitJsonModelTransform.mjs'
 
 const TOP_LAYER_ID = 1
 const BOTTOM_LAYER_ID = 32
@@ -12,6 +13,17 @@ const DEFAULT_BOARD_THICKNESS_MM = 1.6
 const DEFAULT_COMPONENT_HEIGHT_MIL = 60
 const RECTANGULAR_PAD_SHAPE = 2
 const CIRCULAR_PAD_SHAPE = 1
+const CIRCLE_CUTOUT_POINTS = 32
+const MODEL_URL_FIELDS = [
+    ['model_step_url', 'step'],
+    ['model_stp_url', 'step'],
+    ['model_wrl_url', 'wrl'],
+    ['model_vrml_url', 'wrl'],
+    ['model_glb_url', 'glb'],
+    ['model_gltf_url', 'gltf'],
+    ['model_stl_url', 'stl'],
+    ['model_obj_url', 'obj']
+]
 
 /**
  * Converts serialized CircuitJSON element arrays into the viewer render model.
@@ -46,16 +58,28 @@ export class PcbScene3dCircuitJsonAdapter {
     /**
      * Builds the internal render model used by the Three.js runtime.
      * @param {object[]} circuitJson Serialized CircuitJSON model.
+     * @param {{ modelUrlResolver?: (url: string, context: object) => string | object | null | undefined }} [options] Adapter options.
      * @returns {object}
      */
-    static build(circuitJson) {
+    static build(circuitJson, options = {}) {
         CircuitJsonDocument.assertModel(circuitJson)
         const index = CircuitJsonIndexer.index(circuitJson)
         const board = PcbScene3dCircuitJsonAdapter.#buildBoard(index)
         const detail = PcbScene3dCircuitJsonAdapter.#buildDetail(index)
+        const externalPlacements =
+            PcbScene3dCircuitJsonAdapter.#buildExternalPlacements(
+                index,
+                board,
+                options
+            )
+        const externalModelByComponentId =
+            PcbScene3dCircuitJsonAdapter.#externalModelByComponentId(
+                externalPlacements
+            )
         const components = PcbScene3dCircuitJsonAdapter.#buildComponents(
             index,
-            board
+            board,
+            externalModelByComponentId
         )
 
         return {
@@ -63,19 +87,22 @@ export class PcbScene3dCircuitJsonAdapter {
             coordinateSystem: 'circuitjson-mm',
             board,
             components,
-            externalPlacements: [],
+            externalPlacements,
             boardAssemblyModel: null,
             detail
         }
     }
 
     /**
-     * Builds the render-model board from a `pcb_board` element.
+     * Builds the render-model board from a `pcb_panel` or `pcb_board` element.
      * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
      * @returns {object}
      */
     static #buildBoard(index) {
-        const boardElement = index.elementsByType.get('pcb_board')?.[0] || {}
+        const boardElement =
+            index.elementsByType.get('pcb_panel')?.[0] ||
+            index.elementsByType.get('pcb_board')?.[0] ||
+            {}
         const widthMil = CircuitJsonUnits.mmToMil(
             boardElement.width,
             DEFAULT_BOARD_WIDTH_MM
@@ -110,6 +137,7 @@ export class PcbScene3dCircuitJsonAdapter {
             centerX: center.x,
             centerY: center.y,
             segments,
+            cutouts: PcbScene3dCircuitJsonAdapter.#buildBoardCutouts(index),
             surfaceColor: null,
             edgeColor: null
         }
@@ -169,17 +197,128 @@ export class PcbScene3dCircuitJsonAdapter {
     }
 
     /**
+     * Builds explicit through-board cutout loops.
+     * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
+     * @returns {{ points: { x: number, y: number }[], sourceId?: string }[]}
+     */
+    static #buildBoardCutouts(index) {
+        return (index.elementsByType.get('pcb_cutout') || [])
+            .map((cutout) => PcbScene3dCircuitJsonAdapter.#buildCutout(cutout))
+            .filter(Boolean)
+    }
+
+    /**
+     * Builds one cutout loop.
+     * @param {object} cutout Cutout element.
+     * @returns {{ points: { x: number, y: number }[], sourceId?: string } | null}
+     */
+    static #buildCutout(cutout) {
+        const outline =
+            PcbScene3dCircuitJsonAdapter.#cutoutOutlinePoints(cutout)
+        if (outline.length < 3) {
+            return null
+        }
+
+        return {
+            points: outline,
+            sourceId: String(cutout?.pcb_cutout_id || cutout?.cutout_id || '')
+        }
+    }
+
+    /**
+     * Resolves cutout outline points from polygon, rectangle, or circle fields.
+     * @param {object} cutout Cutout element.
+     * @returns {{ x: number, y: number }[]}
+     */
+    static #cutoutOutlinePoints(cutout) {
+        const points = PcbScene3dCircuitJsonAdapter.#array(
+            cutout?.points || cutout?.outline || cutout?.polygon || []
+        )
+            .map((point) => CircuitJsonUnits.pointMmToMil(point))
+            .filter((point) => Number.isFinite(point.x + point.y))
+        if (points.length >= 3) {
+            return points
+        }
+
+        const shape = String(cutout?.shape || '').toLowerCase()
+        if (shape.includes('circle') || Number(cutout?.radius || 0) > 0) {
+            return PcbScene3dCircuitJsonAdapter.#circleCutoutPoints(cutout)
+        }
+
+        return PcbScene3dCircuitJsonAdapter.#rectCutoutPoints(cutout)
+    }
+
+    /**
+     * Builds a rectangular cutout loop.
+     * @param {object} cutout Cutout element.
+     * @returns {{ x: number, y: number }[]}
+     */
+    static #rectCutoutPoints(cutout) {
+        const center = CircuitJsonUnits.pointMmToMil(
+            cutout?.center || {
+                x: cutout?.x,
+                y: cutout?.y
+            }
+        )
+        const width = CircuitJsonUnits.mmToMil(cutout?.width, 0)
+        const height = CircuitJsonUnits.mmToMil(cutout?.height, 0)
+        if (width <= 0 || height <= 0) {
+            return []
+        }
+
+        const halfWidth = width / 2
+        const halfHeight = height / 2
+        return [
+            { x: center.x - halfWidth, y: center.y - halfHeight },
+            { x: center.x + halfWidth, y: center.y - halfHeight },
+            { x: center.x + halfWidth, y: center.y + halfHeight },
+            { x: center.x - halfWidth, y: center.y + halfHeight }
+        ]
+    }
+
+    /**
+     * Builds a circular cutout loop.
+     * @param {object} cutout Cutout element.
+     * @returns {{ x: number, y: number }[]}
+     */
+    static #circleCutoutPoints(cutout) {
+        const center = CircuitJsonUnits.pointMmToMil(
+            cutout?.center || {
+                x: cutout?.x,
+                y: cutout?.y
+            }
+        )
+        const radius = CircuitJsonUnits.mmToMil(
+            cutout?.radius || Number(cutout?.diameter || 0) / 2,
+            0
+        )
+        if (radius <= 0) {
+            return []
+        }
+
+        return Array.from({ length: CIRCLE_CUTOUT_POINTS }, (_entry, index) => {
+            const angle = (Math.PI * 2 * index) / CIRCLE_CUTOUT_POINTS
+            return {
+                x: center.x + Math.cos(angle) * radius,
+                y: center.y + Math.sin(angle) * radius
+            }
+        })
+    }
+
+    /**
      * Builds component fallback bodies from `pcb_component` elements.
      * @param {{ elementsByType: Map<string, object[]>, sourceComponentById: Map<string, object> }} index CircuitJSON index.
      * @param {{ centerX: number, centerY: number, thicknessMil: number }} board Render board.
+     * @param {Map<string, object>} externalModelByComponentId External model metadata by PCB component ID.
      * @returns {object[]}
      */
-    static #buildComponents(index, board) {
+    static #buildComponents(index, board, externalModelByComponentId) {
         return (index.elementsByType.get('pcb_component') || []).map(
             (component, componentIndex) => {
                 const sourceComponent = index.sourceComponentById.get(
                     String(component?.source_component_id || '')
                 )
+                const componentId = String(component?.pcb_component_id || '')
                 const center = CircuitJsonUnits.pointMmToMil(
                     component?.center || {
                         x: component?.x,
@@ -231,10 +370,264 @@ export class PcbScene3dCircuitJsonAdapter {
                             height: Math.max(height, 10)
                         }
                     },
-                    externalModel: null
+                    externalModel:
+                        externalModelByComponentId.get(componentId) || null
                 }
             }
         )
+    }
+
+    /**
+     * Builds external component model placements from CAD metadata.
+     * @param {{ elementsByType: Map<string, object[]>, sourceComponentById: Map<string, object> }} index CircuitJSON index.
+     * @param {{ centerX: number, centerY: number, thicknessMil: number }} board Render board.
+     * @param {{ modelUrlResolver?: (url: string, context: object) => string | object | null | undefined }} options Adapter options.
+     * @returns {object[]}
+     */
+    static #buildExternalPlacements(index, board, options) {
+        const componentById = PcbScene3dCircuitJsonAdapter.#elementById(
+            index,
+            'pcb_component',
+            'pcb_component_id'
+        )
+        return (index.elementsByType.get('cad_component') || [])
+            .map((cadComponent, cadIndex) => {
+                const component = componentById.get(
+                    String(cadComponent?.pcb_component_id || '')
+                )
+                return PcbScene3dCircuitJsonAdapter.#buildExternalPlacement(
+                    cadComponent,
+                    component,
+                    index,
+                    board,
+                    options,
+                    cadIndex
+                )
+            })
+            .filter(Boolean)
+    }
+
+    /**
+     * Builds one external model placement.
+     * @param {object} cadComponent CAD component element.
+     * @param {object | undefined} component PCB component element.
+     * @param {{ sourceComponentById: Map<string, object> }} index CircuitJSON index.
+     * @param {{ centerX: number, centerY: number, thicknessMil: number }} board Render board.
+     * @param {{ modelUrlResolver?: (url: string, context: object) => string | object | null | undefined }} options Adapter options.
+     * @param {number} cadIndex CAD component index.
+     * @returns {object | null}
+     */
+    static #buildExternalPlacement(
+        cadComponent,
+        component,
+        index,
+        board,
+        options,
+        cadIndex
+    ) {
+        const sourceComponent = index.sourceComponentById.get(
+            String(component?.source_component_id || '')
+        )
+        const externalModel = PcbScene3dCircuitJsonAdapter.#externalModel(
+            cadComponent,
+            component,
+            sourceComponent,
+            options,
+            cadIndex
+        )
+        if (!externalModel) {
+            return null
+        }
+
+        const mountSide = PcbScene3dCircuitJsonAdapter.#layerSide(
+            component?.layer || cadComponent?.layer
+        )
+        return {
+            designator: PcbScene3dCircuitJsonAdapter.#componentDesignator(
+                component || cadComponent,
+                sourceComponent,
+                cadIndex
+            ),
+            pcbComponentId: String(component?.pcb_component_id || ''),
+            mountSide,
+            rotationDeg: PcbScene3dCircuitJsonAdapter.#placementRotationDeg(
+                cadComponent,
+                component
+            ),
+            positionMil: PcbScene3dCircuitJsonAdapter.#placementPositionMil(
+                cadComponent,
+                component,
+                board,
+                mountSide
+            ),
+            modelTransform:
+                PcbScene3dCircuitJsonModelTransform.build(cadComponent),
+            ...PcbScene3dCircuitJsonModelTransform.displayMetadata(
+                cadComponent
+            ),
+            externalModel
+        }
+    }
+
+    /**
+     * Builds an external model metadata object.
+     * @param {object} cadComponent CAD component element.
+     * @param {object | undefined} component PCB component element.
+     * @param {object | undefined} sourceComponent Source component element.
+     * @param {{ modelUrlResolver?: (url: string, context: object) => string | object | null | undefined }} options Adapter options.
+     * @param {number} cadIndex CAD component index.
+     * @returns {object | null}
+     */
+    static #externalModel(
+        cadComponent,
+        component,
+        sourceComponent,
+        options,
+        cadIndex
+    ) {
+        const match = MODEL_URL_FIELDS.find(([field]) =>
+            String(cadComponent?.[field] || '').trim()
+        )
+        if (!match) {
+            return null
+        }
+
+        const [field, format] = match
+        const sourceUrl = String(cadComponent?.[field] || '').trim()
+        const context = {
+            format,
+            field,
+            cadComponent,
+            component,
+            sourceComponent,
+            index: cadIndex
+        }
+
+        return {
+            format,
+            name: PcbScene3dCircuitJsonAdapter.#fileNameFromUrl(sourceUrl),
+            sourceUrl,
+            ...PcbScene3dCircuitJsonAdapter.#resolveModelUrl(
+                sourceUrl,
+                context,
+                options
+            )
+        }
+    }
+
+    /**
+     * Applies optional caller-owned model URL resolution.
+     * @param {string} sourceUrl Source URL.
+     * @param {object} context Resolver context.
+     * @param {{ modelUrlResolver?: (url: string, context: object) => string | object | null | undefined }} options Adapter options.
+     * @returns {object}
+     */
+    static #resolveModelUrl(sourceUrl, context, options) {
+        const resolver = options?.modelUrlResolver
+        if (typeof resolver !== 'function') {
+            return {}
+        }
+
+        const resolved = resolver(sourceUrl, context)
+        if (typeof resolved === 'string') {
+            return { resolvedUrl: resolved }
+        }
+        if (resolved && typeof resolved === 'object') {
+            return { ...resolved }
+        }
+        return {}
+    }
+
+    /**
+     * Builds a component ID to external-model map.
+     * @param {object[]} placements External placements.
+     * @returns {Map<string, object>}
+     */
+    static #externalModelByComponentId(placements) {
+        const map = new Map()
+        placements.forEach((placement) => {
+            const componentId = String(placement?.pcbComponentId || '')
+            if (componentId && placement?.externalModel) {
+                map.set(componentId, placement.externalModel)
+            }
+        })
+        return map
+    }
+
+    /**
+     * Builds a map keyed by one element ID field.
+     * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
+     * @param {string} type Element type.
+     * @param {string} idField ID field.
+     * @returns {Map<string, object>}
+     */
+    static #elementById(index, type, idField) {
+        const map = new Map()
+        ;(index.elementsByType.get(type) || []).forEach((element) => {
+            const id = String(element?.[idField] || '')
+            if (id) {
+                map.set(id, element)
+            }
+        })
+        return map
+    }
+
+    /**
+     * Resolves placement position in board-local mils.
+     * @param {object} cadComponent CAD component element.
+     * @param {object | undefined} component PCB component element.
+     * @param {{ centerX: number, centerY: number, thicknessMil: number }} board Render board.
+     * @param {'top' | 'bottom'} mountSide Mount side.
+     * @returns {{ x: number, y: number, z: number }}
+     */
+    static #placementPositionMil(cadComponent, component, board, mountSide) {
+        const point = CircuitJsonUnits.pointMmToMil(
+            cadComponent?.position ||
+                component?.center || {
+                    x: component?.x,
+                    y: component?.y
+                }
+        )
+        const fallbackZ =
+            mountSide === 'bottom'
+                ? -Number(board?.thicknessMil || 0) / 2
+                : Number(board?.thicknessMil || 0) / 2
+        const z = Number.isFinite(Number(cadComponent?.position?.z))
+            ? CircuitJsonUnits.mmToMil(cadComponent.position.z, 0)
+            : fallbackZ
+
+        return {
+            x: point.x - Number(board?.centerX || 0),
+            y: point.y - Number(board?.centerY || 0),
+            z
+        }
+    }
+
+    /**
+     * Resolves placement rotation in board space.
+     * @param {object} cadComponent CAD component element.
+     * @param {object | undefined} component PCB component element.
+     * @returns {number}
+     */
+    static #placementRotationDeg(cadComponent, component) {
+        return Number(
+            cadComponent?.rotation?.z ??
+                cadComponent?.rotationDeg ??
+                cadComponent?.rotation ??
+                component?.rotation ??
+                component?.ccw_rotation ??
+                0
+        )
+    }
+
+    /**
+     * Extracts a file name from a URL-like model reference.
+     * @param {string} sourceUrl Source URL.
+     * @returns {string}
+     */
+    static #fileNameFromUrl(sourceUrl) {
+        const cleanUrl = String(sourceUrl || '').split(/[?#]/u)[0]
+        return cleanUrl.split('/').filter(Boolean).pop() || 'model'
     }
 
     /**
@@ -541,5 +934,14 @@ export class PcbScene3dCircuitJsonAdapter {
         return value.includes('bottom') || value === 'b.cu' || value === 'back'
             ? 'bottom'
             : 'top'
+    }
+
+    /**
+     * Normalizes a value to an array.
+     * @param {unknown} value Candidate value.
+     * @returns {any[]}
+     */
+    static #array(value) {
+        return Array.isArray(value) ? value : []
     }
 }
