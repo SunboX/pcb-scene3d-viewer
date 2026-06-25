@@ -26,24 +26,21 @@ export class PcbScene3dRenderGroupVisibility {
             true
         )
         PcbScene3dRenderGroupVisibility.#setVisible(
+            state?.groups?.get('paste'),
+            true
+        )
+        PcbScene3dRenderGroupVisibility.#setVisible(
             state?.groups?.get('copper'),
             Boolean(state?.toggles?.copper)
         )
-        PcbScene3dRenderGroupVisibility.#applyDetailOverlayPresentation(
-            state?.groups?.get('silkscreen'),
-            boardAssemblyActive
-        )
-        PcbScene3dRenderGroupVisibility.#applyDetailOverlayPresentation(
-            state?.groups?.get('copper'),
-            boardAssemblyActive
+        ;['silkscreen', 'paste', 'copper'].forEach((groupName) =>
+            PcbScene3dRenderGroupVisibility.#applyDetailOverlayPresentation(
+                state?.groups?.get(groupName),
+                boardAssemblyActive
+            )
         )
         const showFallbackBodies =
-            !boardAssemblyActive &&
-            (Boolean(state?.toggles?.['fallback-bodies']) ||
-                PcbScene3dFallbackVisibility.hasVisibleExternalCompanion(
-                    state?.fallbackBodyRoots,
-                    state?.toggles
-                ))
+            !boardAssemblyActive && Boolean(state?.toggles?.['fallback-bodies'])
         PcbScene3dRenderGroupVisibility.#setVisible(
             state?.groups?.get('fallback-bodies'),
             showFallbackBodies

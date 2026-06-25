@@ -35,9 +35,10 @@
 ## Library Scope
 
 - Include browser-side Three.js scene runtime, geometry factories, STEP/WRL
-  model loading, component picking, view presets, archive export, the optional
-  DOM controller, and the optional 3D shell renderer/styles.
-- Do not include ECAD parser logic or format-specific scene-description
+  model loading, component picking, view presets, archive export, CircuitJSON
+  scene adapters and CAD model asset resolution, the optional DOM controller,
+  and the optional 3D shell renderer/styles.
+- Do not include ECAD parser logic or source-format-specific scene-description
   builders. Altium and KiCad scene descriptions are produced by their own
   toolkits and passed into this package.
 - Keep renderer fixes universal. Never special-case a specific file name,

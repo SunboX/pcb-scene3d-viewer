@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
     PcbAssemblyGeometryBuilder,
-    PcbAssemblyMeshUtils
+    PcbAssemblyMeshUtils,
+    PcbScene3dCircuitJsonAdapter
 } from '../src/scene3d.mjs'
 
 /**
@@ -259,6 +260,33 @@ function createSlottedPadScene() {
 }
 
 /**
+ * Builds a scene with a slotted drill whose center is offset from the copper
+ * annulus center.
+ * @returns {object}
+ */
+function createOffsetSlottedPadScene() {
+    const scene = createCenteredScene()
+    scene.detail.pads = [
+        {
+            x: 600,
+            y: 260,
+            shapeTop: 1,
+            shapeBottom: 1,
+            sizeTopX: 140,
+            sizeTopY: 140,
+            sizeBottomX: 140,
+            sizeBottomY: 140,
+            holeDiameter: 40,
+            holeSlotLength: 100,
+            holeRotation: 45,
+            holeOffsetX: 25,
+            holeOffsetY: -15
+        }
+    ]
+    return scene
+}
+
+/**
  * Builds a scene with one top-side copper fill that declares an inner hole.
  * @returns {object}
  */
@@ -469,6 +497,25 @@ function meshBounds(mesh) {
 }
 
 /**
+ * Measures the board-normal mesh bounds.
+ * @param {{ vertices?: number[][] }} mesh Mesh data.
+ * @returns {{ minZ: number, maxZ: number }}
+ */
+function meshZBounds(mesh) {
+    const bounds = {
+        minZ: Infinity,
+        maxZ: -Infinity
+    }
+
+    for (const vertex of mesh.vertices || []) {
+        bounds.minZ = Math.min(bounds.minZ, Number(vertex[2] || 0))
+        bounds.maxZ = Math.max(bounds.maxZ, Number(vertex[2] || 0))
+    }
+
+    return bounds
+}
+
+/**
  * Finds planar board face centroids within a given radius.
  * @param {{ vertices?: number[][], faces?: number[][] }} mesh Mesh data.
  * @param {number} radius Radius from the local origin.
@@ -555,6 +602,194 @@ test('PcbAssemblyGeometryBuilder emits fallback component bodies for missing mod
     )
 })
 
+test('PcbAssemblyGeometryBuilder emits footprint-derived component leads', async () => {
+    const scene = PcbScene3dCircuitJsonAdapter.build([
+        {
+            type: 'pcb_board',
+            pcb_board_id: 'board_1',
+            center: { x: 0, y: 0 },
+            width: 20,
+            height: 10,
+            thickness: 1.6
+        },
+        {
+            type: 'source_component',
+            source_component_id: 'source_u1',
+            name: 'U1'
+        },
+        {
+            type: 'pcb_component',
+            pcb_component_id: 'pcb_u1',
+            source_component_id: 'source_u1',
+            center: { x: 1, y: 2 },
+            layer: 'top',
+            rotation: 0
+        },
+        {
+            type: 'cad_component',
+            cad_component_id: 'cad_u1',
+            pcb_component_id: 'pcb_u1',
+            footprinter_string: 'soic8'
+        }
+    ])
+    const geometry = await PcbAssemblyGeometryBuilder.build(scene, {
+        includeModels: false
+    })
+    const component = scene.components[0]
+    const leadMeshes = geometry.meshes.filter((mesh) =>
+        String(mesh.name || '').startsWith('component-U1-lead-')
+    )
+
+    assert.equal(component.body.family, 'soic')
+    assert.equal(component.body.footprintModel.leadCount, 8)
+    assert.equal(leadMeshes.length, 8)
+    assert.ok(findMesh(geometry.meshes, 'component-U1-body'))
+})
+
+test('PcbAssemblyGeometryBuilder emits footprint-derived header pins', async () => {
+    const scene = PcbScene3dCircuitJsonAdapter.build([
+        {
+            type: 'pcb_board',
+            pcb_board_id: 'board_1',
+            center: { x: 0, y: 0 },
+            width: 20,
+            height: 10,
+            thickness: 1.6
+        },
+        {
+            type: 'source_component',
+            source_component_id: 'source_j1',
+            name: 'J1',
+            ftype: 'simple_pin_header'
+        },
+        {
+            type: 'pcb_component',
+            pcb_component_id: 'pcb_j1',
+            source_component_id: 'source_j1',
+            center: { x: 1, y: 2 },
+            layer: 'top',
+            rotation: 0
+        },
+        {
+            type: 'cad_component',
+            cad_component_id: 'cad_j1',
+            pcb_component_id: 'pcb_j1',
+            footprinter_string: 'pinrow4_nopinlabels'
+        }
+    ])
+    const geometry = await PcbAssemblyGeometryBuilder.build(scene, {
+        includeModels: false
+    })
+    const component = scene.components[0]
+    const pinMeshes = geometry.meshes.filter((mesh) =>
+        String(mesh.name || '').startsWith('component-J1-pin-')
+    )
+
+    assert.equal(component.body.family, 'header')
+    assert.equal(component.body.footprintModel.style, 'pin-header')
+    assert.equal(component.body.footprintModel.pinCount, 4)
+    assert.equal(component.body.footprintModel.rowCount, 1)
+    assert.equal(pinMeshes.length, 4)
+    assert.ok(findMesh(geometry.meshes, 'component-J1-body'))
+})
+
+test('PcbAssemblyGeometryBuilder keeps bottom fallback SMD bodies below the board', async () => {
+    const scene = PcbScene3dCircuitJsonAdapter.build([
+        {
+            type: 'pcb_board',
+            pcb_board_id: 'board_1',
+            center: { x: 0, y: 0 },
+            width: 20,
+            height: 10,
+            thickness: 1.6
+        },
+        {
+            type: 'source_component',
+            source_component_id: 'source_u1',
+            name: 'U1'
+        },
+        {
+            type: 'pcb_component',
+            pcb_component_id: 'pcb_u1',
+            source_component_id: 'source_u1',
+            center: { x: 1, y: 2 },
+            layer: 'bottom',
+            rotation: 0
+        },
+        {
+            type: 'cad_component',
+            cad_component_id: 'cad_u1',
+            pcb_component_id: 'pcb_u1',
+            footprinter_string: 'soic8'
+        }
+    ])
+    const geometry = await PcbAssemblyGeometryBuilder.build(scene, {
+        includeModels: false
+    })
+    const body = findMesh(geometry.meshes, 'component-U1-body')
+    const lead = findMesh(geometry.meshes, 'component-U1-lead-1')
+
+    assert.equal(scene.components[0].mountSide, 'bottom')
+    assert.ok(body)
+    assert.ok(lead)
+    assert.equal(meshZBounds(body).maxZ < 0, true)
+    assert.equal(meshZBounds(lead).maxZ < 0, true)
+})
+
+test('PcbAssemblyGeometryBuilder emits bounding-box bodies instead of explicit model loads', async () => {
+    const scene = createCenteredScene()
+    scene.components = [
+        {
+            designator: 'U1',
+            mountSide: 'top',
+            rotationDeg: 0,
+            positionMil: { x: 100, y: 10, z: 70 },
+            renderFallbackBody: true,
+            externalModel: { format: 'step', name: 'u1.step' },
+            body: {
+                sizeMil: {
+                    width: 120,
+                    depth: 80,
+                    height: 40
+                }
+            }
+        }
+    ]
+    scene.externalPlacements = [
+        {
+            designator: 'U1',
+            mountSide: 'top',
+            rotationDeg: 0,
+            positionMil: { x: 100, y: 10, z: 70 },
+            renderAsBoundingBox: true,
+            externalModel: { format: 'step', name: 'u1.step' }
+        }
+    ]
+    let loadCount = 0
+
+    const geometry = await PcbAssemblyGeometryBuilder.build(scene, {
+        modelMeshLoader: async () => {
+            loadCount += 1
+            return PcbAssemblyMeshUtils.box('explicit-model', {
+                width: 10,
+                depth: 10,
+                height: 10
+            })
+        }
+    })
+    const fallback = findMesh(geometry.meshes, 'component-U1-body')
+
+    assert.equal(loadCount, 0)
+    assert.ok(fallback)
+    assert.equal(findMesh(geometry.meshes, 'component-U1'), undefined)
+    assert.deepEqual(meshBounds(fallback), {
+        minX: 40,
+        maxX: 160,
+        minY: -30,
+        maxY: 50
+    })
+})
+
 test('PcbAssemblyGeometryBuilder exports PCB tracks with rounded end caps', async () => {
     const geometry = await PcbAssemblyGeometryBuilder.build(
         createCenteredScene(),
@@ -637,6 +872,20 @@ test('PcbAssemblyGeometryBuilder keeps copper beside slotted circular pad drills
     assert.ok(bottomPad)
     assert.deepEqual(planarCentroidsInsideRadius(topPad, 10, [100, 10]), [])
     assert.deepEqual(planarCentroidsInsideRadius(bottomPad, 10, [100, 10]), [])
+})
+
+test('PcbAssemblyGeometryBuilder applies pad drill offsets to board and copper openings', async () => {
+    const geometry = await PcbAssemblyGeometryBuilder.build(
+        createOffsetSlottedPadScene(),
+        { modelMeshLoader: createModelMeshLoader() }
+    )
+    const board = findMesh(geometry.meshes, 'board')
+    const topPad = findMesh(geometry.meshes, 'pad-top-1')
+    const bottomPad = findMesh(geometry.meshes, 'pad-bottom-1')
+
+    assert.deepEqual(planarCentroidsInsideRadius(board, 10, [125, -5]), [])
+    assert.deepEqual(planarCentroidsInsideRadius(topPad, 10, [125, -5]), [])
+    assert.deepEqual(planarCentroidsInsideRadius(bottomPad, 10, [125, -5]), [])
 })
 
 test('PcbAssemblyGeometryBuilder preserves authored holes in copper fill meshes', async () => {

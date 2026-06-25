@@ -36,6 +36,7 @@ export class PcbAssemblyTextModelMeshParser {
             'OBJ'
         )
         const vertices = []
+        const vertexColors = []
         const faceGroups = new Map()
         const materialLibraries = []
         let activeMaterial = ''
@@ -57,11 +58,11 @@ export class PcbAssemblyTextModelMeshParser {
                 }
 
                 if (trimmed.startsWith('v ')) {
-                    vertices.push(
-                        PcbAssemblyTextModelMeshParser.#toMilTriplet(
-                            trimmed.slice(2)
-                        )
+                    const vertex = PcbAssemblyTextModelMeshParser.#objVertex(
+                        trimmed.slice(2)
                     )
+                    vertices.push(vertex.position)
+                    vertexColors.push(vertex.color)
                     return
                 }
 
@@ -106,7 +107,8 @@ export class PcbAssemblyTextModelMeshParser {
             vertices,
             faces,
             ...PcbAssemblyTextModelMeshParser.#objMaterialProperties(
-                materials.get(materialName)
+                materials.get(materialName),
+                vertexColors
             )
         }))
     }
@@ -262,7 +264,7 @@ export class PcbAssemblyTextModelMeshParser {
      * Reads and parses declared OBJ material libraries.
      * @param {object} model Model metadata.
      * @param {string[]} materialLibraries Declared MTL file names.
-     * @returns {Promise<Map<string, number[]>>}
+     * @returns {Promise<Map<string, object>>}
      */
     static async #objMaterialColors(model, materialLibraries) {
         const materials = new Map()
@@ -282,7 +284,7 @@ export class PcbAssemblyTextModelMeshParser {
     /**
      * Parses one MTL material library into color entries.
      * @param {string | null} text MTL source text.
-     * @param {Map<string, number[]>} materials Mutable material color map.
+     * @param {Map<string, object>} materials Mutable material map.
      * @returns {void}
      */
     static #parseObjMaterialLibrary(text, materials) {
@@ -295,9 +297,20 @@ export class PcbAssemblyTextModelMeshParser {
                 const trimmed = line.replace(/#.*/u, '').trim()
                 if (trimmed.startsWith('newmtl ')) {
                     activeName = trimmed.slice(7).trim()
-                    active = { rgb: null, alpha: 1 }
+                    active = {
+                        diffuseColor: null,
+                        ambientColor: null,
+                        specularColor: null,
+                        shininess: null,
+                        alpha: 1
+                    }
                     if (activeName) {
-                        materials.set(activeName, [0.55, 0.56, 0.58, 1])
+                        materials.set(
+                            activeName,
+                            PcbAssemblyTextModelMeshParser.#objMaterialEntry(
+                                active
+                            )
+                        )
                     }
                     return
                 }
@@ -307,9 +320,22 @@ export class PcbAssemblyTextModelMeshParser {
                 }
 
                 if (trimmed.startsWith('Kd ')) {
-                    active.rgb = PcbAssemblyTextModelMeshParser.#unitTriple(
-                        trimmed.slice(3)
-                    )
+                    active.diffuseColor =
+                        PcbAssemblyTextModelMeshParser.#unitTriple(
+                            trimmed.slice(3)
+                        )
+                } else if (trimmed.startsWith('Ka ')) {
+                    active.ambientColor =
+                        PcbAssemblyTextModelMeshParser.#unitTriple(
+                            trimmed.slice(3)
+                        )
+                } else if (trimmed.startsWith('Ks ')) {
+                    active.specularColor =
+                        PcbAssemblyTextModelMeshParser.#unitTriple(
+                            trimmed.slice(3)
+                        )
+                } else if (trimmed.startsWith('Ns ')) {
+                    active.shininess = Math.max(Number(trimmed.slice(3)), 0)
                 } else if (trimmed.startsWith('d ')) {
                     active.alpha = PcbAssemblyTextModelMeshParser.#clampUnit(
                         Number(trimmed.slice(2))
@@ -322,19 +348,96 @@ export class PcbAssemblyTextModelMeshParser {
                         )
                 }
 
-                if (active.rgb) {
-                    materials.set(activeName, [...active.rgb, active.alpha])
-                }
+                materials.set(
+                    activeName,
+                    PcbAssemblyTextModelMeshParser.#objMaterialEntry(active)
+                )
             })
     }
 
     /**
      * Resolves material properties for an OBJ face group.
-     * @param {number[] | undefined} color Material color.
-     * @returns {{ color?: number[] }}
+     * @param {object | undefined} material Material metadata.
+     * @param {(number[] | null)[]} vertexColors Parsed vertex colors.
+     * @returns {{ color?: number[], material?: object, vertexColors?: (number[] | null)[] }}
      */
-    static #objMaterialProperties(color) {
-        return Array.isArray(color) && color.length >= 3 ? { color } : {}
+    static #objMaterialProperties(material, vertexColors) {
+        const properties = {}
+        const color = Array.isArray(material?.diffuseColor)
+            ? [...material.diffuseColor, material.alpha ?? 1]
+            : PcbAssemblyTextModelMeshParser.#averageVertexColor(vertexColors)
+        if (Array.isArray(color) && color.length >= 3) {
+            properties.color = color
+        }
+
+        if (material) {
+            properties.material =
+                PcbAssemblyTextModelMeshParser.#cleanMaterial(material)
+        }
+        if (vertexColors.some(Boolean)) {
+            properties.vertexColors = vertexColors
+        }
+        return properties
+    }
+
+    /**
+     * Builds a normalized material entry.
+     * @param {object} material Mutable parser state.
+     * @returns {object}
+     */
+    static #objMaterialEntry(material) {
+        return {
+            diffuseColor: Array.isArray(material?.diffuseColor)
+                ? material.diffuseColor
+                : [0.55, 0.56, 0.58],
+            alpha: PcbAssemblyTextModelMeshParser.#clampUnit(
+                material?.alpha,
+                1
+            ),
+            ...(Array.isArray(material?.ambientColor)
+                ? { ambientColor: material.ambientColor }
+                : {}),
+            ...(Array.isArray(material?.specularColor)
+                ? { specularColor: material.specularColor }
+                : {}),
+            ...(Number.isFinite(Number(material?.shininess))
+                ? { shininess: Number(material.shininess) }
+                : {})
+        }
+    }
+
+    /**
+     * Removes empty material fields.
+     * @param {object} material Material metadata.
+     * @returns {object}
+     */
+    static #cleanMaterial(material) {
+        return Object.fromEntries(
+            Object.entries(material).filter(([_key, value]) => {
+                return value !== null && value !== undefined
+            })
+        )
+    }
+
+    /**
+     * Computes an average vertex color when a material has no diffuse color.
+     * @param {(number[] | null)[]} vertexColors Parsed vertex colors.
+     * @returns {number[] | null}
+     */
+    static #averageVertexColor(vertexColors) {
+        const colors = vertexColors.filter(
+            (color) => Array.isArray(color) && color.length >= 3
+        )
+        if (!colors.length) {
+            return null
+        }
+
+        return [
+            colors.reduce((sum, color) => sum + color[0], 0) / colors.length,
+            colors.reduce((sum, color) => sum + color[1], 0) / colors.length,
+            colors.reduce((sum, color) => sum + color[2], 0) / colors.length,
+            1
+        ]
     }
 
     /**
@@ -367,6 +470,26 @@ export class PcbAssemblyTextModelMeshParser {
         return [0, 1, 2].map((index) =>
             PcbAssemblyTextModelMeshParser.#clampUnit(values[index])
         )
+    }
+
+    /**
+     * Parses an OBJ vertex with optional RGB channels.
+     * @param {string} text OBJ vertex payload.
+     * @returns {{ position: number[], color: number[] | null }}
+     */
+    static #objVertex(text) {
+        const values =
+            String(text || '').match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/gu) || []
+        const position = [0, 1, 2].map(
+            (index) => Number(values[index] || 0) * MM_TO_MIL
+        )
+        const color =
+            values.length >= 6
+                ? [3, 4, 5].map((index) =>
+                      PcbAssemblyTextModelMeshParser.#clampUnit(values[index])
+                  )
+                : null
+        return { position, color }
     }
 
     /**

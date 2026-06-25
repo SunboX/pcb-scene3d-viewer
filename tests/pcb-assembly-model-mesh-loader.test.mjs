@@ -33,6 +33,39 @@ function createTriangleBinaryBuffer() {
 }
 
 /**
+ * Builds a minimal GLTF document whose primitive carries vertex colors.
+ * @returns {object}
+ */
+function createVertexColoredTriangleGltf() {
+    const baseBuffer = createTriangleBinaryBuffer()
+    const colorBytes = new Uint8Array(48)
+    const colorView = new DataView(colorBytes.buffer)
+    ;[1, 0, 0, 1, 0, 1, 0, 0.5, 0, 0, 1, 0.25].forEach((value, index) => {
+        colorView.setFloat32(index * 4, value, true)
+    })
+
+    const buffer = new Uint8Array(baseBuffer.byteLength + colorBytes.byteLength)
+    buffer.set(baseBuffer, 0)
+    buffer.set(colorBytes, baseBuffer.byteLength)
+
+    const gltf = createTriangleGltf()
+    gltf.meshes[0].primitives[0].attributes.COLOR_0 = 2
+    gltf.buffers = [{ byteLength: buffer.byteLength, uri: dataUri(buffer) }]
+    gltf.bufferViews.push({
+        buffer: 0,
+        byteOffset: baseBuffer.byteLength,
+        byteLength: colorBytes.byteLength
+    })
+    gltf.accessors.push({
+        bufferView: 2,
+        componentType: 5126,
+        count: 3,
+        type: 'VEC4'
+    })
+    return gltf
+}
+
+/**
  * Builds a minimal GLTF document with an embedded buffer.
  * @returns {object}
  */
@@ -258,6 +291,126 @@ d 0.4`
     assert.deepEqual(meshes[0].color, [0.1, 0.2, 0.3, 0.4])
 })
 
+test('PcbAssemblyModelMeshLoader fetches resolved models with cache and headers', async () => {
+    const calls = []
+    const loader = new PcbAssemblyModelMeshLoader({
+        authHeaders: { Authorization: 'Bearer fake-token' },
+        fetch: async (url, options) => {
+            calls.push({ url, headers: options.headers })
+            return {
+                ok: true,
+                arrayBuffer: async () =>
+                    new TextEncoder().encode(
+                        `
+v 0 0 0
+v ${MIL100_MM} 0 0
+v 0 ${MIL100_MM} 0
+f 1 2 3`
+                    ).buffer
+            }
+        }
+    })
+    const placement = {
+        externalModel: {
+            format: 'obj',
+            name: 'remote.obj',
+            resolvedUrl: 'https://assets.invalid/remote.obj'
+        }
+    }
+
+    assertTriangleMeshes(await loader.loadPlacement(placement))
+    assertTriangleMeshes(await loader.loadPlacement(placement))
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].url, 'https://assets.invalid/remote.obj')
+    assert.equal(calls[0].headers.Authorization, 'Bearer fake-token')
+})
+
+test('PcbAssemblyModelMeshLoader fetches remote GLTF sidecar buffers', async () => {
+    const calls = []
+    const binaryBuffer = createTriangleBinaryBuffer()
+    const gltf = createTriangleGltf()
+    gltf.buffers = [
+        {
+            byteLength: binaryBuffer.byteLength,
+            uri: 'buffers/triangle.bin'
+        }
+    ]
+    const loader = new PcbAssemblyModelMeshLoader({
+        authHeaders: { Authorization: 'Bearer fake-token' },
+        fetch: async (url, options) => {
+            calls.push({ url, headers: options.headers })
+            if (url.endsWith('/models/triangle.gltf')) {
+                return {
+                    ok: true,
+                    text: async () => JSON.stringify(gltf)
+                }
+            }
+            if (url.endsWith('/models/buffers/triangle.bin')) {
+                return {
+                    ok: true,
+                    arrayBuffer: async () => binaryBuffer.buffer
+                }
+            }
+            throw new Error('Unexpected model URL: ' + url)
+        }
+    })
+    const placement = {
+        externalModel: {
+            format: 'gltf',
+            name: 'remote-triangle.gltf',
+            resolvedUrl: 'https://assets.invalid/models/triangle.gltf'
+        }
+    }
+
+    assertTriangleMeshes(await loader.loadPlacement(placement))
+    assertTriangleMeshes(await loader.loadPlacement(placement))
+    assert.deepEqual(
+        calls.map((call) => call.url),
+        [
+            'https://assets.invalid/models/triangle.gltf',
+            'https://assets.invalid/models/buffers/triangle.bin'
+        ]
+    )
+    assert.equal(calls[0].headers.Authorization, 'Bearer fake-token')
+    assert.equal(calls[1].headers.Authorization, 'Bearer fake-token')
+})
+
+test('PcbAssemblyModelMeshLoader preserves OBJ vertex and material metadata', async () => {
+    const loader = new PcbAssemblyModelMeshLoader()
+    const meshes = await loader.loadPlacement({
+        externalModel: {
+            format: 'obj',
+            name: 'polished.obj',
+            payloadText: `
+mtllib polished.mtl
+v 0 0 0 0.7 0.2 0.1
+v ${MIL100_MM} 0 0 0.7 0.2 0.1
+v 0 ${MIL100_MM} 0 0.7 0.2 0.1
+usemtl body
+f 1 2 3`,
+            resources: [
+                {
+                    name: 'polished.mtl',
+                    payloadText: `
+newmtl body
+Ka 0.02 0.03 0.04
+Kd 0.1 0.2 0.3
+Ks 0.8 0.7 0.6
+Ns 400
+d 0.5`
+                }
+            ]
+        }
+    })
+
+    assertTriangleMeshes(meshes)
+    assert.deepEqual(meshes[0].color, [0.1, 0.2, 0.3, 0.5])
+    assert.deepEqual(meshes[0].material.ambientColor, [0.02, 0.03, 0.04])
+    assert.deepEqual(meshes[0].material.specularColor, [0.8, 0.7, 0.6])
+    assert.equal(meshes[0].material.shininess, 400)
+    assert.deepEqual(meshes[0].vertexColors[0], [0.7, 0.2, 0.1])
+})
+
 test('PcbAssemblyModelMeshLoader loads GLTF meshes', async () => {
     const loader = new PcbAssemblyModelMeshLoader()
     const meshes = await loader.loadPlacement({
@@ -288,6 +441,45 @@ test('PcbAssemblyModelMeshLoader preserves GLTF material alpha', async () => {
 
     assertTriangleMeshes(meshes)
     assert.deepEqual(meshes[0].color, [0.2, 0.3, 0.4, 0.35])
+})
+
+test('PcbAssemblyModelMeshLoader preserves GLTF vertex colors', async () => {
+    const loader = new PcbAssemblyModelMeshLoader()
+    const meshes = await loader.loadPlacement({
+        externalModel: {
+            format: 'gltf',
+            name: 'vertex-colored-triangle.gltf',
+            payloadText: JSON.stringify(createVertexColoredTriangleGltf())
+        }
+    })
+
+    assertTriangleMeshes(meshes)
+    assert.deepEqual(meshes[0].vertexColors, [
+        [1, 0, 0, 1],
+        [0, 1, 0, 0.5],
+        [0, 0, 1, 0.25]
+    ])
+})
+
+test('PcbAssemblyModelMeshLoader skips unsupported GLTF primitive modes', async () => {
+    const loader = new PcbAssemblyModelMeshLoader()
+    const gltf = createTriangleGltf()
+    gltf.meshes[0].primitives.unshift({
+        attributes: { POSITION: 0 },
+        indices: 1,
+        mode: 1,
+        material: 0
+    })
+
+    const meshes = await loader.loadPlacement({
+        externalModel: {
+            format: 'gltf',
+            name: 'mixed-primitives.gltf',
+            payloadText: JSON.stringify(gltf)
+        }
+    })
+
+    assertTriangleMeshes(meshes)
 })
 
 test('PcbAssemblyModelMeshLoader loads binary GLB meshes', async () => {

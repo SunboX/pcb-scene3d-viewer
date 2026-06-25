@@ -12,6 +12,7 @@ test('index exports scene3d viewer APIs', () => {
 })
 
 test('scene3d entrypoint exports the same runtime APIs', () => {
+    assert.equal(typeof scene3d.CircuitJsonCadModelAssetResolver, 'function')
     assert.equal(scene3d.PcbScene3dRuntime, viewer.PcbScene3dRuntime)
     assert.equal(
         scene3d.PcbScene3dShellRenderer,

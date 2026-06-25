@@ -222,6 +222,68 @@ test('PcbScene3dExternalModels seats dominant body planes above sparse lower lea
     assert.equal(modelGroup.position.z, 0)
 })
 
+test('PcbScene3dExternalModels keeps bottom sparse leads below the board face', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            board: { thicknessMil: 63 },
+            externalPlacements: [
+                {
+                    designator: 'J3',
+                    mountSide: 'bottom',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: -31.5 },
+                    modelTransform: {
+                        rotationDeg: { x: -180, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'bottom-leaded-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/bottom-leaded-body'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                const payload = buildLeadedBodyPayload()
+                const positions = [...payload.positions]
+                for (let index = 2; index < positions.length; index += 3) {
+                    positions[index] = -positions[index]
+                }
+
+                return {
+                    meshPayloads: [{ ...payload, positions }]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    externalModelsGroup.updateMatrixWorld(true)
+    const placedBounds = new THREE.Box3().setFromObject(externalModelsGroup)
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assert.equal(Math.round(modelGroup.position.z * 10) / 10, 15)
+    assert.ok(
+        placedBounds.max.z <= -31.5 + 0.001,
+        'bottom geometry must remain below the PCB underside'
+    )
+})
+
 test('PcbScene3dExternalModels preserves source-origin model Z placement', async () => {
     const externalModelsGroup = new THREE.Group()
     const diagnostics = await PcbScene3dExternalModels.loadIntoScene({

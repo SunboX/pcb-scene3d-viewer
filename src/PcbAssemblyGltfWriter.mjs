@@ -17,7 +17,7 @@ const BIN_CHUNK_TYPE = 0x004e4942
 export class PcbAssemblyGltfWriter {
     /**
      * Writes a GLTF or GLB assembly document.
-     * @param {{ name?: string, meshes?: object[], format?: string, binary?: boolean }} assembly Assembly data.
+     * @param {{ name?: string, meshes?: object[], format?: string, binary?: boolean, includeSceneMetadata?: boolean }} assembly Assembly data.
      * @returns {object | Uint8Array}
      */
     static write(assembly = {}) {
@@ -32,7 +32,7 @@ export class PcbAssemblyGltfWriter {
 
     /**
      * Builds the GLTF JSON tree and shared binary buffer.
-     * @param {{ name?: string, meshes?: object[] }} assembly Assembly data.
+     * @param {{ name?: string, meshes?: object[], includeSceneMetadata?: boolean }} assembly Assembly data.
      * @param {boolean} binary Whether the document will be embedded in GLB.
      * @returns {{ gltf: object, buffer: Uint8Array }}
      */
@@ -45,6 +45,9 @@ export class PcbAssemblyGltfWriter {
         sourceMeshes.forEach((mesh) => {
             PcbAssemblyGltfWriter.#appendMesh(state, mesh)
         })
+        if (assembly?.includeSceneMetadata === true) {
+            PcbAssemblyGltfWriter.#appendSceneMetadata(state, sourceMeshes)
+        }
 
         const buffer = PcbAssemblyGltfWriter.#concatBuffer(state.bufferParts)
         const gltf = {
@@ -90,6 +93,17 @@ export class PcbAssemblyGltfWriter {
             gltf.images = state.images
             gltf.textures = state.textures
         }
+        if (state.cameras.length) {
+            gltf.cameras = state.cameras
+        }
+        if (state.lights.length) {
+            gltf.extensionsUsed = ['KHR_lights_punctual']
+            gltf.extensions = {
+                KHR_lights_punctual: {
+                    lights: state.lights
+                }
+            }
+        }
 
         return { gltf, buffer }
     }
@@ -112,8 +126,72 @@ export class PcbAssemblyGltfWriter {
             textureIndexes: new Map(),
             meshIndexes: new Map(),
             meshes: [],
-            nodes: []
+            nodes: [],
+            cameras: [],
+            lights: []
         }
+    }
+
+    /**
+     * Appends default camera and light nodes from scene bounds.
+     * @param {object} state Writer state.
+     * @param {object[]} meshes Source meshes.
+     * @returns {void}
+     */
+    static #appendSceneMetadata(state, meshes) {
+        const bounds = PcbAssemblyGltfWriter.#sceneBounds(meshes)
+        const center = [
+            (bounds.min[0] + bounds.max[0]) / 2,
+            (bounds.min[1] + bounds.max[1]) / 2,
+            (bounds.min[2] + bounds.max[2]) / 2
+        ]
+        const span = Math.max(
+            bounds.max[0] - bounds.min[0],
+            bounds.max[1] - bounds.min[1],
+            bounds.max[2] - bounds.min[2],
+            1
+        )
+        const distance = span * 2.2
+        const cameraIndex = state.cameras.length
+        state.cameras.push({
+            name: 'Default Camera',
+            type: 'perspective',
+            perspective: {
+                yfov: 0.7,
+                znear: Math.max(distance / 1000, 0.01),
+                zfar: distance * 10
+            }
+        })
+        state.nodes.push({
+            name: 'Default Camera',
+            camera: cameraIndex,
+            translation: [
+                center[0] + distance * 0.65,
+                center[1] + distance * 0.45,
+                center[2] + distance
+            ],
+            rotation: [-0.260009, 0.279848, 0.076342, 0.920364]
+        })
+
+        const lightIndex = state.lights.length
+        state.lights.push({
+            name: 'Key Light',
+            type: 'directional',
+            intensity: 4
+        })
+        state.nodes.push({
+            name: 'Key Light',
+            translation: [
+                center[0] - distance * 0.35,
+                center[1] + distance,
+                center[2] + distance
+            ],
+            extensions: {
+                KHR_lights_punctual: {
+                    light: lightIndex
+                }
+            }
+        })
     }
 
     /**
@@ -181,7 +259,11 @@ export class PcbAssemblyGltfWriter {
             texture: {
                 top: String(mesh?.texture?.top || ''),
                 bottom: String(mesh?.texture?.bottom || '')
-            }
+            },
+            material: mesh?.material || null,
+            vertexColors: Array.isArray(mesh?.vertexColors)
+                ? mesh.vertexColors
+                : []
         })
     }
 
@@ -195,6 +277,7 @@ export class PcbAssemblyGltfWriter {
         const vertices = Array.isArray(mesh?.vertices) ? mesh.vertices : []
         const faces = Array.isArray(mesh?.faces) ? mesh.faces : []
         const bounds = PcbAssemblyGltfWriter.#meshBounds2d(vertices)
+        const vertexColors = PcbAssemblyGltfWriter.#vertexColors(mesh)
         const groups = new Map()
 
         faces.forEach((face) => {
@@ -224,7 +307,8 @@ export class PcbAssemblyGltfWriter {
                     vertices,
                     triangle,
                     bounds,
-                    textureKind !== 'solid'
+                    textureKind !== 'solid',
+                    vertexColors
                 )
             })
         })
@@ -232,6 +316,31 @@ export class PcbAssemblyGltfWriter {
         return Array.from(groups.values())
             .filter((group) => group.positions.length)
             .map((group) => PcbAssemblyGltfWriter.#writePrimitive(state, group))
+    }
+
+    /**
+     * Resolves normalized vertex colors parallel to source vertices.
+     * @param {object} mesh Source mesh.
+     * @returns {(number[] | null)[]}
+     */
+    static #vertexColors(mesh) {
+        const vertexColors = Array.isArray(mesh?.vertexColors)
+            ? mesh.vertexColors
+            : []
+        const vertices = Array.isArray(mesh?.vertices) ? mesh.vertices : []
+        if (
+            !vertices.length ||
+            vertexColors.length !== vertices.length ||
+            !vertexColors.some(Boolean)
+        ) {
+            return []
+        }
+
+        return vertexColors.map((color) =>
+            Array.isArray(color) && color.length >= 3
+                ? PcbAssemblyGltfWriter.#color(color)
+                : null
+        )
     }
 
     /**
@@ -245,6 +354,7 @@ export class PcbAssemblyGltfWriter {
             positions: [],
             normals: [],
             texcoords: [],
+            colors: [],
             indexes: []
         }
     }
@@ -256,6 +366,7 @@ export class PcbAssemblyGltfWriter {
      * @param {number[]} triangle Source vertex indexes.
      * @param {{ minX: number, maxX: number, minY: number, maxY: number }} bounds XY bounds.
      * @param {boolean} includeTexcoords Whether to emit texture coordinates.
+     * @param {(number[] | null)[]} vertexColors Optional vertex colors.
      * @returns {void}
      */
     static #appendTriangle(
@@ -263,7 +374,8 @@ export class PcbAssemblyGltfWriter {
         vertices,
         triangle,
         bounds,
-        includeTexcoords
+        includeTexcoords,
+        vertexColors
     ) {
         const points = triangle.map((index) =>
             PcbAssemblyGltfWriter.#exportedVertex(vertices[index])
@@ -280,6 +392,10 @@ export class PcbAssemblyGltfWriter {
                     bounds
                 )
                 group.texcoords.push(uv[0], uv[1])
+            }
+            if (vertexColors.length) {
+                const color = vertexColors[triangle[index]] || [1, 1, 1, 1]
+                group.colors.push(color[0], color[1], color[2], color[3])
             }
         })
         group.indexes.push(firstIndex, firstIndex + 1, firstIndex + 2)
@@ -329,6 +445,16 @@ export class PcbAssemblyGltfWriter {
                 FLOAT_COMPONENT,
                 'VEC2',
                 group.texcoords.length / 2,
+                ARRAY_BUFFER_TARGET
+            )
+        }
+        if (group.colors.length) {
+            attributes.COLOR_0 = PcbAssemblyGltfWriter.#appendAccessor(
+                state,
+                PcbAssemblyGltfWriter.#floatBytes(group.colors),
+                FLOAT_COMPONENT,
+                'VEC4',
+                group.colors.length / 4,
                 ARRAY_BUFFER_TARGET
             )
         }
@@ -429,7 +555,9 @@ export class PcbAssemblyGltfWriter {
             ':' +
             String(textureKind || 'solid') +
             ':' +
-            String(textureUri || '')
+            String(textureUri || '') +
+            ':' +
+            JSON.stringify(mesh?.material || null)
 
         if (state.materialIndexes.has(key)) {
             return state.materialIndexes.get(key)
@@ -450,6 +578,11 @@ export class PcbAssemblyGltfWriter {
             name: textureKind === 'solid' ? 'solid' : textureKind + '-texture',
             doubleSided: true,
             pbrMetallicRoughness: pbr
+        }
+        if (mesh?.material && typeof mesh.material === 'object') {
+            material.extras = {
+                sourceMaterial: mesh.material
+            }
         }
         if (color[3] < 1) {
             material.alphaMode = 'BLEND'
@@ -589,6 +722,41 @@ export class PcbAssemblyGltfWriter {
                 maxY: -Infinity
             }
         )
+    }
+
+    /**
+     * Computes exported scene bounds.
+     * @param {object[]} meshes Source meshes.
+     * @returns {{ min: number[], max: number[] }}
+     */
+    static #sceneBounds(meshes) {
+        const bounds = {
+            min: [Infinity, Infinity, Infinity],
+            max: [-Infinity, -Infinity, -Infinity]
+        }
+        meshes.forEach((mesh) => {
+            PcbAssemblyGltfWriter.#array(mesh?.vertices).forEach((vertex) => {
+                const point = PcbAssemblyGltfWriter.#exportedVertex(vertex)
+                for (let index = 0; index < 3; index += 1) {
+                    bounds.min[index] = Math.min(
+                        bounds.min[index],
+                        point[index]
+                    )
+                    bounds.max[index] = Math.max(
+                        bounds.max[index],
+                        point[index]
+                    )
+                }
+            })
+        })
+
+        if (!bounds.min.every(Number.isFinite)) {
+            return {
+                min: [-0.5, -0.5, -0.5],
+                max: [0.5, 0.5, 0.5]
+            }
+        }
+        return bounds
     }
 
     /**
@@ -773,6 +941,15 @@ export class PcbAssemblyGltfWriter {
             binary += String.fromCharCode(byte)
         })
         return btoa(binary)
+    }
+
+    /**
+     * Normalizes a value to an array.
+     * @param {unknown} value Candidate array.
+     * @returns {any[]}
+     */
+    static #array(value) {
+        return Array.isArray(value) ? value : []
     }
 
     /**

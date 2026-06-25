@@ -40,6 +40,7 @@ test('required project files exist', async () => {
         'spec/library-scope.md',
         'src/index.mjs',
         'src/scene3d.mjs',
+        'src/CircuitJsonCadModelAssetResolver.mjs',
         'src/PcbScene3dController.mjs',
         'src/PcbScene3dRuntime.mjs',
         'src/PcbScene3dExternalModels.mjs',

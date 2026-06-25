@@ -1,5 +1,6 @@
 import { PcbScene3dBodyColor } from './PcbScene3dBodyColor.mjs'
 import { PcbScene3dComponentAdjustment } from './PcbScene3dComponentAdjustment.mjs'
+import { PcbScene3dFootprintBodyBuilder } from './PcbScene3dFootprintBodyBuilder.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 
 /**
@@ -15,7 +16,6 @@ export class PcbScene3dFallbackBodyFactory {
      */
     static build(THREE, component, options = {}) {
         const family = component.body.family
-        const size = component.body.sizeMil
         const material = new THREE.MeshStandardMaterial({
             color: PcbScene3dFallbackBodyFactory.#resolveColor(family, options),
             roughness: 0.72,
@@ -23,8 +23,7 @@ export class PcbScene3dFallbackBodyFactory {
         })
         const mesh = PcbScene3dFallbackBodyFactory.#buildMesh(
             THREE,
-            family,
-            size,
+            component.body,
             material
         )
         const mountRig = PcbScene3dMountRig.create(THREE, component)
@@ -62,12 +61,54 @@ export class PcbScene3dFallbackBodyFactory {
     /**
      * Builds the body mesh for one package family.
      * @param {any} THREE Three.js namespace.
+     * @param {{ family: string, sizeMil: { width: number, depth: number, height: number } }} body Body descriptor.
+     * @param {any} material Mesh material.
+     * @returns {any}
+     */
+    static #buildMesh(THREE, body, material) {
+        const family = body.family
+        const size = body.sizeMil
+        const mainMesh = PcbScene3dFallbackBodyFactory.#buildMainMesh(
+            THREE,
+            family,
+            size,
+            material
+        )
+        const accessoryBoxes =
+            PcbScene3dFootprintBodyBuilder.accessoryBoxes(body)
+
+        if (!accessoryBoxes.length) {
+            return mainMesh
+        }
+
+        const group = new THREE.Group()
+        const leadMaterial = new THREE.MeshStandardMaterial({
+            color: 0xb8b5aa,
+            roughness: 0.48,
+            metalness: 0.42
+        })
+
+        group.add(mainMesh)
+        accessoryBoxes.forEach((box) => {
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(box.width, box.depth, box.height),
+                leadMaterial
+            )
+            mesh.position.set(box.x, box.y, box.z)
+            group.add(mesh)
+        })
+        return group
+    }
+
+    /**
+     * Builds the main package body mesh.
+     * @param {any} THREE Three.js namespace.
      * @param {string} family Package family.
      * @param {{ width: number, depth: number, height: number }} size Body size.
      * @param {any} material Mesh material.
      * @returns {any}
      */
-    static #buildMesh(THREE, family, size, material) {
+    static #buildMainMesh(THREE, family, size, material) {
         if (family === 'radial-capacitor' || family === 'test-point') {
             return new THREE.Mesh(
                 new THREE.CylinderGeometry(

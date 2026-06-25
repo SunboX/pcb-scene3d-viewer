@@ -34,6 +34,19 @@ export class PcbScene3dFallbackVisibility {
      * @returns {void}
      */
     static markExternalModelLoaded(loadedDesignators, designator) {
+        PcbScene3dFallbackVisibility.markDesignatorRepresented(
+            loadedDesignators,
+            designator
+        )
+    }
+
+    /**
+     * Marks one designator as already represented by non-fallback geometry.
+     * @param {Set<string>} loadedDesignators
+     * @param {string} designator
+     * @returns {void}
+     */
+    static markDesignatorRepresented(loadedDesignators, designator) {
         if (!(loadedDesignators instanceof Set)) {
             return
         }
@@ -80,43 +93,15 @@ export class PcbScene3dFallbackVisibility {
                         toggles
                     )
                 rootObject.visible =
-                    stitchedCompanion ||
-                    (showFallbackBodies && !hideForLoadedExternal)
+                    showFallbackBodies &&
+                    (stitchedCompanion || !hideForLoadedExternal)
             })
         })
     }
 
     /**
-     * Checks whether any fallback root should keep the fallback group visible
-     * as part of a stitched external-model package.
-     * @param {Map<string, Set<any>>} fallbackRoots Fallback root registry.
-     * @param {{ 'external-models'?: boolean }} toggles Detail toggles.
-     * @returns {boolean}
-     */
-    static hasVisibleExternalCompanion(fallbackRoots, toggles) {
-        if (
-            !(fallbackRoots instanceof Map) ||
-            !Boolean(toggles?.['external-models'])
-        ) {
-            return false
-        }
-
-        let hasCompanion = false
-        fallbackRoots.forEach((roots) => {
-            roots?.forEach?.((rootObject) => {
-                hasCompanion =
-                    hasCompanion ||
-                    PcbScene3dFallbackVisibility.#isExternalCompanion(
-                        rootObject
-                    )
-            })
-        })
-        return hasCompanion
-    }
-
-    /**
-     * Checks whether one fallback body should stay visible as a stitched
-     * external-model companion under the active toggles.
+     * Checks whether one fallback body is a stitched external-model companion
+     * under the active toggles.
      * @param {any} rootObject Fallback root object.
      * @param {{ 'external-models'?: boolean }} toggles Detail toggles.
      * @returns {boolean}

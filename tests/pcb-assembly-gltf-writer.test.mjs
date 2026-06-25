@@ -211,6 +211,36 @@ test('PcbAssemblyGltfWriter reuses identical meshes as node instances', () => {
     assert.deepEqual(gltf.scenes[0].nodes, [0, 1])
 })
 
+test('PcbAssemblyGltfWriter can add default camera and light nodes', () => {
+    const gltf = PcbAssemblyGltfWriter.write({
+        name: 'framed-board',
+        meshes: [createBoardMesh()],
+        format: 'gltf',
+        includeSceneMetadata: true
+    })
+    const cameraNode = gltf.nodes.find((node) => Number.isInteger(node.camera))
+    const lightNode = gltf.nodes.find((node) =>
+        Number.isInteger(node.extensions?.KHR_lights_punctual?.light)
+    )
+
+    assert.equal(gltf.cameras[0].type, 'perspective')
+    assert.equal(
+        gltf.extensions.KHR_lights_punctual.lights[0].type,
+        'directional'
+    )
+    assert.ok(gltf.extensionsUsed.includes('KHR_lights_punctual'))
+    assert.ok(cameraNode.translation[2] > 0)
+    assert.ok(lightNode.translation[2] > 0)
+    assert.equal(
+        gltf.scenes[0].nodes.includes(gltf.nodes.indexOf(cameraNode)),
+        true
+    )
+    assert.equal(
+        gltf.scenes[0].nodes.includes(gltf.nodes.indexOf(lightNode)),
+        true
+    )
+})
+
 test('PcbAssemblyGltfValidator accepts exported textured GLB payloads', () => {
     const textureUri =
         'data:image/png;base64,' + Buffer.from('fake-png').toString('base64')

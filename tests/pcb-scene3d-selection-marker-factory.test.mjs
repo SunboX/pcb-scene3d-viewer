@@ -143,10 +143,47 @@ test('PcbScene3dSelectionMarkerFactory builds marker from rotated owned pads', (
     assert.equal(marker.children.length, 1)
     const line = marker.children[0]
     assert.equal(line.renderOrder, 1000)
-    assert.equal(line.material.options.depthTest, false)
+    assert.equal(line.material.options.depthTest, true)
     assert.equal(line.material.options.color, 0x14c5e6)
     assert.deepEqual(
         line.geometry.attributes.get('position').array,
         [-38, -18, 39, 78, -18, 39, 78, 18, 39, -38, 18, 39]
+    )
+})
+
+test('PcbScene3dSelectionMarkerFactory keeps bottom markers below bottom-side bodies', () => {
+    const marker = PcbScene3dSelectionMarkerFactory.build(
+        createFakeThree(),
+        {
+            board: {
+                centerX: 100,
+                centerY: 100,
+                thicknessMil: 63
+            },
+            components: [
+                {
+                    componentIndex: 8,
+                    designator: 'IC8',
+                    mountSide: 'bottom',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: -42.5 },
+                    boardPositionMil: { x: 120, y: 100, z: -42.5 },
+                    body: { sizeMil: { width: 20, depth: 20, height: 22 } }
+                }
+            ],
+            detail: {
+                pads: []
+            }
+        },
+        'IC8',
+        (x, y) => ({ x: x - 100, y: y - 100 })
+    )
+
+    assert.ok(marker)
+    const line = marker.children[0]
+    assert.equal(line.material.options.depthTest, true)
+    assert.deepEqual(
+        line.geometry.attributes.get('position').array,
+        [2, -18, -61.5, 38, -18, -61.5, 38, 18, -61.5, 2, 18, -61.5]
     )
 })

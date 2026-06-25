@@ -76,7 +76,7 @@ export class PcbScene3dStepLoader {
 
     /**
      * Loads one STEP model and normalizes it into triangle payloads.
-     * @param {{ origin?: string, name?: string, sourceStream?: string, relativePath?: string, payloadText?: string, file?: Blob | File | null }} model
+     * @param {{ origin?: string, name?: string, sourceStream?: string, relativePath?: string, payloadText?: string, payloadBytes?: any, bytes?: any, data?: any, file?: Blob | File | Uint8Array | ArrayBuffer | null }} model
      * @returns {Promise<{ meshPayloads: { name: string, color: number[] | null, positions: ArrayLike<number>, normals: ArrayLike<number>, indices: ArrayLike<number>, faceColors: { first: number, last: number, color: number[] | null }[] }[] }>}
      */
     async loadModel(model) {
@@ -99,7 +99,7 @@ export class PcbScene3dStepLoader {
 
     /**
      * Loads one uncached STEP model.
-     * @param {{ origin?: string, name?: string, sourceStream?: string, relativePath?: string, payloadText?: string, file?: Blob | File | null }} model
+     * @param {{ origin?: string, name?: string, sourceStream?: string, relativePath?: string, payloadText?: string, payloadBytes?: any, bytes?: any, data?: any, file?: Blob | File | Uint8Array | ArrayBuffer | null }} model
      * @returns {Promise<{ meshPayloads: { name: string, color: number[] | null, positions: ArrayLike<number>, normals: ArrayLike<number>, indices: ArrayLike<number>, faceColors: { first: number, last: number, color: number[] | null }[] }[] }>}
      */
     async #loadModelUncached(model) {
@@ -310,8 +310,8 @@ export class PcbScene3dStepLoader {
     }
 
     /**
-     * Reads one STEP model into bytes from embedded text or a session file.
-     * @param {{ payloadText?: string, file?: Blob | File | null }} model
+     * Reads one STEP model into bytes from embedded text, bytes, or a session file.
+     * @param {{ payloadText?: string, payloadBytes?: any, bytes?: any, data?: any, file?: Blob | File | Uint8Array | ArrayBuffer | null }} model
      * @returns {Promise<Uint8Array>}
      */
     static async #readModelContent(model) {
@@ -321,11 +321,47 @@ export class PcbScene3dStepLoader {
             return new TextEncoder().encode(payloadText)
         }
 
-        if (typeof model?.file?.arrayBuffer === 'function') {
-            return new Uint8Array(await model.file.arrayBuffer())
+        for (const value of [
+            model?.payloadBytes,
+            model?.bytes,
+            model?.data,
+            model?.file
+        ]) {
+            const bytes = await PcbScene3dStepLoader.#bytesFromValue(value)
+            if (bytes) {
+                return bytes
+            }
         }
 
         throw new Error('STEP model content is not available.')
+    }
+
+    /**
+     * Converts one byte-like value into bytes.
+     * @param {any} value Candidate byte source.
+     * @returns {Promise<Uint8Array | null>}
+     */
+    static async #bytesFromValue(value) {
+        if (!value) {
+            return null
+        }
+        if (value instanceof Uint8Array) {
+            return value
+        }
+        if (value instanceof ArrayBuffer) {
+            return new Uint8Array(value)
+        }
+        if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+            return new Uint8Array(
+                value.buffer,
+                value.byteOffset,
+                value.byteLength
+            )
+        }
+        if (typeof value.arrayBuffer === 'function') {
+            return new Uint8Array(await value.arrayBuffer())
+        }
+        return null
     }
 
     /**

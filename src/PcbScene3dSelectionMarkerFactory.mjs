@@ -70,7 +70,7 @@ export class PcbScene3dSelectionMarkerFactory {
             color: Number(options?.color || 0x14c5e6),
             transparent: true,
             opacity: 1,
-            depthTest: false,
+            depthTest: true,
             depthWrite: false
         })
         const line = new THREE.LineLoop(geometry, material)
@@ -309,12 +309,47 @@ export class PcbScene3dSelectionMarkerFactory {
      * @returns {number}
      */
     static #markerZ(board, component) {
+        const side = String(component?.mountSide || 'top').toLowerCase()
+        const bodyOuterZ = PcbScene3dSelectionMarkerFactory.#bodyOuterMarkerZ(
+            board,
+            component,
+            side
+        )
+        if (Number.isFinite(bodyOuterZ)) {
+            return bodyOuterZ
+        }
+
         const topZ =
             Number(board?.thicknessMil || 0) / 2 +
             PcbScene3dSelectionMarkerFactory.#MARKER_Z_OFFSET_MIL
-        return String(component?.mountSide || 'top').toLowerCase() === 'bottom'
-            ? -topZ
-            : topZ
+        return side === 'bottom' ? -topZ : topZ
+    }
+
+    /**
+     * Resolves a marker Z outside the selected fallback body when body-centered
+     * placement metadata is available.
+     * @param {{ thicknessMil?: number } | undefined} board Board metadata.
+     * @param {{ positionMil?: { z?: number }, body?: { sizeMil?: { height?: number } } }} component Scene component.
+     * @param {string} side Normalized mount side.
+     * @returns {number}
+     */
+    static #bodyOuterMarkerZ(board, component, side) {
+        const centerZ = Number(component?.positionMil?.z)
+        const height = Number(component?.body?.sizeMil?.height)
+        const halfBoardThickness = Number(board?.thicknessMil || 0) / 2
+
+        if (
+            !Number.isFinite(centerZ) ||
+            !Number.isFinite(height) ||
+            !(height > 0) ||
+            Math.abs(centerZ) <= halfBoardThickness
+        ) {
+            return Number.NaN
+        }
+
+        const offset =
+            height / 2 + PcbScene3dSelectionMarkerFactory.#MARKER_Z_OFFSET_MIL
+        return side === 'bottom' ? centerZ - offset : centerZ + offset
     }
 
     /**

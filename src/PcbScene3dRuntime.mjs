@@ -20,21 +20,19 @@ import { PcbScene3dRenderGroupVisibility } from './PcbScene3dRenderGroupVisibili
 import { PcbScene3dRenderScheduler } from './PcbScene3dRenderScheduler.mjs'
 import { PcbScene3dRuntimeBoardMeshes } from './PcbScene3dRuntimeBoardMeshes.mjs'
 import { PcbScene3dRuntimeHelpers } from './PcbScene3dRuntimeHelpers.mjs'
-import { PcbScene3dSilkscreenChunkedFactory } from './PcbScene3dSilkscreenChunkedFactory.mjs'
-import { PcbScene3dTrueTypeTextFactory } from './PcbScene3dTrueTypeTextFactory.mjs'
+import { PcbScene3dRuntimeSurfaceArtworkLoader } from './PcbScene3dRuntimeSurfaceArtworkLoader.mjs'
 import { PcbScene3dSelectionResolver } from './PcbScene3dSelectionResolver.mjs'
 import { PcbScene3dSelectionMarkerOverlay } from './PcbScene3dSelectionMarkerOverlay.mjs'
 import { PcbScene3dSelectionStyler } from './PcbScene3dSelectionStyler.mjs'
 import { PcbScene3dStaticBodyFactory } from './PcbScene3dStaticBodyFactory.mjs'
 import { PcbScene3dViewportResize } from './PcbScene3dViewportResize.mjs'
 import { PcbScene3dViewScale } from './PcbScene3dViewScale.mjs'
-const SILKSCREEN_COPPER_CLEARANCE_MIL = 0.12
+const COPPER_HALF_MIL = PcbScene3dCopperFactory.visualHalfThicknessMil()
 const Z_MIL = {
-    cu: 0.05,
-    silk:
-        PcbScene3dCopperFactory.visualHalfThicknessMil() +
-        SILKSCREEN_COPPER_CLEARANCE_MIL
+    paste: COPPER_HALF_MIL + 0.28,
+    silk: COPPER_HALF_MIL + 0.12
 }
+const SELECTION_HIGHLIGHT_COLOR = 0x14c5e6
 /**
  * Browser-side Three.js runtime for the interactive PCB 3D viewport.
  */
@@ -389,12 +387,11 @@ export class PcbScene3dRuntime {
             this.#sceneDescription
         )
         this.#rootGroup.add(boardGroup)
-        const silkscreenGroup = new THREE.Group()
-        this.#groups.set('silkscreen', silkscreenGroup)
-        this.#rootGroup.add(silkscreenGroup)
-        const copperGroup = new THREE.Group()
-        this.#groups.set('copper', copperGroup)
-        this.#rootGroup.add(copperGroup)
+        ;['silkscreen', 'paste', 'copper'].forEach((groupName) => {
+            const group = new THREE.Group()
+            this.#groups.set(groupName, group)
+            this.#rootGroup.add(group)
+        })
         const fallbackBodiesGroup = new THREE.Group()
         const staticBodiesGroup = new THREE.Group()
         const externalModelsGroup = new THREE.Group()
@@ -441,6 +438,13 @@ export class PcbScene3dRuntime {
                     staticBody.placement
                 )
             staticBodiesGroup.add(staticBody.rootGroup)
+            ;[staticBody.placement?.designator, selectionKey].forEach(
+                (designator) =>
+                    PcbScene3dFallbackVisibility.markDesignatorRepresented(
+                        this.#loadedExternalModelDesignators,
+                        designator
+                    )
+            )
             this.#registerSelectionRoot(selectionKey, staticBody.rootGroup)
             this.#componentAdjustmentRegistry.register(
                 selectionKey,
@@ -485,13 +489,11 @@ export class PcbScene3dRuntime {
             preset,
             this.#sceneDescription
         )
-        PcbScene3dExternalModels.applyViewCompensation(
-            this.#groups.get('silkscreen'),
-            scale
-        )
-        PcbScene3dExternalModels.applyViewCompensation(
-            this.#groups.get('external-models'),
-            scale
+        ;['silkscreen', 'paste', 'external-models'].forEach((groupName) =>
+            PcbScene3dExternalModels.applyViewCompensation(
+                this.#groups.get(groupName),
+                scale
+            )
         )
     }
 
@@ -507,7 +509,7 @@ export class PcbScene3dRuntime {
                 return
             }
 
-            await this.#loadDeferredSilkscreen()
+            await this.#loadDeferredSurfaceArtwork()
             this.#render()
 
             await PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
@@ -544,32 +546,40 @@ export class PcbScene3dRuntime {
     }
 
     /**
-     * Builds and attaches silkscreen detail once after the first frame.
+     * Builds and attaches surface artwork detail once after the first frame.
      * @returns {Promise<void>}
      */
-    async #loadDeferredSilkscreen() {
-        const silkscreenGroup = this.#groups.get('silkscreen')
-        if (!silkscreenGroup || silkscreenGroup.children.length) return
+    async #loadDeferredSurfaceArtwork() {
+        let didLoad = false
+        const baseZ = this.#sceneDescription.board.thicknessMil / 2
+        const silkscreen = this.#sceneDescription.detail.silkscreen || {}
+        const overlays = [
+            ['silkscreen', silkscreen, Z_MIL.silk, true],
+            ['paste', this.#sceneDescription.detail.paste, Z_MIL.paste, false]
+        ]
 
-        await PcbScene3dTrueTypeTextFactory.prepareEmbeddedFonts(
-            this.#sceneDescription.detail.embeddedFonts || []
-        )
-        const topZ = this.#sceneDescription.board.thicknessMil / 2 + Z_MIL.silk
-        const detailGroup = await PcbScene3dSilkscreenChunkedFactory.buildGroup(
-            this.#three,
-            this.#sceneDescription.detail.silkscreen || {},
-            topZ,
-            -topZ,
-            (x, y) => this.#normalizeDetailPoint(x, y),
-            {
-                shouldContinue: () => !this.#isDisposed,
-                yieldToMain: () =>
-                    PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
+        for (const [groupName, artwork, z, prepareFonts] of overlays) {
+            if (artwork == null) {
+                continue
             }
-        )
-        if (this.#isDisposed) return
-        if (detailGroup.children.length) {
-            silkscreenGroup.add(detailGroup)
+            const loaded = PcbScene3dRuntimeSurfaceArtworkLoader.load({
+                three: this.#three,
+                group: this.#groups.get(groupName),
+                artwork,
+                topZ: baseZ + z,
+                bottomZ: -(baseZ + z),
+                normalizePoint: (x, y) => this.#normalizeDetailPoint(x, y),
+                shouldContinue: () => !this.#isDisposed,
+                prepareFonts,
+                embeddedFonts: this.#sceneDescription.detail.embeddedFonts
+            })
+            didLoad =
+                (loaded && typeof loaded.then === 'function'
+                    ? await loaded
+                    : loaded) || didLoad
+        }
+
+        if (didLoad) {
             this.#applyViewScale(this.#presetState.get())
         }
     }
@@ -583,7 +593,7 @@ export class PcbScene3dRuntime {
         if (!copperGroup || copperGroup.children.length) {
             return
         }
-        const topZ = this.#sceneDescription.board.thicknessMil / 2 + Z_MIL.cu
+        const topZ = this.#sceneDescription.board.thicknessMil / 2 + 0.05
         const detailGroup = PcbScene3dCopperDetailGroupBuilder.build(
             this.#three,
             this.#sceneDescription,
@@ -799,7 +809,7 @@ export class PcbScene3dRuntime {
                 this.#selectedDesignator
             ),
             (x, y) => this.#normalizeDetailPoint(x, y),
-            { color: PcbScene3dRuntime.#resolveSelectionHighlightColor() }
+            { color: SELECTION_HIGHLIGHT_COLOR }
         )
     }
 
@@ -920,7 +930,7 @@ export class PcbScene3dRuntime {
                 this.#selectionRoots,
                 '',
                 this.#selectedDesignator,
-                PcbScene3dRuntime.#resolveSelectionHighlightColor()
+                SELECTION_HIGHLIGHT_COLOR
             )
         }
     }
@@ -936,7 +946,7 @@ export class PcbScene3dRuntime {
             this.#selectionRoots,
             this.#selectedDesignator,
             normalizedDesignator,
-            PcbScene3dRuntime.#resolveSelectionHighlightColor()
+            SELECTION_HIGHLIGHT_COLOR
         )
         this.#selectedDesignator = normalizedDesignator
         this.#applyToggleVisibility()
@@ -982,10 +992,5 @@ export class PcbScene3dRuntime {
      */
     static resolveViewScale(preset, sceneDescription = null) {
         return PcbScene3dViewScale.resolve(preset, sceneDescription)
-    }
-
-    /** @returns {number} */
-    static #resolveSelectionHighlightColor() {
-        return 0x14c5e6
     }
 }

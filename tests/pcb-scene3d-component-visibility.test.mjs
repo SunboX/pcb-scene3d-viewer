@@ -93,7 +93,7 @@ test('PcbScene3dComponentVisibility overlays selected component hidden state', (
     assert.equal(otherRoot.visible, true)
 })
 
-test('PcbScene3dComponentVisibility keeps stitched fallback companions visible with external models', () => {
+test('PcbScene3dComponentVisibility hides stitched fallback companions when disabled', () => {
     const hiddenDesignators = new Set()
     const fallbackRoot = new FakeRoot()
     fallbackRoot.userData = {
@@ -114,6 +114,20 @@ test('PcbScene3dComponentVisibility keeps stitched fallback companions visible w
         hasLoadedBoardAssemblyModel: false
     })
 
+    assert.equal(fallbackRoot.visible, false)
+
+    PcbScene3dComponentVisibility.apply({
+        selectionRoots,
+        hiddenDesignators,
+        fallbackBodyRoots,
+        loadedExternalModelDesignators: new Set(['XO1']),
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': true
+        },
+        hasLoadedBoardAssemblyModel: false
+    })
+
     assert.equal(fallbackRoot.visible, true)
 
     PcbScene3dComponentVisibility.setHidden(hiddenDesignators, 'XO1', true)
@@ -130,6 +144,50 @@ test('PcbScene3dComponentVisibility keeps stitched fallback companions visible w
     })
 
     assert.equal(fallbackRoot.visible, false)
+})
+
+test('PcbScene3dComponentVisibility hides unresolved fallback bodies when disabled', () => {
+    const hiddenDesignators = new Set()
+    const fallbackRoot = new FakeRoot()
+    const representedFallbackRoot = new FakeRoot()
+    const selectionRoots = new Map([
+        ['R5', new Set([fallbackRoot])],
+        ['J17', new Set([representedFallbackRoot])]
+    ])
+    const fallbackBodyRoots = new Map([
+        ['R5', new Set([fallbackRoot])],
+        ['J17', new Set([representedFallbackRoot])]
+    ])
+
+    PcbScene3dComponentVisibility.apply({
+        selectionRoots,
+        hiddenDesignators,
+        fallbackBodyRoots,
+        loadedExternalModelDesignators: new Set(['J17']),
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': false
+        },
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(fallbackRoot.visible, false)
+    assert.equal(representedFallbackRoot.visible, false)
+
+    PcbScene3dComponentVisibility.apply({
+        selectionRoots,
+        hiddenDesignators,
+        fallbackBodyRoots,
+        loadedExternalModelDesignators: new Set(['J17']),
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': true
+        },
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(fallbackRoot.visible, true)
+    assert.equal(representedFallbackRoot.visible, false)
 })
 
 test('PcbScene3dComponentVisibility hides co-located stack alternates when one is selected', () => {

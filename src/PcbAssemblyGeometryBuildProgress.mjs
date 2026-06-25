@@ -60,6 +60,9 @@ export class PcbAssemblyGeometryBuildProgress {
                 PcbAssemblyGeometryBuildProgress.#countSilkscreenUnits(
                     sceneDescription?.detail?.silkscreen || {}
                 ) +
+                PcbAssemblyGeometryBuildProgress.#countSilkscreenUnits(
+                    sceneDescription?.detail?.paste || {}
+                ) +
                 PcbAssemblyGeometryBuildProgress.#countComponentUnits(
                     sceneDescription
                 )

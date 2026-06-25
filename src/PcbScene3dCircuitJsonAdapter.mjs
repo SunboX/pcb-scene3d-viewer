@@ -3,18 +3,22 @@ import {
     CircuitJsonIndexer,
     CircuitJsonUnits
 } from 'circuitjson-toolkit'
+import { PcbScene3dCircuitJsonGeometry } from './PcbScene3dCircuitJsonGeometry.mjs'
 import { PcbScene3dCircuitJsonModelTransform } from './PcbScene3dCircuitJsonModelTransform.mjs'
+import { PcbScene3dCircuitJsonCopperPourBuilder } from './PcbScene3dCircuitJsonCopperPourBuilder.mjs'
+import { PcbScene3dCircuitJsonSilkscreenBuilder } from './PcbScene3dCircuitJsonSilkscreenBuilder.mjs'
+import { PcbScene3dFootprintBodyBuilder } from './PcbScene3dFootprintBodyBuilder.mjs'
+import { PcbScene3dCircuitJsonLayer } from './PcbScene3dCircuitJsonLayer.mjs'
+import { PcbScene3dCircuitJsonTraceRouteBuilder } from './PcbScene3dCircuitJsonTraceRouteBuilder.mjs'
+import { PcbScene3dCircuitJsonThermalSpokeBuilder } from './PcbScene3dCircuitJsonThermalSpokeBuilder.mjs'
+import { PcbScene3dCircuitJsonModelUrlResolver } from './PcbScene3dCircuitJsonModelUrlResolver.mjs'
+import { PcbScene3dCircuitJsonSolderPasteBuilder } from './PcbScene3dCircuitJsonSolderPasteBuilder.mjs'
 
-const TOP_LAYER_ID = 1
-const BOTTOM_LAYER_ID = 32
-const DEFAULT_BOARD_WIDTH_MM = 25.4
-const DEFAULT_BOARD_HEIGHT_MM = 25.4
-const DEFAULT_BOARD_THICKNESS_MM = 1.6
 const DEFAULT_COMPONENT_HEIGHT_MIL = 60
 const RECTANGULAR_PAD_SHAPE = 2
 const CIRCULAR_PAD_SHAPE = 1
-const CIRCLE_CUTOUT_POINTS = 32
 const MODEL_URL_FIELDS = [
+    ['model_3mf_url', '3mf'],
     ['model_step_url', 'step'],
     ['model_stp_url', 'step'],
     ['model_wrl_url', 'wrl'],
@@ -58,28 +62,35 @@ export class PcbScene3dCircuitJsonAdapter {
     /**
      * Builds the internal render model used by the Three.js runtime.
      * @param {object[]} circuitJson Serialized CircuitJSON model.
-     * @param {{ modelUrlResolver?: (url: string, context: object) => string | object | null | undefined }} [options] Adapter options.
+     * @param {{ modelUrlResolver?: (url: string, context: object) => string | object | null | undefined, projectBaseUrl?: string, boardDrillQuality?: string, showPcbNotes?: boolean, showPcbPaste?: boolean }} [options] Adapter options.
      * @returns {object}
      */
     static build(circuitJson, options = {}) {
         CircuitJsonDocument.assertModel(circuitJson)
         const index = CircuitJsonIndexer.index(circuitJson)
-        const board = PcbScene3dCircuitJsonAdapter.#buildBoard(index)
-        const detail = PcbScene3dCircuitJsonAdapter.#buildDetail(index)
+        const board = PcbScene3dCircuitJsonGeometry.buildBoard(index, options)
+        const detail = PcbScene3dCircuitJsonAdapter.#buildDetail(index, options)
         const externalPlacements =
             PcbScene3dCircuitJsonAdapter.#buildExternalPlacements(
                 index,
                 board,
                 options
             )
-        const externalModelByComponentId =
-            PcbScene3dCircuitJsonAdapter.#externalModelByComponentId(
+        const externalPlacementByComponentId =
+            PcbScene3dCircuitJsonAdapter.#externalPlacementByComponentId(
                 externalPlacements
+            )
+        const cadComponentByComponentId =
+            PcbScene3dCircuitJsonAdapter.#elementById(
+                index,
+                'cad_component',
+                'pcb_component_id'
             )
         const components = PcbScene3dCircuitJsonAdapter.#buildComponents(
             index,
             board,
-            externalModelByComponentId
+            externalPlacementByComponentId,
+            cadComponentByComponentId
         )
 
         return {
@@ -94,56 +105,6 @@ export class PcbScene3dCircuitJsonAdapter {
     }
 
     /**
-     * Builds the render-model board from a `pcb_panel` or `pcb_board` element.
-     * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
-     * @returns {object}
-     */
-    static #buildBoard(index) {
-        const boardElement =
-            index.elementsByType.get('pcb_panel')?.[0] ||
-            index.elementsByType.get('pcb_board')?.[0] ||
-            {}
-        const widthMil = CircuitJsonUnits.mmToMil(
-            boardElement.width,
-            DEFAULT_BOARD_WIDTH_MM
-        )
-        const heightMil = CircuitJsonUnits.mmToMil(
-            boardElement.height,
-            DEFAULT_BOARD_HEIGHT_MM
-        )
-        const thicknessMil = CircuitJsonUnits.mmToMil(
-            boardElement.thickness,
-            DEFAULT_BOARD_THICKNESS_MM
-        )
-        const center = CircuitJsonUnits.pointMmToMil(boardElement.center || {})
-        const minX = center.x - widthMil / 2
-        const minY = center.y - heightMil / 2
-        const segments = PcbScene3dCircuitJsonAdapter.#buildBoardSegments(
-            boardElement,
-            {
-                minX,
-                minY,
-                widthMil,
-                heightMil
-            }
-        )
-
-        return {
-            widthMil,
-            heightMil,
-            thicknessMil,
-            minX,
-            minY,
-            centerX: center.x,
-            centerY: center.y,
-            segments,
-            cutouts: PcbScene3dCircuitJsonAdapter.#buildBoardCutouts(index),
-            surfaceColor: null,
-            edgeColor: null
-        }
-    }
-
-    /**
      * Returns true for parser-produced arrays that already carry a legacy
      * renderer model and must keep using their format-specific scene builder.
      * @param {unknown} value Candidate model.
@@ -154,182 +115,34 @@ export class PcbScene3dCircuitJsonAdapter {
     }
 
     /**
-     * Builds closed board line segments from outline points or rectangle size.
-     * @param {object} boardElement CircuitJSON board element.
-     * @param {{ minX: number, minY: number, widthMil: number, heightMil: number }} fallback Fallback rectangle.
-     * @returns {object[]}
-     */
-    static #buildBoardSegments(boardElement, fallback) {
-        const outlinePoints = Array.isArray(boardElement?.outline)
-            ? boardElement.outline
-                  .map((point) => CircuitJsonUnits.pointMmToMil(point))
-                  .filter((point) => Number.isFinite(point.x + point.y))
-            : []
-        const points =
-            outlinePoints.length >= 3
-                ? outlinePoints
-                : [
-                      { x: fallback.minX, y: fallback.minY },
-                      {
-                          x: fallback.minX + fallback.widthMil,
-                          y: fallback.minY
-                      },
-                      {
-                          x: fallback.minX + fallback.widthMil,
-                          y: fallback.minY + fallback.heightMil
-                      },
-                      {
-                          x: fallback.minX,
-                          y: fallback.minY + fallback.heightMil
-                      }
-                  ]
-
-        return points.map((point, index) => {
-            const next = points[(index + 1) % points.length]
-            return {
-                type: 'line',
-                x1: point.x,
-                y1: point.y,
-                x2: next.x,
-                y2: next.y
-            }
-        })
-    }
-
-    /**
-     * Builds explicit through-board cutout loops.
-     * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
-     * @returns {{ points: { x: number, y: number }[], sourceId?: string }[]}
-     */
-    static #buildBoardCutouts(index) {
-        return (index.elementsByType.get('pcb_cutout') || [])
-            .map((cutout) => PcbScene3dCircuitJsonAdapter.#buildCutout(cutout))
-            .filter(Boolean)
-    }
-
-    /**
-     * Builds one cutout loop.
-     * @param {object} cutout Cutout element.
-     * @returns {{ points: { x: number, y: number }[], sourceId?: string } | null}
-     */
-    static #buildCutout(cutout) {
-        const outline =
-            PcbScene3dCircuitJsonAdapter.#cutoutOutlinePoints(cutout)
-        if (outline.length < 3) {
-            return null
-        }
-
-        return {
-            points: outline,
-            sourceId: String(cutout?.pcb_cutout_id || cutout?.cutout_id || '')
-        }
-    }
-
-    /**
-     * Resolves cutout outline points from polygon, rectangle, or circle fields.
-     * @param {object} cutout Cutout element.
-     * @returns {{ x: number, y: number }[]}
-     */
-    static #cutoutOutlinePoints(cutout) {
-        const points = PcbScene3dCircuitJsonAdapter.#array(
-            cutout?.points || cutout?.outline || cutout?.polygon || []
-        )
-            .map((point) => CircuitJsonUnits.pointMmToMil(point))
-            .filter((point) => Number.isFinite(point.x + point.y))
-        if (points.length >= 3) {
-            return points
-        }
-
-        const shape = String(cutout?.shape || '').toLowerCase()
-        if (shape.includes('circle') || Number(cutout?.radius || 0) > 0) {
-            return PcbScene3dCircuitJsonAdapter.#circleCutoutPoints(cutout)
-        }
-
-        return PcbScene3dCircuitJsonAdapter.#rectCutoutPoints(cutout)
-    }
-
-    /**
-     * Builds a rectangular cutout loop.
-     * @param {object} cutout Cutout element.
-     * @returns {{ x: number, y: number }[]}
-     */
-    static #rectCutoutPoints(cutout) {
-        const center = CircuitJsonUnits.pointMmToMil(
-            cutout?.center || {
-                x: cutout?.x,
-                y: cutout?.y
-            }
-        )
-        const width = CircuitJsonUnits.mmToMil(cutout?.width, 0)
-        const height = CircuitJsonUnits.mmToMil(cutout?.height, 0)
-        if (width <= 0 || height <= 0) {
-            return []
-        }
-
-        const halfWidth = width / 2
-        const halfHeight = height / 2
-        return [
-            { x: center.x - halfWidth, y: center.y - halfHeight },
-            { x: center.x + halfWidth, y: center.y - halfHeight },
-            { x: center.x + halfWidth, y: center.y + halfHeight },
-            { x: center.x - halfWidth, y: center.y + halfHeight }
-        ]
-    }
-
-    /**
-     * Builds a circular cutout loop.
-     * @param {object} cutout Cutout element.
-     * @returns {{ x: number, y: number }[]}
-     */
-    static #circleCutoutPoints(cutout) {
-        const center = CircuitJsonUnits.pointMmToMil(
-            cutout?.center || {
-                x: cutout?.x,
-                y: cutout?.y
-            }
-        )
-        const radius = CircuitJsonUnits.mmToMil(
-            cutout?.radius || Number(cutout?.diameter || 0) / 2,
-            0
-        )
-        if (radius <= 0) {
-            return []
-        }
-
-        return Array.from({ length: CIRCLE_CUTOUT_POINTS }, (_entry, index) => {
-            const angle = (Math.PI * 2 * index) / CIRCLE_CUTOUT_POINTS
-            return {
-                x: center.x + Math.cos(angle) * radius,
-                y: center.y + Math.sin(angle) * radius
-            }
-        })
-    }
-
-    /**
      * Builds component fallback bodies from `pcb_component` elements.
      * @param {{ elementsByType: Map<string, object[]>, sourceComponentById: Map<string, object> }} index CircuitJSON index.
      * @param {{ centerX: number, centerY: number, thicknessMil: number }} board Render board.
-     * @param {Map<string, object>} externalModelByComponentId External model metadata by PCB component ID.
+     * @param {Map<string, object>} externalPlacementByComponentId External placement metadata by PCB component ID.
+     * @param {Map<string, object>} cadComponentByComponentId CAD metadata by PCB component ID.
      * @returns {object[]}
      */
-    static #buildComponents(index, board, externalModelByComponentId) {
+    static #buildComponents(
+        index,
+        board,
+        externalPlacementByComponentId,
+        cadComponentByComponentId
+    ) {
         return (index.elementsByType.get('pcb_component') || []).map(
             (component, componentIndex) => {
                 const sourceComponent = index.sourceComponentById.get(
                     String(component?.source_component_id || '')
                 )
                 const componentId = String(component?.pcb_component_id || '')
+                const externalPlacement =
+                    externalPlacementByComponentId.get(componentId) || null
+                const cadComponent =
+                    cadComponentByComponentId.get(componentId) || null
                 const center = CircuitJsonUnits.pointMmToMil(
                     component?.center || {
                         x: component?.x,
                         y: component?.y
                     }
-                )
-                const width = CircuitJsonUnits.mmToMil(component?.width, 2)
-                const depth = CircuitJsonUnits.mmToMil(component?.height, 1.2)
-                const height = CircuitJsonUnits.mmToMil(
-                    component?.component_height,
-                    DEFAULT_COMPONENT_HEIGHT_MIL / 39.37007874015748
                 )
                 const designator =
                     PcbScene3dCircuitJsonAdapter.#componentDesignator(
@@ -340,6 +153,25 @@ export class PcbScene3dCircuitJsonAdapter {
                 const mountSide = PcbScene3dCircuitJsonAdapter.#layerSide(
                     component?.layer
                 )
+                const bodySize =
+                    PcbScene3dCircuitJsonAdapter.#componentBodySize(
+                        component,
+                        externalPlacement,
+                        cadComponent
+                    )
+                const body =
+                    PcbScene3dFootprintBodyBuilder.resolveComponentBody({
+                        cadComponent,
+                        component,
+                        sourceComponent,
+                        fallbackSizeMil: bodySize,
+                        hasExternalModel: Boolean(
+                            externalPlacement?.externalModel
+                        )
+                    })
+                const bodyCenterZ =
+                    board.thicknessMil / 2 +
+                    Number(body?.sizeMil?.height || bodySize.height) / 2
 
                 return {
                     designator,
@@ -348,7 +180,7 @@ export class PcbScene3dCircuitJsonAdapter {
                     positionMil: {
                         x: center.x - board.centerX,
                         y: center.y - board.centerY,
-                        z: board.thicknessMil / 2 + height / 2
+                        z: mountSide === 'bottom' ? -bodyCenterZ : bodyCenterZ
                     },
                     boardPositionMil: {
                         x: center.x,
@@ -362,19 +194,58 @@ export class PcbScene3dCircuitJsonAdapter {
                             'CircuitJSON component'
                     ),
                     source: 'circuitjson',
-                    body: {
-                        family: 'chip',
-                        sizeMil: {
-                            width: Math.max(width, 20),
-                            depth: Math.max(depth, 20),
-                            height: Math.max(height, 10)
-                        }
-                    },
-                    externalModel:
-                        externalModelByComponentId.get(componentId) || null
+                    ...PcbScene3dCircuitJsonAdapter.#componentDisplayMetadata(
+                        externalPlacement
+                    ),
+                    body,
+                    externalModel: externalPlacement?.externalModel || null
                 }
             }
         )
+    }
+
+    /**
+     * Builds component display metadata from an external placement.
+     * @param {object | null} externalPlacement External placement metadata.
+     * @returns {{ renderFallbackBody?: boolean }}
+     */
+    static #componentDisplayMetadata(externalPlacement) {
+        return externalPlacement?.renderAsBoundingBox === true
+            ? { renderFallbackBody: true }
+            : {}
+    }
+
+    /**
+     * Resolves fallback body dimensions for one component.
+     * @param {object} component PCB component element.
+     * @param {object | null} externalPlacement External placement metadata.
+     * @param {object | null} cadComponent CAD component element.
+     * @returns {{ width: number, depth: number, height: number }}
+     */
+    static #componentBodySize(component, externalPlacement, cadComponent) {
+        const boundingSize =
+            externalPlacement?.boundingBoxSizeMil ||
+            PcbScene3dCircuitJsonAdapter.#sizeMmToMil(
+                cadComponent?.model_size || cadComponent?.size
+            )
+        const width =
+            PcbScene3dCircuitJsonAdapter.#positiveNumber(boundingSize?.x) ||
+            CircuitJsonUnits.mmToMil(component?.width, 2)
+        const depth =
+            PcbScene3dCircuitJsonAdapter.#positiveNumber(boundingSize?.y) ||
+            CircuitJsonUnits.mmToMil(component?.height, 1.2)
+        const height =
+            PcbScene3dCircuitJsonAdapter.#positiveNumber(boundingSize?.z) ||
+            CircuitJsonUnits.mmToMil(
+                component?.component_height,
+                DEFAULT_COMPONENT_HEIGHT_MIL / 39.37007874015748
+            )
+
+        return {
+            width: Math.max(width, 20),
+            depth: Math.max(depth, 20),
+            height: Math.max(height, 10)
+        }
     }
 
     /**
@@ -465,7 +336,53 @@ export class PcbScene3dCircuitJsonAdapter {
             ...PcbScene3dCircuitJsonModelTransform.displayMetadata(
                 cadComponent
             ),
+            ...PcbScene3dCircuitJsonAdapter.#boundingBoxDisplayMetadata(
+                cadComponent
+            ),
             externalModel
+        }
+    }
+
+    /**
+     * Builds explicit bounding-box display metadata from a CAD component.
+     * @param {object} cadComponent CAD component element.
+     * @returns {{ renderAsBoundingBox?: boolean, boundingBoxSizeMil?: { x: number, y: number, z: number } }}
+     */
+    static #boundingBoxDisplayMetadata(cadComponent) {
+        if (cadComponent?.show_as_bounding_box !== true) {
+            return {}
+        }
+
+        const size = PcbScene3dCircuitJsonAdapter.#sizeMmToMil(
+            cadComponent?.model_size || cadComponent?.size
+        )
+        return {
+            renderAsBoundingBox: true,
+            ...(size ? { boundingBoxSizeMil: size } : {})
+        }
+    }
+
+    /**
+     * Converts a model size object from millimeters to mils.
+     * @param {object | undefined} size Size metadata.
+     * @returns {{ x: number, y: number, z: number } | null}
+     */
+    static #sizeMmToMil(size) {
+        const x = size?.x ?? size?.width
+        const y = size?.y ?? size?.height
+        const z = size?.z ?? size?.depth
+        if (
+            !Number.isFinite(Number(x)) &&
+            !Number.isFinite(Number(y)) &&
+            !Number.isFinite(Number(z))
+        ) {
+            return null
+        }
+
+        return {
+            x: CircuitJsonUnits.mmToMil(x, 0),
+            y: CircuitJsonUnits.mmToMil(y, 0),
+            z: CircuitJsonUnits.mmToMil(z, 0)
         }
     }
 
@@ -524,31 +441,38 @@ export class PcbScene3dCircuitJsonAdapter {
      */
     static #resolveModelUrl(sourceUrl, context, options) {
         const resolver = options?.modelUrlResolver
-        if (typeof resolver !== 'function') {
-            return {}
+        if (typeof resolver === 'function') {
+            const resolved = resolver(sourceUrl, context)
+            if (typeof resolved === 'string') {
+                return { resolvedUrl: resolved }
+            }
+            if (resolved && typeof resolved === 'object') {
+                return { ...resolved }
+            }
         }
 
-        const resolved = resolver(sourceUrl, context)
-        if (typeof resolved === 'string') {
-            return { resolvedUrl: resolved }
+        const resolvedUrl = PcbScene3dCircuitJsonModelUrlResolver.resolve(
+            sourceUrl,
+            options?.projectBaseUrl
+        )
+        if (resolvedUrl && resolvedUrl !== sourceUrl) {
+            return { resolvedUrl }
         }
-        if (resolved && typeof resolved === 'object') {
-            return { ...resolved }
-        }
+
         return {}
     }
 
     /**
-     * Builds a component ID to external-model map.
+     * Builds a component ID to external placement map.
      * @param {object[]} placements External placements.
      * @returns {Map<string, object>}
      */
-    static #externalModelByComponentId(placements) {
+    static #externalPlacementByComponentId(placements) {
         const map = new Map()
         placements.forEach((placement) => {
             const componentId = String(placement?.pcbComponentId || '')
-            if (componentId && placement?.externalModel) {
-                map.set(componentId, placement.externalModel)
+            if (componentId) {
+                map.set(componentId, placement)
             }
         })
         return map
@@ -650,23 +574,39 @@ export class PcbScene3dCircuitJsonAdapter {
     /**
      * Builds all core board detail primitives.
      * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
+     * @param {{ boardDrillQuality?: string, showPcbNotes?: boolean, showPcbPaste?: boolean }} options Adapter options.
      * @returns {object}
      */
-    static #buildDetail(index) {
+    static #buildDetail(index, options) {
+        const paste = PcbScene3dCircuitJsonSolderPasteBuilder.build(
+            index,
+            options
+        )
+
         return {
             pads: [
                 ...PcbScene3dCircuitJsonAdapter.#buildSmtPads(index),
                 ...PcbScene3dCircuitJsonAdapter.#buildPlatedHoles(index),
                 ...PcbScene3dCircuitJsonAdapter.#buildNonPlatedHoles(index)
             ],
-            tracks: PcbScene3dCircuitJsonAdapter.#buildTracks(index),
+            tracks: [
+                ...PcbScene3dCircuitJsonTraceRouteBuilder.buildTracks(index),
+                ...PcbScene3dCircuitJsonThermalSpokeBuilder.build(index)
+            ],
             arcs: [],
             fills: [],
-            vias: PcbScene3dCircuitJsonAdapter.#buildVias(index),
-            polygons: [],
+            vias: PcbScene3dCircuitJsonTraceRouteBuilder.buildVias(index),
+            polygons: PcbScene3dCircuitJsonCopperPourBuilder.build(index),
             copperTexts: [],
             embeddedFonts: [],
-            silkscreen: PcbScene3dCircuitJsonAdapter.#buildSilkscreen(index)
+            silkscreen: PcbScene3dCircuitJsonSilkscreenBuilder.build(
+                index,
+                options
+            ),
+            ...(paste ? { paste } : {}),
+            drillQuality: PcbScene3dCircuitJsonGeometry.normalizeDrillQuality(
+                options?.boardDrillQuality
+            )
         }
     }
 
@@ -680,6 +620,11 @@ export class PcbScene3dCircuitJsonAdapter {
             const side = PcbScene3dCircuitJsonAdapter.#layerSide(pad?.layer)
             const size = PcbScene3dCircuitJsonAdapter.#padSize(pad)
             const isBottom = side === 'bottom'
+            const exposesCopper =
+                PcbScene3dCircuitJsonAdapter.#exposesCopperThroughMask(
+                    pad,
+                    true
+                )
             const padDetail = {
                 x: CircuitJsonUnits.mmToMil(pad?.x, 0),
                 y: CircuitJsonUnits.mmToMil(pad?.y, 0),
@@ -698,8 +643,13 @@ export class PcbScene3dCircuitJsonAdapter {
                 sizeBottomX: isBottom ? size.width : 0,
                 sizeBottomY: isBottom ? size.height : 0,
                 holeDiameter: 0,
-                hasTopSolderMaskOpening: !isBottom,
-                hasBottomSolderMaskOpening: isBottom
+                hasTopSolderMaskOpening: !isBottom && exposesCopper,
+                hasBottomSolderMaskOpening: isBottom && exposesCopper,
+                ...PcbScene3dCircuitJsonAdapter.#roundedPadMetadata(
+                    pad,
+                    size,
+                    isBottom
+                )
             }
             return padDetail
         })
@@ -715,13 +665,19 @@ export class PcbScene3dCircuitJsonAdapter {
             (hole) => {
                 const size =
                     PcbScene3dCircuitJsonAdapter.#platedHoleOuterSize(hole)
-                const holeDiameter = CircuitJsonUnits.mmToMil(
-                    hole?.hole_diameter || hole?.hole_width,
-                    0
-                )
+                const center = CircuitJsonUnits.pointMmToMil({
+                    x: hole?.x,
+                    y: hole?.y
+                })
+                const drill = PcbScene3dCircuitJsonGeometry.holeDrillSpec(hole)
+                const exposesCopper =
+                    PcbScene3dCircuitJsonAdapter.#exposesCopperThroughMask(
+                        hole,
+                        true
+                    )
                 return {
-                    x: CircuitJsonUnits.mmToMil(hole?.x, 0),
-                    y: CircuitJsonUnits.mmToMil(hole?.y, 0),
+                    x: center.x,
+                    y: center.y,
                     rotation: Number(hole?.ccw_rotation || 0),
                     shapeTop: PcbScene3dCircuitJsonAdapter.#padShape(hole),
                     shapeMid: PcbScene3dCircuitJsonAdapter.#padShape(hole),
@@ -732,9 +688,13 @@ export class PcbScene3dCircuitJsonAdapter {
                     sizeMidY: size.height,
                     sizeBottomX: size.width,
                     sizeBottomY: size.height,
-                    holeDiameter,
-                    hasTopSolderMaskOpening: true,
-                    hasBottomSolderMaskOpening: true
+                    holeDiameter: drill.diameter,
+                    holeSlotLength: drill.slotLength,
+                    holeRotation: drill.rotationDeg,
+                    holeOffsetX: drill.center.x - center.x,
+                    holeOffsetY: drill.center.y - center.y,
+                    hasTopSolderMaskOpening: exposesCopper,
+                    hasBottomSolderMaskOpening: exposesCopper
                 }
             }
         )
@@ -747,14 +707,11 @@ export class PcbScene3dCircuitJsonAdapter {
      */
     static #buildNonPlatedHoles(index) {
         return (index.elementsByType.get('pcb_hole') || []).map((hole) => {
-            const diameter = CircuitJsonUnits.mmToMil(
-                hole?.hole_diameter || hole?.hole_width,
-                0
-            )
+            const drill = PcbScene3dCircuitJsonGeometry.holeDrillSpec(hole)
             return {
-                x: CircuitJsonUnits.mmToMil(hole?.x, 0),
-                y: CircuitJsonUnits.mmToMil(hole?.y, 0),
-                rotation: Number(hole?.ccw_rotation || 0),
+                x: drill.center.x,
+                y: drill.center.y,
+                rotation: drill.rotationDeg,
                 shapeTop: 0,
                 shapeMid: 0,
                 shapeBottom: 0,
@@ -764,112 +721,13 @@ export class PcbScene3dCircuitJsonAdapter {
                 sizeMidY: 0,
                 sizeBottomX: 0,
                 sizeBottomY: 0,
-                holeDiameter: diameter,
+                holeDiameter: drill.diameter,
+                holeSlotLength: drill.slotLength,
+                holeRotation: drill.rotationDeg,
                 hasTopSolderMaskOpening: false,
                 hasBottomSolderMaskOpening: false
             }
         })
-    }
-
-    /**
-     * Builds via detail primitives.
-     * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
-     * @returns {object[]}
-     */
-    static #buildVias(index) {
-        return (index.elementsByType.get('pcb_via') || []).map((via) => ({
-            x: CircuitJsonUnits.mmToMil(via?.x, 0),
-            y: CircuitJsonUnits.mmToMil(via?.y, 0),
-            diameter: CircuitJsonUnits.mmToMil(via?.outer_diameter, 0),
-            holeDiameter: CircuitJsonUnits.mmToMil(via?.hole_diameter, 0),
-            isTentingTop: false,
-            isTentingBottom: false
-        }))
-    }
-
-    /**
-     * Builds copper track detail primitives from `pcb_trace` wire routes.
-     * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
-     * @returns {object[]}
-     */
-    static #buildTracks(index) {
-        const tracks = []
-        ;(index.elementsByType.get('pcb_trace') || []).forEach((trace) => {
-            const route = Array.isArray(trace?.route) ? trace.route : []
-            for (let index = 0; index < route.length - 1; index += 1) {
-                const start = route[index]
-                const end = route[index + 1]
-                if (
-                    String(start?.route_type || 'wire') !== 'wire' ||
-                    String(end?.route_type || 'wire') !== 'wire'
-                ) {
-                    continue
-                }
-                const layer = start?.layer || end?.layer
-                tracks.push({
-                    x1: CircuitJsonUnits.mmToMil(start?.x, 0),
-                    y1: CircuitJsonUnits.mmToMil(start?.y, 0),
-                    x2: CircuitJsonUnits.mmToMil(end?.x, 0),
-                    y2: CircuitJsonUnits.mmToMil(end?.y, 0),
-                    width: CircuitJsonUnits.mmToMil(
-                        start?.width || end?.width,
-                        0.1524
-                    ),
-                    layerId:
-                        PcbScene3dCircuitJsonAdapter.#layerSide(layer) ===
-                        'bottom'
-                            ? BOTTOM_LAYER_ID
-                            : TOP_LAYER_ID,
-                    solderMaskOpening: true
-                })
-            }
-        })
-        return tracks
-    }
-
-    /**
-     * Builds basic silkscreen detail from known CircuitJSON drawing elements.
-     * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
-     * @returns {{ top: object, bottom: object }}
-     */
-    static #buildSilkscreen(index) {
-        const top = { tracks: [], arcs: [], fills: [], texts: [] }
-        const bottom = { tracks: [], arcs: [], fills: [], texts: [] }
-        ;(index.elementsByType.get('pcb_silkscreen_line') || []).forEach(
-            (line) => {
-                const target =
-                    PcbScene3dCircuitJsonAdapter.#layerSide(line?.layer) ===
-                    'bottom'
-                        ? bottom
-                        : top
-                target.tracks.push({
-                    x1: CircuitJsonUnits.mmToMil(line?.x1, 0),
-                    y1: CircuitJsonUnits.mmToMil(line?.y1, 0),
-                    x2: CircuitJsonUnits.mmToMil(line?.x2, 0),
-                    y2: CircuitJsonUnits.mmToMil(line?.y2, 0),
-                    width: CircuitJsonUnits.mmToMil(line?.stroke_width, 0.12)
-                })
-            }
-        )
-        ;(index.elementsByType.get('pcb_silkscreen_text') || []).forEach(
-            (text) => {
-                const target =
-                    PcbScene3dCircuitJsonAdapter.#layerSide(text?.layer) ===
-                    'bottom'
-                        ? bottom
-                        : top
-                target.texts.push({
-                    value: String(text?.text || text?.value || ''),
-                    x: CircuitJsonUnits.mmToMil(text?.x, 0),
-                    y: CircuitJsonUnits.mmToMil(text?.y, 0),
-                    rotation: Number(text?.ccw_rotation || 0),
-                    sizeX: CircuitJsonUnits.mmToMil(text?.font_size, 1),
-                    sizeY: CircuitJsonUnits.mmToMil(text?.font_size, 1),
-                    width: CircuitJsonUnits.mmToMil(text?.stroke_width, 0.12)
-                })
-            }
-        )
-        return { top, bottom }
     }
 
     /**
@@ -889,6 +747,48 @@ export class PcbScene3dCircuitJsonAdapter {
             width: CircuitJsonUnits.mmToMil(pad?.width, 1),
             height: CircuitJsonUnits.mmToMil(pad?.height, 1)
         }
+    }
+
+    /**
+     * Builds rounded-rectangle metadata for pill-shaped SMT pads.
+     * @param {object} pad Pad element.
+     * @param {{ width: number, height: number }} size Pad copper size.
+     * @param {boolean} isBottom True when the pad is on the bottom side.
+     * @returns {object}
+     */
+    static #roundedPadMetadata(pad, size, isBottom) {
+        if (!String(pad?.shape || '').endsWith('pill')) {
+            return {}
+        }
+
+        const cornerRadius =
+            PcbScene3dCircuitJsonAdapter.#roundedPadCornerRadiusPercent(
+                pad,
+                size
+            )
+        return {
+            hasRoundedRect: true,
+            roundedRectShapeTop: isBottom ? null : RECTANGULAR_PAD_SHAPE,
+            roundedRectShapeBottom: isBottom ? RECTANGULAR_PAD_SHAPE : null,
+            cornerRadiusTop: isBottom ? null : cornerRadius,
+            cornerRadiusBottom: isBottom ? cornerRadius : null
+        }
+    }
+
+    /**
+     * Resolves a pill-pad corner radius as a percent of the shortest side.
+     * @param {object} pad Pad element.
+     * @param {{ width: number, height: number }} size Pad copper size.
+     * @returns {number}
+     */
+    static #roundedPadCornerRadiusPercent(pad, size) {
+        const shortestSide = Math.min(Number(size.width), Number(size.height))
+        const radius = CircuitJsonUnits.mmToMil(pad?.radius, 0)
+        if (shortestSide > 0 && radius > 0) {
+            return Math.min((radius / shortestSide) * 100, 50)
+        }
+
+        return 50
     }
 
     /**
@@ -919,9 +819,48 @@ export class PcbScene3dCircuitJsonAdapter {
      * @returns {number}
      */
     static #padShape(pad) {
-        return String(pad?.shape || '').includes('rect')
+        const shape = String(pad?.shape || '')
+        return shape.includes('rect') || shape.endsWith('pill')
             ? RECTANGULAR_PAD_SHAPE
             : CIRCULAR_PAD_SHAPE
+    }
+
+    /**
+     * Resolves whether a copper feature is visible through solder mask.
+     * @param {object} element CircuitJSON copper element.
+     * @param {boolean} fallback Fallback visibility when no flag is present.
+     * @returns {boolean}
+     */
+    static #exposesCopperThroughMask(element, fallback) {
+        const covered =
+            PcbScene3dCircuitJsonAdapter.#solderMaskCoveredValue(element)
+        return covered === null ? fallback : !covered
+    }
+
+    /**
+     * Reads the optional solder-mask coverage flag.
+     * @param {object} element CircuitJSON element.
+     * @returns {boolean | null}
+     */
+    static #solderMaskCoveredValue(element) {
+        const value =
+            element?.is_covered_with_solder_mask ??
+            element?.covered_with_solder_mask
+        if (typeof value === 'boolean') {
+            return value
+        }
+        if (value === undefined || value === null || value === '') {
+            return null
+        }
+
+        const text = String(value).trim().toLowerCase()
+        if (text === 'true') {
+            return true
+        }
+        if (text === 'false') {
+            return false
+        }
+        return null
     }
 
     /**
@@ -930,18 +869,16 @@ export class PcbScene3dCircuitJsonAdapter {
      * @returns {'top' | 'bottom'}
      */
     static #layerSide(layer) {
-        const value = String(layer || 'top').toLowerCase()
-        return value.includes('bottom') || value === 'b.cu' || value === 'back'
-            ? 'bottom'
-            : 'top'
+        return PcbScene3dCircuitJsonLayer.side(layer)
     }
 
     /**
-     * Normalizes a value to an array.
+     * Returns a positive finite number or zero.
      * @param {unknown} value Candidate value.
-     * @returns {any[]}
+     * @returns {number}
      */
-    static #array(value) {
-        return Array.isArray(value) ? value : []
+    static #positiveNumber(value) {
+        const number = Number(value)
+        return Number.isFinite(number) && number > 0 ? number : 0
     }
 }

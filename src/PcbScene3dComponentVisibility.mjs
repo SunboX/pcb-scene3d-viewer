@@ -203,6 +203,11 @@ export class PcbScene3dComponentVisibility {
             return false
         }
 
+        const showFallbackBodies = Boolean(state?.toggles?.['fallback-bodies'])
+        if (!showFallbackBodies) {
+            return false
+        }
+
         if (
             PcbScene3dFallbackVisibility.shouldKeepExternalCompanion(
                 rootObject,
@@ -212,7 +217,6 @@ export class PcbScene3dComponentVisibility {
             return true
         }
 
-        const showFallbackBodies = Boolean(state?.toggles?.['fallback-bodies'])
         const hideForLoadedExternal =
             Boolean(state?.toggles?.['external-models']) &&
             state?.loadedExternalModelDesignators?.has?.(

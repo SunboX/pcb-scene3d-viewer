@@ -64,11 +64,53 @@ test('PcbScene3dFallbackVisibility hides duplicate fallback bodies only while ex
     assert.equal(unmatchedFallback.visible, false)
 })
 
+test('PcbScene3dFallbackVisibility hides unresolved fallback bodies when disabled', () => {
+    const fallbackRoots = new Map()
+    const loadedDesignators = new Set(['J17'])
+    const representedFallback = { visible: true }
+    const unresolvedFallback = { visible: false }
+
+    PcbScene3dFallbackVisibility.registerFallbackRoot(
+        fallbackRoots,
+        'J17',
+        representedFallback
+    )
+    PcbScene3dFallbackVisibility.registerFallbackRoot(
+        fallbackRoots,
+        'R5',
+        unresolvedFallback
+    )
+
+    PcbScene3dFallbackVisibility.applyVisibility(
+        fallbackRoots,
+        loadedDesignators,
+        {
+            'fallback-bodies': false,
+            'external-models': true
+        }
+    )
+
+    assert.equal(representedFallback.visible, false)
+    assert.equal(unresolvedFallback.visible, false)
+
+    PcbScene3dFallbackVisibility.applyVisibility(
+        fallbackRoots,
+        loadedDesignators,
+        {
+            'fallback-bodies': true,
+            'external-models': true
+        }
+    )
+
+    assert.equal(representedFallback.visible, false)
+    assert.equal(unresolvedFallback.visible, true)
+})
+
 /**
- * Verifies package fallbacks can remain visible as stitched companions for
- * partial embedded external bodies.
+ * Verifies stitched companion fallbacks stay controlled by the fallback-body
+ * detail toggle.
  */
-test('PcbScene3dFallbackVisibility keeps stitched fallback companions with external models', () => {
+test('PcbScene3dFallbackVisibility hides stitched fallback companions when disabled', () => {
     const fallbackRoots = new Map()
     const loadedDesignators = new Set()
     const companionFallback = {
@@ -95,7 +137,7 @@ test('PcbScene3dFallbackVisibility keeps stitched fallback companions with exter
         }
     )
 
-    assert.equal(companionFallback.visible, true)
+    assert.equal(companionFallback.visible, false)
 
     PcbScene3dFallbackVisibility.applyVisibility(
         fallbackRoots,
@@ -107,4 +149,15 @@ test('PcbScene3dFallbackVisibility keeps stitched fallback companions with exter
     )
 
     assert.equal(companionFallback.visible, false)
+
+    PcbScene3dFallbackVisibility.applyVisibility(
+        fallbackRoots,
+        loadedDesignators,
+        {
+            'fallback-bodies': true,
+            'external-models': true
+        }
+    )
+
+    assert.equal(companionFallback.visible, true)
 })

@@ -6,9 +6,11 @@ import { PcbAssemblyPadMeshBuilder } from './PcbAssemblyPadMeshBuilder.mjs'
 
 const COPPER_THICKNESS_MIL = 2.2
 const SILKSCREEN_THICKNESS_MIL = 0.8
+const PASTE_THICKNESS_MIL = 0.8
 const BOARD_COLOR = [0.05, 0.32, 0.18]
 const COPPER_COLOR = [0.85, 0.62, 0.12]
 const SILKSCREEN_COLOR = [0.96, 0.95, 0.9]
+const PASTE_COLOR = [0.78, 0.76, 0.72]
 
 /**
  * Converts a prepared 3D scene description into exportable faceted meshes.
@@ -36,7 +38,16 @@ export class PcbAssemblyGeometryBuilder {
                 sceneDescription,
                 progress
             )
-        const pcbMeshes = [...boardMeshes, ...copperMeshes, ...silkscreenMeshes]
+        const pasteMeshes = await PcbAssemblyGeometryBuilder.#buildPasteMeshes(
+            sceneDescription,
+            progress
+        )
+        const pcbMeshes = [
+            ...boardMeshes,
+            ...copperMeshes,
+            ...pasteMeshes,
+            ...silkscreenMeshes
+        ]
         const componentResult = await PcbAssemblyComponentMeshBuilder.build(
             sceneDescription,
             options,
@@ -329,6 +340,48 @@ export class PcbAssemblyGeometryBuilder {
                         (index + 1) +
                         '/' +
                         texts.length
+                )
+            }
+        }
+
+        return meshes.filter(Boolean)
+    }
+
+    /**
+     * Builds solder-paste overlay meshes.
+     * @param {{ board?: object, detail?: object }} sceneDescription Prepared scene description.
+     * @param {{ advance?: (units: number, message: string) => Promise<void> } | null} progress Progress tracker.
+     * @returns {Promise<object[]>}
+     */
+    static async #buildPasteMeshes(sceneDescription, progress = null) {
+        const detail = sceneDescription?.detail || {}
+        const board = sceneDescription?.board || {}
+        const topZ =
+            Number(board.thicknessMil || 63) / 2 +
+            COPPER_THICKNESS_MIL +
+            PASTE_THICKNESS_MIL / 2
+        const bottomZ = -topZ
+        const meshes = []
+        const sides = [
+            ['top', detail?.paste?.top || {}, topZ],
+            ['bottom', detail?.paste?.bottom || {}, bottomZ]
+        ]
+
+        for (const [side, paste, z] of sides) {
+            const fills = PcbAssemblyGeometryBuilder.#array(paste.fills)
+            for (let index = 0; index < fills.length; index += 1) {
+                meshes.push(
+                    ...PcbAssemblyGeometryBuilder.#fillMeshes(
+                        'paste-' + side + '-fill-' + (index + 1),
+                        fills[index],
+                        z,
+                        PASTE_THICKNESS_MIL,
+                        PASTE_COLOR
+                    )
+                )
+                await progress?.advance?.(
+                    1,
+                    'Building solder paste ' + (index + 1) + '/' + fills.length
                 )
             }
         }

@@ -70,6 +70,7 @@ test('PcbScene3dRenderGroupVisibility preserves PCB detail while board assembly 
         [
             'board',
             'silkscreen',
+            'paste',
             'copper',
             'fallback-bodies',
             'external-models'
@@ -90,6 +91,7 @@ test('PcbScene3dRenderGroupVisibility preserves PCB detail while board assembly 
 
     assert.equal(groups.get('board').visible, true)
     assert.equal(groups.get('silkscreen').visible, true)
+    assert.equal(groups.get('paste').visible, true)
     assert.equal(groups.get('copper').visible, true)
     assert.equal(groups.get('fallback-bodies').visible, false)
     assert.equal(groups.get('external-models').visible, true)
@@ -100,14 +102,17 @@ test('PcbScene3dRenderGroupVisibility keeps component depth over board assemblie
         [
             'board',
             'silkscreen',
+            'paste',
             'copper',
             'fallback-bodies',
             'external-models'
         ].map((name) => [name, new FakeGroup()])
     )
     const silkscreenMesh = new FakeMesh()
+    const pasteMesh = new FakeMesh()
     const copperMesh = new FakeMesh()
     groups.get('silkscreen').add(silkscreenMesh)
+    groups.get('paste').add(pasteMesh)
     groups.get('copper').add(copperMesh)
 
     PcbScene3dRenderGroupVisibility.apply({
@@ -123,10 +128,13 @@ test('PcbScene3dRenderGroupVisibility keeps component depth over board assemblie
     })
 
     assert.equal(silkscreenMesh.renderOrder > 0, true)
+    assert.equal(pasteMesh.renderOrder > 0, true)
     assert.equal(copperMesh.renderOrder > 0, true)
     assert.equal(silkscreenMesh.material.depthTest, true)
+    assert.equal(pasteMesh.material.depthTest, true)
     assert.equal(copperMesh.material.depthTest, true)
     assert.equal(silkscreenMesh.material.depthWrite, true)
+    assert.equal(pasteMesh.material.depthWrite, true)
     assert.equal(copperMesh.material.depthWrite, true)
 })
 
@@ -178,7 +186,7 @@ test('PcbScene3dRenderGroupVisibility hides only model-search external roots', (
     assert.equal(modelSearchRoot.visible, true)
 })
 
-test('PcbScene3dRenderGroupVisibility keeps fallback group for stitched external companions', () => {
+test('PcbScene3dRenderGroupVisibility hides fallback group for disabled stitched companions', () => {
     const groups = new Map(
         [
             'board',
@@ -207,6 +215,73 @@ test('PcbScene3dRenderGroupVisibility keeps fallback group for stitched external
         hasLoadedBoardAssemblyModel: false
     })
 
+    assert.equal(groups.get('fallback-bodies').visible, false)
+    assert.equal(companionFallback.visible, false)
+
+    PcbScene3dRenderGroupVisibility.apply({
+        groups,
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': true,
+            copper: true
+        },
+        fallbackBodyRoots,
+        loadedExternalModelDesignators: new Set(['XO1']),
+        hasLoadedBoardAssemblyModel: false
+    })
+
     assert.equal(groups.get('fallback-bodies').visible, true)
     assert.equal(companionFallback.visible, true)
+})
+
+test('PcbScene3dRenderGroupVisibility hides fallback group for disabled unresolved bodies', () => {
+    const groups = new Map(
+        [
+            'board',
+            'silkscreen',
+            'copper',
+            'fallback-bodies',
+            'external-models'
+        ].map((name) => [name, new FakeGroup()])
+    )
+    const unresolvedFallback = new FakeGroup()
+    const representedFallback = new FakeGroup()
+    const fallbackBodyRoots = new Map([
+        ['R5', new Set([unresolvedFallback])],
+        ['J17', new Set([representedFallback])]
+    ])
+    groups.get('fallback-bodies').add(unresolvedFallback)
+    groups.get('fallback-bodies').add(representedFallback)
+
+    PcbScene3dRenderGroupVisibility.apply({
+        groups,
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': false,
+            copper: true
+        },
+        fallbackBodyRoots,
+        loadedExternalModelDesignators: new Set(['J17']),
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(groups.get('fallback-bodies').visible, false)
+    assert.equal(unresolvedFallback.visible, false)
+    assert.equal(representedFallback.visible, false)
+
+    PcbScene3dRenderGroupVisibility.apply({
+        groups,
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': true,
+            copper: true
+        },
+        fallbackBodyRoots,
+        loadedExternalModelDesignators: new Set(['J17']),
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(groups.get('fallback-bodies').visible, true)
+    assert.equal(unresolvedFallback.visible, true)
+    assert.equal(representedFallback.visible, false)
 })

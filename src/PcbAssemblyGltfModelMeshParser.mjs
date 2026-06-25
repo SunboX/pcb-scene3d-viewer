@@ -275,6 +275,10 @@ export class PcbAssemblyGltfModelMeshParser {
         primitiveIndex,
         node
     ) {
+        if ((primitive?.mode ?? 4) !== 4) {
+            return null
+        }
+
         const positionAccessor = primitive?.attributes?.POSITION
         if (!Number.isInteger(positionAccessor)) {
             return null
@@ -289,6 +293,12 @@ export class PcbAssemblyGltfModelMeshParser {
             PcbAssemblyGltfModelMeshParser.#pointMmToMil(
                 PcbAssemblyGltfModelMeshParser.#transformPoint(matrix, point)
             )
+        )
+        const vertexColors = PcbAssemblyGltfModelMeshParser.#vertexColors(
+            gltf,
+            buffers,
+            primitive,
+            vertices.length
         )
         const indexes = Number.isInteger(primitive?.indices)
             ? PcbAssemblyGltfModelMeshParser.#readAccessor(
@@ -316,8 +326,55 @@ export class PcbAssemblyGltfModelMeshParser {
             ...PcbAssemblyGltfModelMeshParser.#primitiveMaterial(
                 gltf,
                 primitive
-            )
+            ),
+            ...(vertexColors.length ? { vertexColors } : {})
         }
+    }
+
+    /**
+     * Reads optional per-vertex GLTF colors.
+     * @param {object} gltf GLTF JSON.
+     * @param {Uint8Array[]} buffers Loaded buffers.
+     * @param {object} primitive GLTF primitive.
+     * @param {number} vertexCount Expected vertex count.
+     * @returns {number[][]}
+     */
+    static #vertexColors(gltf, buffers, primitive, vertexCount) {
+        const colorAccessor = primitive?.attributes?.COLOR_0
+        if (!Number.isInteger(colorAccessor)) {
+            return []
+        }
+
+        const colors = PcbAssemblyGltfModelMeshParser.#readAccessor(
+            gltf,
+            buffers,
+            colorAccessor
+        )
+        if (colors.length !== vertexCount) {
+            return []
+        }
+
+        return colors.map((color) =>
+            PcbAssemblyGltfModelMeshParser.#vertexColor(color)
+        )
+    }
+
+    /**
+     * Normalizes one GLTF vertex color tuple.
+     * @param {number[]} color Source color tuple.
+     * @returns {number[]}
+     */
+    static #vertexColor(color) {
+        const rgb = [0, 1, 2].map((index) =>
+            PcbAssemblyGltfModelMeshParser.#clampUnit(color?.[index])
+        )
+        if (color.length >= 4) {
+            return [
+                ...rgb,
+                PcbAssemblyGltfModelMeshParser.#clampUnit(color[3], 1)
+            ]
+        }
+        return rgb
     }
 
     /**

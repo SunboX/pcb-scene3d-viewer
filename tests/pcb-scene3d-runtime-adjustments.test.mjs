@@ -607,7 +607,7 @@ test('PcbScene3dRuntime tags fallback bodies that stitch partial embedded extern
     }
 })
 
-test('PcbScene3dRuntime reports ready before slow external model loading settles', async () => {
+test('PcbScene3dRuntime respects fallback toggle while slow external loading settles', async () => {
     const originalWindow = globalThis.window
     const originalDocument = globalThis.document
     const originalLoadIntoScene = PcbScene3dExternalModels.loadIntoScene
@@ -648,6 +648,10 @@ test('PcbScene3dRuntime reports ready before slow external model loading settles
     assert.ok(lastCreatedScene)
     assert.equal(resolveFallbackBodiesGroup()?.visible, false)
     assert.equal(readyResolved, true)
+
+    runtime.setToggle('fallback-bodies', true)
+
+    assert.equal(resolveFallbackBodiesGroup()?.visible, true)
 
     resolveExternalModels?.()
     await readyPromise

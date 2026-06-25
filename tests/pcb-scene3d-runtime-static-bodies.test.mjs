@@ -658,6 +658,156 @@ test('PcbScene3dRuntime skips suppressed procedural fallback bodies', async () =
     }
 })
 
+test('PcbScene3dRuntime hides unresolved fallback bodies until enabled', async () => {
+    const originalWindow = globalThis.window
+    const originalDocument = globalThis.document
+    const originalLoadIntoScene = PcbScene3dExternalModels.loadIntoScene
+    const originalBuildBoardMesh = PcbScene3dRuntimeBoardMeshes.buildBoardMesh
+    const originalBuildBoardOutline =
+        PcbScene3dRuntimeBoardMeshes.buildBoardOutline
+    const originalApplyBoardFaceSide =
+        PcbScene3dRuntimeBoardMeshes.applyBoardFaceSide
+    const originalBuildSolderMaskGroup =
+        PcbScene3dBoardSolderMaskFactory.buildGroup
+    const originalBuildCopperGroup = PcbScene3dCopperDetailGroupBuilder.build
+    const originalBuildSilkscreenGroup =
+        PcbScene3dSilkscreenChunkedFactory.buildGroup
+    const originalBuildFallbackBody = PcbScene3dFallbackBodyFactory.build
+    const fallbackRoots = new Map()
+
+    globalThis.window = {
+        devicePixelRatio: 1,
+        /**
+         * @param {() => void} callback Animation callback.
+         * @returns {void}
+         */
+        requestAnimationFrame(callback) {
+            callback()
+        },
+        /**
+         * @returns {void}
+         */
+        addEventListener() {},
+        /**
+         * @returns {void}
+         */
+        removeEventListener() {}
+    }
+    globalThis.document = {}
+    lastCreatedScene = null
+    PcbScene3dExternalModels.loadIntoScene = async () => []
+    PcbScene3dRuntimeBoardMeshes.buildBoardMesh = () => new FakeGroup()
+    PcbScene3dRuntimeBoardMeshes.buildBoardOutline = () => new FakeGroup()
+    PcbScene3dRuntimeBoardMeshes.applyBoardFaceSide = () => {}
+    PcbScene3dBoardSolderMaskFactory.buildGroup = () => new FakeGroup()
+    PcbScene3dCopperDetailGroupBuilder.build = () => new FakeGroup()
+    PcbScene3dSilkscreenChunkedFactory.buildGroup = () => new FakeGroup()
+    PcbScene3dFallbackBodyFactory.build = (_THREE, component) => {
+        const rootGroup = new FakeGroup()
+        const designator = String(component?.designator || '')
+        rootGroup.userData.testFallbackDesignator = designator
+        fallbackRoots.set(designator, rootGroup)
+
+        return {
+            rootGroup,
+            adjustmentGroup: new FakeGroup()
+        }
+    }
+
+    const runtime = new PcbScene3dRuntime(
+        new FakeViewportNode(),
+        {
+            board: {
+                widthMil: 500,
+                heightMil: 300,
+                centerX: 250,
+                centerY: 150,
+                thicknessMil: 60,
+                segments: []
+            },
+            components: [
+                {
+                    designator: 'R1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 40 },
+                    body: {
+                        family: 'chip',
+                        sizeMil: { width: 60, depth: 24, height: 14 }
+                    }
+                },
+                {
+                    designator: 'R2',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 120, y: 0, z: 40 },
+                    body: {
+                        family: 'chip',
+                        sizeMil: { width: 60, depth: 24, height: 14 }
+                    }
+                }
+            ],
+            staticBodyPlacements: [
+                {
+                    designator: 'R1',
+                    selectionKey: 'R1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 38 },
+                    geometry: {
+                        kind: 'extruded-polygon',
+                        status: 'complete',
+                        heightMil: 10,
+                        verticesMil: [
+                            { x: -10, y: -4 },
+                            { x: 10, y: -4 },
+                            { x: 10, y: 4 },
+                            { x: -10, y: 4 }
+                        ]
+                    }
+                }
+            ],
+            detail: {
+                silkscreen: {},
+                tracks: [],
+                arcs: [],
+                pads: [],
+                vias: []
+            },
+            externalPlacements: []
+        },
+        { loadRuntimeModules: async () => createFakeRuntimeModules() }
+    )
+
+    try {
+        await runtime.whenReady()
+
+        assert.equal(fallbackRoots.get('R1')?.visible, false)
+        assert.equal(fallbackRoots.get('R2')?.visible, false)
+
+        runtime.setToggle('fallback-bodies', true)
+
+        assert.equal(fallbackRoots.get('R1')?.visible, false)
+        assert.equal(fallbackRoots.get('R2')?.visible, true)
+    } finally {
+        runtime.dispose()
+        PcbScene3dFallbackBodyFactory.build = originalBuildFallbackBody
+        PcbScene3dSilkscreenChunkedFactory.buildGroup =
+            originalBuildSilkscreenGroup
+        PcbScene3dCopperDetailGroupBuilder.build = originalBuildCopperGroup
+        PcbScene3dBoardSolderMaskFactory.buildGroup =
+            originalBuildSolderMaskGroup
+        PcbScene3dRuntimeBoardMeshes.applyBoardFaceSide =
+            originalApplyBoardFaceSide
+        PcbScene3dRuntimeBoardMeshes.buildBoardOutline =
+            originalBuildBoardOutline
+        PcbScene3dRuntimeBoardMeshes.buildBoardMesh = originalBuildBoardMesh
+        PcbScene3dExternalModels.loadIntoScene = originalLoadIntoScene
+        globalThis.window = originalWindow
+        globalThis.document = originalDocument
+    }
+})
+
 test('PcbScene3dRuntime registers external model adjustment targets', async () => {
     const originalWindow = globalThis.window
     const originalDocument = globalThis.document

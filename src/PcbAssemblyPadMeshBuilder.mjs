@@ -178,6 +178,8 @@ export class PcbAssemblyPadMeshBuilder {
             return null
         }
 
+        const holeX = x + Number(pad?.holeOffsetX || 0)
+        const holeY = y + Number(pad?.holeOffsetY || 0)
         const slotLength = PcbAssemblyPadMeshBuilder.#firstPositive([
             pad?.holeSlotLength,
             pad?.slotLength,
@@ -187,20 +189,20 @@ export class PcbAssemblyPadMeshBuilder {
         if (slotLength > diameter + GEOMETRY_EPSILON) {
             return PcbAssemblyPadMeshBuilder.#rotatedPoints(
                 PcbAssemblyMeshUtils.capsulePoints(
-                    x - (slotLength - diameter) / 2,
-                    y,
-                    x + (slotLength - diameter) / 2,
-                    y,
+                    holeX - (slotLength - diameter) / 2,
+                    holeY,
+                    holeX + (slotLength - diameter) / 2,
+                    holeY,
                     diameter / 2
                 ),
-                x,
-                y,
+                holeX,
+                holeY,
                 Number(pad?.holeRotation ?? pad?.rotation ?? 0) -
                     Number(pad?.rotation || 0)
             )
         }
 
-        return PcbAssemblyMeshUtils.circlePoints(x, y, diameter / 2, 24)
+        return PcbAssemblyMeshUtils.circlePoints(holeX, holeY, diameter / 2, 24)
     }
 
     /**

@@ -1,4 +1,5 @@
 import { PcbAssemblyMeshUtils } from './PcbAssemblyMeshUtils.mjs'
+import { PcbScene3dFootprintBodyBuilder } from './PcbScene3dFootprintBodyBuilder.mjs'
 
 const COMPONENT_COLOR = [0.55, 0.56, 0.58]
 
@@ -63,7 +64,11 @@ export class PcbAssemblyComponentMeshBuilder {
         const meshes = []
         const placements = PcbAssemblyComponentMeshBuilder.#array(
             sceneDescription?.externalPlacements
-        ).filter((placement) => placement?.externalModel)
+        ).filter(
+            (placement) =>
+                placement?.externalModel &&
+                placement?.renderAsBoundingBox !== true
+        )
 
         for (
             let placementIndex = 0;
@@ -182,37 +187,108 @@ export class PcbAssemblyComponentMeshBuilder {
                     includeModels
                 )
             )
-            .map((component, index) =>
-                PcbAssemblyMeshUtils.transformMesh(
-                    {
-                        ...PcbAssemblyMeshUtils.box(
-                            'component-' +
-                                PcbAssemblyMeshUtils.safeName(
-                                    component?.designator ||
-                                        'fallback-' + (index + 1)
-                                ) +
-                                '-body',
-                            {
-                                width:
-                                    Number(component?.body?.sizeMil?.width) ||
-                                    20,
-                                depth:
-                                    Number(component?.body?.sizeMil?.depth) ||
-                                    20,
-                                height:
-                                    Number(component?.body?.sizeMil?.height) ||
-                                    10,
-                                color: COMPONENT_COLOR
-                            }
-                        ),
-                        ...PcbAssemblyComponentMeshBuilder.#placementOpacity(
-                            component,
-                            {}
-                        )
-                    },
-                    component
+            .flatMap((component, index) =>
+                PcbAssemblyComponentMeshBuilder.#fallbackComponentMeshes(
+                    component,
+                    index
                 )
             )
+    }
+
+    /**
+     * Builds all fallback meshes for one component.
+     * @param {object} component Component scene entry.
+     * @param {number} index Component index.
+     * @returns {object[]}
+     */
+    static #fallbackComponentMeshes(component, index) {
+        const designator = PcbAssemblyMeshUtils.safeName(
+            component?.designator || 'fallback-' + (index + 1)
+        )
+        const opacity = PcbAssemblyComponentMeshBuilder.#placementOpacity(
+            component,
+            {}
+        )
+        const bodySize = component?.body?.sizeMil || {}
+        const localMeshes = [
+            PcbAssemblyComponentMeshBuilder.#fallbackBodyMesh(
+                'component-' + designator + '-body',
+                component?.body,
+                bodySize
+            ),
+            ...PcbAssemblyComponentMeshBuilder.#fallbackAccessoryMeshes(
+                designator,
+                component
+            )
+        ]
+
+        return localMeshes.map((mesh) =>
+            PcbAssemblyMeshUtils.transformMesh(
+                {
+                    ...mesh,
+                    ...opacity
+                },
+                component
+            )
+        )
+    }
+
+    /**
+     * Builds package accessory meshes in placement-local orientation.
+     * @param {string} designator Sanitized component designator.
+     * @param {object} component Component scene entry.
+     * @returns {object[]}
+     */
+    static #fallbackAccessoryMeshes(designator, component) {
+        const mirrorZ =
+            String(component?.mountSide || 'top').toLowerCase() === 'bottom'
+
+        return PcbScene3dFootprintBodyBuilder.accessoryBoxes(
+            component?.body
+        ).map((box) =>
+            PcbAssemblyMeshUtils.box(
+                'component-' + designator + '-' + box.role + '-' + box.index,
+                {
+                    x: box.x,
+                    y: box.y,
+                    z: mirrorZ ? -Number(box.z || 0) : box.z,
+                    width: box.width,
+                    depth: box.depth,
+                    height: box.height,
+                    color: box.color
+                }
+            )
+        )
+    }
+
+    /**
+     * Builds one procedural fallback body mesh.
+     * @param {string} name Mesh name.
+     * @param {object | undefined} body Component body descriptor.
+     * @param {object} bodySize Body size in mils.
+     * @returns {object}
+     */
+    static #fallbackBodyMesh(name, body, bodySize) {
+        const width = Number(bodySize?.width) || 20
+        const depth = Number(bodySize?.depth) || 20
+        const height = Number(bodySize?.height) || 10
+        if (
+            body?.family === 'test-point' ||
+            body?.family === 'radial-capacitor'
+        ) {
+            return PcbAssemblyMeshUtils.cylinder(name, {
+                radius: Math.max(width, depth) / 2,
+                height,
+                color: COMPONENT_COLOR
+            })
+        }
+
+        return PcbAssemblyMeshUtils.box(name, {
+            width,
+            depth,
+            height,
+            color: COMPONENT_COLOR
+        })
     }
 
     /**
@@ -229,6 +305,10 @@ export class PcbAssemblyComponentMeshBuilder {
     ) {
         if (!component || component.renderFallbackBody === false) {
             return false
+        }
+
+        if (component.renderFallbackBody === true) {
+            return Boolean(component?.body?.sizeMil)
         }
 
         const designator = String(component?.designator || '').trim()

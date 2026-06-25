@@ -65,7 +65,13 @@ Methods:
   host `buildScene` callbacks.
 - `build(circuitJson, options?)`: returns a runtime-ready scene description.
   `options.modelUrlResolver` can attach caller-owned URL resolution metadata to
-  `cad_component` external models without fetching them.
+  `cad_component` external models without fetching them. `projectBaseUrl`
+  resolves relative model URLs and package-style `node_modules/...` model paths,
+  `drawFauxBoard: true` generates a board around component bounds when no board
+  or panel exists, `boardDrillQuality` controls generated circular
+  drill/cutout sampling, and `showPcbNotes: true` renders note, fabrication,
+  and courtyard artwork as silkscreen detail. `showPcbPaste: true` renders
+  direct solder-paste artwork as a separate top/bottom overlay.
 
 `PcbScene3dController` and `PcbScene3dRuntime` call this adapter automatically
 when they receive direct CircuitJSON input. See
@@ -130,7 +136,10 @@ Workers respond with `scene3d:success` and `sceneDescription`, or
 Builds export meshes from a prepared scene description. `options.modelMeshLoader`
 can provide external model meshes, `options.includeModels: false` skips external
 model loading, and `options.renderFallbackBodies: false` disables procedural
-component bodies for unresolved models.
+component bodies for unresolved models. Placements with `renderAsBoundingBox:
+true` are exported as procedural component bodies instead of loading the
+referenced model. Optional solder-paste detail exports as distinct paste meshes
+when present in `sceneDescription.detail.paste`.
 
 ### `PcbAssemblyGltfWriter.write(options?)`
 
@@ -143,9 +152,32 @@ Options:
   `color`, optional `opacity`, and optional board `texture` data URIs.
 - `format`: `gltf` or `glb`.
 - `binary`: optional boolean equivalent to `format: 'glb'`.
+- `includeSceneMetadata`: when `true`, emits a default camera and punctual light
+  for third-party GLTF viewers.
 
 Returns a GLTF JSON object for `gltf` and a `Uint8Array` for `glb`. RGBA colors
-or opacity values below `1` are emitted as blended GLTF materials.
+or opacity values below `1` are emitted as blended GLTF materials. Mesh
+`vertexColors` are exported as `COLOR_0`, and mesh `material` metadata is
+preserved in material extras.
+
+### `new PcbAssemblyModelMeshLoader(options?)`
+
+Loads STEP, WRL, STL, OBJ, GLTF, and GLB external models into assembly meshes.
+By default the loader only reads embedded payloads, session files, and provided
+byte buffers. Network loading is opt-in through either an injected `fetch`
+function or `allowNetworkModelFetch: true`. Remote `.gltf` buffer sidecars are
+resolved relative to the `.gltf` URL and use the same fetch, auth-header,
+timeout, and cache policy as the top-level model.
+
+Options:
+
+- `stepLoader`: custom STEP loader.
+- `fetch`: host-provided fetch function for resolved model URLs.
+- `allowNetworkModelFetch`: use `globalThis.fetch` for `resolvedUrl` or
+  `sourceUrl` models when no local payload is present.
+- `authHeaders`: headers forwarded to network model requests.
+- `fetchTimeoutMs`: abort timeout for network model requests.
+- `modelCache`: optional cache map keyed by resolved model URL.
 
 ## Model Archive Export
 

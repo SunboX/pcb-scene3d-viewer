@@ -50,10 +50,20 @@ export class PcbScene3dModelSeatingPolicy {
                 options?.placement
             )
         ) {
+            PcbScene3dModelSeatingPolicy.#keepBottomGeometryBelowBoardFace(
+                THREE,
+                modelGroup,
+                options?.placement
+            )
             return
         }
 
         PcbScene3dModelSeatingPolicy.#preferDominantZeroBodyPlane(
+            THREE,
+            modelGroup,
+            options?.placement
+        )
+        PcbScene3dModelSeatingPolicy.#keepBottomGeometryBelowBoardFace(
             THREE,
             modelGroup,
             options?.placement
@@ -272,6 +282,54 @@ export class PcbScene3dModelSeatingPolicy {
 
         modelGroup.position.z = 0
         modelGroup.updateMatrixWorld?.(true)
+    }
+
+    /**
+     * Keeps bottom-side models entirely on the underside after the mount rig
+     * mirrors local Z around the board face.
+     * @param {any} THREE Three.js namespace.
+     * @param {any} modelGroup Loaded model group.
+     * @param {object | null | undefined} placement Current placement.
+     * @returns {void}
+     */
+    static #keepBottomGeometryBelowBoardFace(THREE, modelGroup, placement) {
+        if (
+            String(placement?.mountSide || '').toLowerCase() !== 'bottom' ||
+            !modelGroup?.position
+        ) {
+            return
+        }
+
+        const values = PcbScene3dModelSeatingPolicy.#collectTransformedVertexZ(
+            THREE,
+            modelGroup
+        )
+        const minZ = PcbScene3dModelSeatingPolicy.#resolveMinZ(values)
+        const currentMinZ = minZ + Number(modelGroup.position.z || 0)
+
+        if (!Number.isFinite(currentMinZ) || currentMinZ >= 0) {
+            return
+        }
+
+        modelGroup.position.z -= currentMinZ
+        modelGroup.updateMatrixWorld?.(true)
+    }
+
+    /**
+     * Resolves the minimum finite Z from a vertex collection.
+     * @param {number[]} values Z values.
+     * @returns {number}
+     */
+    static #resolveMinZ(values) {
+        let minZ = Number.POSITIVE_INFINITY
+
+        ;(Array.isArray(values) ? values : []).forEach((value) => {
+            if (Number.isFinite(value)) {
+                minZ = Math.min(minZ, value)
+            }
+        })
+
+        return minZ
     }
 
     /**

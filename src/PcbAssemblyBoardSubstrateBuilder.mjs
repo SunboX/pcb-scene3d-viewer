@@ -1,9 +1,14 @@
 import earcut from 'earcut'
 import { PcbAssemblyMeshUtils } from './PcbAssemblyMeshUtils.mjs'
 
-const MAX_HOLE_POINTS = 48
+const MAX_HOLE_POINTS = 64
 const MIN_HOLE_POINTS = 8
 const GEOMETRY_EPSILON = 0.001
+const DRILL_QUALITY_POINTS = {
+    low: 16,
+    medium: 24,
+    high: 48
+}
 
 /**
  * Builds PCB substrate meshes, including through-board drill cutouts.
@@ -228,12 +233,16 @@ export class PcbAssemblyBoardSubstrateBuilder {
      */
     static #primitiveHoleLoops(sceneDescription) {
         const detail = sceneDescription?.detail || {}
+        const pointCount =
+            PcbAssemblyBoardSubstrateBuilder.#drillQualityPointCount(
+                detail?.drillQuality
+            )
         return [
             ...PcbAssemblyBoardSubstrateBuilder.#array(detail.pads).map((pad) =>
-                PcbAssemblyBoardSubstrateBuilder.#padHoleLoop(pad)
+                PcbAssemblyBoardSubstrateBuilder.#padHoleLoop(pad, pointCount)
             ),
             ...PcbAssemblyBoardSubstrateBuilder.#array(detail.vias).map((via) =>
-                PcbAssemblyBoardSubstrateBuilder.#viaHoleLoop(via)
+                PcbAssemblyBoardSubstrateBuilder.#viaHoleLoop(via, pointCount)
             )
         ].filter(Boolean)
     }
@@ -241,9 +250,10 @@ export class PcbAssemblyBoardSubstrateBuilder {
     /**
      * Builds a fallback pad drill loop.
      * @param {object} pad Pad primitive.
+     * @param {number} pointCount Circular drill point count.
      * @returns {number[][] | null}
      */
-    static #padHoleLoop(pad) {
+    static #padHoleLoop(pad, pointCount) {
         const diameter = PcbAssemblyBoardSubstrateBuilder.#firstPositive([
             pad?.holeDiameter,
             pad?.drillDiameter,
@@ -256,8 +266,8 @@ export class PcbAssemblyBoardSubstrateBuilder {
             return null
         }
 
-        const x = Number(pad?.x)
-        const y = Number(pad?.y)
+        const x = Number(pad?.x) + Number(pad?.holeOffsetX || 0)
+        const y = Number(pad?.y) + Number(pad?.holeOffsetY || 0)
         if (!Number.isFinite(x) || !Number.isFinite(y)) {
             return null
         }
@@ -283,15 +293,16 @@ export class PcbAssemblyBoardSubstrateBuilder {
             )
         }
 
-        return PcbAssemblyMeshUtils.circlePoints(x, y, diameter / 2, 24)
+        return PcbAssemblyMeshUtils.circlePoints(x, y, diameter / 2, pointCount)
     }
 
     /**
      * Builds a fallback via drill loop.
      * @param {object} via Via primitive.
+     * @param {number} pointCount Circular drill point count.
      * @returns {number[][] | null}
      */
-    static #viaHoleLoop(via) {
+    static #viaHoleLoop(via, pointCount) {
         const diameter = PcbAssemblyBoardSubstrateBuilder.#firstPositive([
             via?.holeDiameter,
             via?.drillDiameter,
@@ -302,7 +313,7 @@ export class PcbAssemblyBoardSubstrateBuilder {
         const y = Number(via?.y)
 
         return diameter && Number.isFinite(x) && Number.isFinite(y)
-            ? PcbAssemblyMeshUtils.circlePoints(x, y, diameter / 2, 24)
+            ? PcbAssemblyMeshUtils.circlePoints(x, y, diameter / 2, pointCount)
             : null
     }
 
@@ -474,6 +485,16 @@ export class PcbAssemblyBoardSubstrateBuilder {
         }
 
         return 0
+    }
+
+    /**
+     * Resolves circular drill sampling from scene detail quality metadata.
+     * @param {unknown} value Candidate quality.
+     * @returns {number}
+     */
+    static #drillQualityPointCount(value) {
+        const quality = String(value || 'medium').toLowerCase()
+        return DRILL_QUALITY_POINTS[quality] || DRILL_QUALITY_POINTS.medium
     }
 
     /**
