@@ -1,4 +1,6 @@
 import { PcbAssemblyExportCoordinateFrame } from './PcbAssemblyExportCoordinateFrame.mjs'
+import { PcbAssemblyGltfImageDataUri } from './PcbAssemblyGltfImageDataUri.mjs'
+import { PcbAssemblyGltfSceneCamera } from './PcbAssemblyGltfSceneCamera.mjs'
 import { PcbAssemblyPolygonTriangulator } from './PcbAssemblyPolygonTriangulator.mjs'
 
 const FLOAT_COMPONENT = 5126
@@ -17,7 +19,7 @@ const BIN_CHUNK_TYPE = 0x004e4942
 export class PcbAssemblyGltfWriter {
     /**
      * Writes a GLTF or GLB assembly document.
-     * @param {{ name?: string, meshes?: object[], format?: string, binary?: boolean, includeSceneMetadata?: boolean }} assembly Assembly data.
+     * @param {{ name?: string, meshes?: object[], format?: string, binary?: boolean, includeSceneMetadata?: boolean, sceneCameraPreset?: string, sceneCameraAspectRatio?: number, sceneCameraFovDegrees?: number }} assembly Assembly data.
      * @returns {object | Uint8Array}
      */
     static write(assembly = {}) {
@@ -32,7 +34,7 @@ export class PcbAssemblyGltfWriter {
 
     /**
      * Builds the GLTF JSON tree and shared binary buffer.
-     * @param {{ name?: string, meshes?: object[], includeSceneMetadata?: boolean }} assembly Assembly data.
+     * @param {{ name?: string, meshes?: object[], includeSceneMetadata?: boolean, sceneCameraPreset?: string, sceneCameraAspectRatio?: number, sceneCameraFovDegrees?: number }} assembly Assembly data.
      * @param {boolean} binary Whether the document will be embedded in GLB.
      * @returns {{ gltf: object, buffer: Uint8Array }}
      */
@@ -46,7 +48,22 @@ export class PcbAssemblyGltfWriter {
             PcbAssemblyGltfWriter.#appendMesh(state, mesh)
         })
         if (assembly?.includeSceneMetadata === true) {
-            PcbAssemblyGltfWriter.#appendSceneMetadata(state, sourceMeshes)
+            PcbAssemblyGltfWriter.#appendSceneMetadata(
+                state,
+                sourceMeshes,
+                assembly
+            )
+        }
+        if (binary) {
+            state.images = PcbAssemblyGltfImageDataUri.pack(
+                state.images,
+                (bytes) =>
+                    PcbAssemblyGltfWriter.#appendBufferView(
+                        state,
+                        bytes,
+                        undefined
+                    )
+            )
         }
 
         const buffer = PcbAssemblyGltfWriter.#concatBuffer(state.bufferParts)
@@ -136,41 +153,23 @@ export class PcbAssemblyGltfWriter {
      * Appends default camera and light nodes from scene bounds.
      * @param {object} state Writer state.
      * @param {object[]} meshes Source meshes.
+     * @param {{ sceneCameraPreset?: string, sceneCameraAspectRatio?: number, sceneCameraFovDegrees?: number }} options Scene metadata options.
      * @returns {void}
      */
-    static #appendSceneMetadata(state, meshes) {
+    static #appendSceneMetadata(state, meshes, options) {
         const bounds = PcbAssemblyGltfWriter.#sceneBounds(meshes)
-        const center = [
-            (bounds.min[0] + bounds.max[0]) / 2,
-            (bounds.min[1] + bounds.max[1]) / 2,
-            (bounds.min[2] + bounds.max[2]) / 2
-        ]
-        const span = Math.max(
-            bounds.max[0] - bounds.min[0],
-            bounds.max[1] - bounds.min[1],
-            bounds.max[2] - bounds.min[2],
-            1
-        )
-        const distance = span * 2.2
+        const camera = PcbAssemblyGltfSceneCamera.resolve(bounds, options)
         const cameraIndex = state.cameras.length
         state.cameras.push({
             name: 'Default Camera',
             type: 'perspective',
-            perspective: {
-                yfov: 0.7,
-                znear: Math.max(distance / 1000, 0.01),
-                zfar: distance * 10
-            }
+            perspective: camera.perspective
         })
         state.nodes.push({
             name: 'Default Camera',
             camera: cameraIndex,
-            translation: [
-                center[0] + distance * 0.65,
-                center[1] + distance * 0.45,
-                center[2] + distance
-            ],
-            rotation: [-0.260009, 0.279848, 0.076342, 0.920364]
+            translation: camera.position,
+            rotation: camera.rotation
         })
 
         const lightIndex = state.lights.length
@@ -182,9 +181,9 @@ export class PcbAssemblyGltfWriter {
         state.nodes.push({
             name: 'Key Light',
             translation: [
-                center[0] - distance * 0.35,
-                center[1] + distance,
-                center[2] + distance
+                camera.center[0] - camera.distance * 0.35,
+                camera.center[1] + camera.distance,
+                camera.center[2] + camera.distance
             ],
             extensions: {
                 KHR_lights_punctual: {
@@ -513,7 +512,7 @@ export class PcbAssemblyGltfWriter {
      * Adds one aligned buffer view to the document.
      * @param {object} state Writer state.
      * @param {Uint8Array} bytes Binary data.
-     * @param {number} target Buffer target.
+     * @param {number | undefined} target Buffer target.
      * @returns {number}
      */
     static #appendBufferView(state, bytes, target) {
@@ -526,8 +525,10 @@ export class PcbAssemblyGltfWriter {
         const bufferView = {
             buffer: 0,
             byteOffset: state.byteLength,
-            byteLength: bytes.byteLength,
-            target
+            byteLength: bytes.byteLength
+        }
+        if (Number.isInteger(target)) {
+            bufferView.target = target
         }
         state.bufferViews.push(bufferView)
         state.bufferParts.push(bytes)

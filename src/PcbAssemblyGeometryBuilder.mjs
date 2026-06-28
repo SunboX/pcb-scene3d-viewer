@@ -3,6 +3,7 @@ import { PcbAssemblyComponentMeshBuilder } from './PcbAssemblyComponentMeshBuild
 import { PcbAssemblyFillGeometryResolver } from './PcbAssemblyFillGeometryResolver.mjs'
 import { PcbAssemblyMeshUtils } from './PcbAssemblyMeshUtils.mjs'
 import { PcbAssemblyPadMeshBuilder } from './PcbAssemblyPadMeshBuilder.mjs'
+import { PcbScene3dExternalPlacementDefaults } from './PcbScene3dExternalPlacementDefaults.mjs'
 
 const COPPER_THICKNESS_MIL = 2.2
 const SILKSCREEN_THICKNESS_MIL = 0.8
@@ -23,23 +24,26 @@ export class PcbAssemblyGeometryBuilder {
      * @returns {Promise<{ meshes: object[], diagnostics: object[] }>}
      */
     static async build(sceneDescription, options = {}) {
+        const renderSceneDescription =
+            PcbScene3dExternalPlacementDefaults.apply(sceneDescription)
         const diagnostics = []
         const progress = options.progress || null
-        const boardMeshes =
-            PcbAssemblyGeometryBuilder.#buildBoardMeshes(sceneDescription)
+        const boardMeshes = PcbAssemblyGeometryBuilder.#buildBoardMeshes(
+            renderSceneDescription
+        )
         await progress?.advance?.(1, 'Building board substrate')
         const copperMeshes =
             await PcbAssemblyGeometryBuilder.#buildCopperMeshes(
-                sceneDescription,
+                renderSceneDescription,
                 progress
             )
         const silkscreenMeshes =
             await PcbAssemblyGeometryBuilder.#buildSilkscreenMeshes(
-                sceneDescription,
+                renderSceneDescription,
                 progress
             )
         const pasteMeshes = await PcbAssemblyGeometryBuilder.#buildPasteMeshes(
-            sceneDescription,
+            renderSceneDescription,
             progress
         )
         const pcbMeshes = [
@@ -49,7 +53,7 @@ export class PcbAssemblyGeometryBuilder {
             ...silkscreenMeshes
         ]
         const componentResult = await PcbAssemblyComponentMeshBuilder.build(
-            sceneDescription,
+            renderSceneDescription,
             options,
             progress
         )
@@ -57,7 +61,9 @@ export class PcbAssemblyGeometryBuilder {
         const meshes = [
             ...PcbAssemblyGeometryBuilder.#translateMeshes(
                 pcbMeshes,
-                PcbAssemblyGeometryBuilder.#boardLocalOffset(sceneDescription)
+                PcbAssemblyGeometryBuilder.#boardLocalOffset(
+                    renderSceneDescription
+                )
             ),
             ...componentResult.meshes
         ]

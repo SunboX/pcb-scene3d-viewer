@@ -285,3 +285,61 @@ test('PcbScene3dRenderGroupVisibility hides fallback group for disabled unresolv
     assert.equal(unresolvedFallback.visible, true)
     assert.equal(representedFallback.visible, false)
 })
+
+test('PcbScene3dRenderGroupVisibility keeps authored static bodies when fallbacks are disabled', () => {
+    const groups = new Map(
+        [
+            'board',
+            'silkscreen',
+            'copper',
+            'fallback-bodies',
+            'static-bodies',
+            'external-models'
+        ].map((name) => [name, new FakeGroup()])
+    )
+
+    PcbScene3dRenderGroupVisibility.apply({
+        groups,
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': false,
+            copper: true
+        },
+        fallbackBodyRoots: new Map(),
+        loadedExternalModelDesignators: new Set(),
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(groups.get('fallback-bodies').visible, false)
+    assert.equal(groups.get('static-bodies').visible, true)
+
+    PcbScene3dRenderGroupVisibility.apply({
+        groups,
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': true,
+            copper: true
+        },
+        fallbackBodyRoots: new Map(),
+        loadedExternalModelDesignators: new Set(),
+        hasLoadedBoardAssemblyModel: false
+    })
+
+    assert.equal(groups.get('fallback-bodies').visible, true)
+    assert.equal(groups.get('static-bodies').visible, true)
+
+    PcbScene3dRenderGroupVisibility.apply({
+        groups,
+        toggles: {
+            'external-models': true,
+            'fallback-bodies': true,
+            copper: true
+        },
+        fallbackBodyRoots: new Map(),
+        loadedExternalModelDesignators: new Set(),
+        hasLoadedBoardAssemblyModel: true
+    })
+
+    assert.equal(groups.get('fallback-bodies').visible, false)
+    assert.equal(groups.get('static-bodies').visible, true)
+})

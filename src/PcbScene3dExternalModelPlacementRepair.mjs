@@ -1,4 +1,6 @@
-import { PcbScene3dExternalModelCenteringPolicy } from './PcbScene3dExternalModelCenteringPolicy.mjs'
+import { PcbScene3dExternalModelPadFallbackCenterRepair } from './PcbScene3dExternalModelPadFallbackCenterRepair.mjs'
+import { PcbScene3dExternalModelOwnerAnchoredConnectorContactRowRepair } from './PcbScene3dExternalModelOwnerAnchoredConnectorContactRowRepair.mjs'
+import { PcbScene3dExternalModelRepeatedBoundsCenterRepair } from './PcbScene3dExternalModelRepeatedBoundsCenterRepair.mjs'
 
 /**
  * Repairs loaded external-model placements using normalized scene metadata.
@@ -15,7 +17,6 @@ export class PcbScene3dExternalModelPlacementRepair {
         '#333333',
         '#3f3f3f'
     ])
-    static #MIN_CENTER_ERROR_MIL = 1
     static #MIN_TERMINAL_SIZE_MIL = 1
     static #SOURCE_ORIGIN_SHIFT_EPSILON_MIL = 0.01
     static #SOURCE_Z_DEPTH_MIN_RATIO = 1.5
@@ -48,13 +49,25 @@ export class PcbScene3dExternalModelPlacementRepair {
             placement,
             placementGroup
         )
+        PcbScene3dExternalModelOwnerAnchoredConnectorContactRowRepair.apply(
+            THREE,
+            sceneDescription,
+            placement,
+            placementGroup
+        )
+        PcbScene3dExternalModelRepeatedBoundsCenterRepair.apply(
+            THREE,
+            sceneDescription,
+            placement,
+            placementGroup
+        )
         PcbScene3dExternalModelPlacementRepair.#repairAsymmetricLeadYaw(
             THREE,
             sceneDescription,
             placement,
             placementGroup
         )
-        PcbScene3dExternalModelPlacementRepair.#repairPadFallbackCenter(
+        PcbScene3dExternalModelPadFallbackCenterRepair.apply(
             THREE,
             sceneDescription,
             placement,
@@ -329,82 +342,6 @@ export class PcbScene3dExternalModelPlacementRepair {
         return (
             String(placement?.projection?.source || '').toLowerCase() ===
                 'pad-fallback' && family === 'sot'
-        )
-    }
-
-    /**
-     * Re-centers pad-fallback models after package yaw correction.
-     * @param {any} THREE Three.js namespace.
-     * @param {object | null | undefined} sceneDescription Scene description.
-     * @param {object | null | undefined} placement External placement.
-     * @param {any} placementGroup Rendered placement root.
-     * @returns {void}
-     */
-    static #repairPadFallbackCenter(
-        THREE,
-        sceneDescription,
-        placement,
-        placementGroup
-    ) {
-        const component =
-            PcbScene3dExternalModelPlacementRepair.#resolveComponent(
-                sceneDescription,
-                placement
-            )
-        if (
-            !component ||
-            !placementGroup?.position ||
-            !PcbScene3dExternalModelCenteringPolicy.shouldCenterOnOwner(
-                placement
-            ) ||
-            !THREE?.Box3
-        ) {
-            return
-        }
-
-        placementGroup.parent?.updateWorldMatrix?.(true, false)
-        placementGroup.updateMatrixWorld?.(true)
-        const bounds = new THREE.Box3().setFromObject(placementGroup)
-        if (bounds.isEmpty()) {
-            return
-        }
-
-        const center = PcbScene3dExternalModelPlacementRepair.#toParentFrame(
-            THREE,
-            bounds.getCenter(new THREE.Vector3()),
-            placementGroup
-        )
-        const target = component.positionMil || {}
-        const dx = Number(target.x || 0) - center.x
-        const dy = Number(target.y || 0) - center.y
-        if (
-            Math.hypot(dx, dy) <
-            PcbScene3dExternalModelPlacementRepair.#MIN_CENTER_ERROR_MIL
-        ) {
-            return
-        }
-
-        placementGroup.position.x += dx
-        placementGroup.position.y += dy
-        placementGroup.userData.scene3dPadFallbackCenterRepair = true
-        placementGroup.updateMatrixWorld?.(true)
-    }
-
-    /**
-     * Converts a world-space point into the placement parent frame.
-     * @param {any} THREE Three.js namespace.
-     * @param {any} center World-space center.
-     * @param {any} placementGroup Rendered placement root.
-     * @returns {any}
-     */
-    static #toParentFrame(THREE, center, placementGroup) {
-        const parent = placementGroup?.parent
-        if (!THREE?.Matrix4 || !parent?.matrixWorld) {
-            return center
-        }
-
-        return center.applyMatrix4(
-            new THREE.Matrix4().copy(parent.matrixWorld).invert()
         )
     }
 

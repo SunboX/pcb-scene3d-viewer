@@ -10,17 +10,87 @@ export class PcbScene3dDrillCutoutFilter {
      * @returns {{ x: number, y: number }[][]}
      */
     static removeNestedCutouts(cutouts) {
-        const validCutouts = (Array.isArray(cutouts) ? cutouts : []).filter(
-            (cutout) => Array.isArray(cutout) && cutout.length >= 3
-        )
+        const validCutoutInfos =
+            PcbScene3dDrillCutoutFilter.#buildPolygonInfos(cutouts)
 
-        return validCutouts.filter(
-            (cutout, index) =>
-                !PcbScene3dDrillCutoutFilter.#isNestedCutout(
-                    cutout,
-                    index,
-                    validCutouts
-                )
+        return validCutoutInfos
+            .filter(
+                (cutoutInfo) =>
+                    !PcbScene3dDrillCutoutFilter.#isNestedCutoutInfo(
+                        cutoutInfo,
+                        validCutoutInfos
+                    )
+            )
+            .map((cutoutInfo) => cutoutInfo.source)
+    }
+
+    /**
+     * Builds reusable polygon metadata for valid polygons.
+     * @param {{ x: number, y: number }[][]} polygons Source polygons.
+     * @returns {{ source: { x: number, y: number }[], points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, centroid: { x: number, y: number }, area: number, index: number }[]}
+     */
+    static #buildPolygonInfos(polygons) {
+        return (Array.isArray(polygons) ? polygons : [])
+            .filter((polygon) => Array.isArray(polygon) && polygon.length >= 3)
+            .map((polygon, index) =>
+                PcbScene3dDrillCutoutFilter.#buildPolygonInfo(polygon, index)
+            )
+    }
+
+    /**
+     * Builds reusable numeric metadata for one polygon.
+     * @param {{ x: number, y: number }[]} polygon Source polygon.
+     * @param {number} index Polygon index among valid polygons.
+     * @returns {{ source: { x: number, y: number }[], points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, centroid: { x: number, y: number }, area: number, index: number }}
+     */
+    static #buildPolygonInfo(polygon, index) {
+        const points = polygon.map((point) => ({
+            x: Number(point?.x || 0),
+            y: Number(point?.y || 0)
+        }))
+        const bounds = {
+            minX: Infinity,
+            maxX: -Infinity,
+            minY: Infinity,
+            maxY: -Infinity
+        }
+        let area = 0
+        let totalX = 0
+        let totalY = 0
+
+        points.forEach((point, pointIndex) => {
+            const next = points[(pointIndex + 1) % points.length]
+
+            bounds.minX = Math.min(bounds.minX, point.x)
+            bounds.maxX = Math.max(bounds.maxX, point.x)
+            bounds.minY = Math.min(bounds.minY, point.y)
+            bounds.maxY = Math.max(bounds.maxY, point.y)
+            totalX += point.x
+            totalY += point.y
+            area += point.x * next.y - next.x * point.y
+        })
+
+        return {
+            source: polygon,
+            points,
+            bounds,
+            centroid: {
+                x: totalX / Math.max(points.length, 1),
+                y: totalY / Math.max(points.length, 1)
+            },
+            area: Math.abs(area) / 2,
+            index
+        }
+    }
+
+    /**
+     * Maps polygon source arrays to their reusable metadata.
+     * @param {{ source: { x: number, y: number }[] }[]} polygonInfos Polygon metadata.
+     * @returns {Map<{ x: number, y: number }[], object>}
+     */
+    static #buildPolygonInfoMap(polygonInfos) {
+        return new Map(
+            polygonInfos.map((polygonInfo) => [polygonInfo.source, polygonInfo])
         )
     }
 
@@ -63,10 +133,25 @@ export class PcbScene3dDrillCutoutFilter {
             }
         }
 
+        const cutoutInfos =
+            PcbScene3dDrillCutoutFilter.#buildPolygonInfos(cutouts)
+        const holeInfos = PcbScene3dDrillCutoutFilter.#buildPolygonInfos(holes)
+        const cutoutInfoMap =
+            PcbScene3dDrillCutoutFilter.#buildPolygonInfoMap(cutoutInfos)
+        const holeInfoMap =
+            PcbScene3dDrillCutoutFilter.#buildPolygonInfoMap(holeInfos)
+
         const authoredHoles = []
         const drillHoles = []
         for (const hole of holes) {
-            if (PcbScene3dDrillCutoutFilter.#isDrillHole(hole, cutouts)) {
+            const holeInfo = holeInfoMap.get(hole)
+            if (
+                holeInfo &&
+                PcbScene3dDrillCutoutFilter.#isDrillHoleInfo(
+                    holeInfo,
+                    cutoutInfos
+                )
+            ) {
                 drillHoles.push(hole)
             } else {
                 authoredHoles.push(hole)
@@ -76,110 +161,88 @@ export class PcbScene3dDrillCutoutFilter {
         return {
             authoredHoles,
             drillHoles,
-            uncoveredCutouts: cutouts.filter(
-                (cutout) =>
-                    !holes.some((hole) =>
-                        PcbScene3dDrillCutoutFilter.#doesHoleCoverCutout(
-                            hole,
-                            cutout
+            uncoveredCutouts: cutouts.filter((cutout) => {
+                const cutoutInfo = cutoutInfoMap.get(cutout)
+                return (
+                    !cutoutInfo ||
+                    !holeInfos.some((holeInfo) =>
+                        PcbScene3dDrillCutoutFilter.#doesHoleInfoCoverCutout(
+                            holeInfo,
+                            cutoutInfo
                         )
                     )
-            )
+                )
+            })
         }
     }
 
     /**
      * Returns true when another cutout fully covers this one.
-     * @param {{ x: number, y: number }[]} cutout Cutout under test.
-     * @param {number} index Cutout index.
-     * @param {{ x: number, y: number }[][]} cutouts All cutouts.
+     * @param {{ points: { x: number, y: number }[], bounds: object, centroid: { x: number, y: number }, area: number, index: number }} cutoutInfo Cutout under test.
+     * @param {{ points: { x: number, y: number }[], bounds: object, centroid: { x: number, y: number }, area: number, index: number }[]} cutoutInfos All cutouts.
      * @returns {boolean}
      */
-    static #isNestedCutout(cutout, index, cutouts) {
-        const area = PcbScene3dDrillCutoutFilter.#absolutePolygonArea(cutout)
-
-        return cutouts.some((otherCutout, otherIndex) => {
-            if (otherIndex === index) {
+    static #isNestedCutoutInfo(cutoutInfo, cutoutInfos) {
+        return cutoutInfos.some((otherCutoutInfo) => {
+            if (otherCutoutInfo.index === cutoutInfo.index) {
                 return false
             }
 
             if (
-                !PcbScene3dDrillCutoutFilter.#doesHoleCoverCutout(
-                    otherCutout,
-                    cutout
+                !PcbScene3dDrillCutoutFilter.#doesHoleInfoCoverCutout(
+                    otherCutoutInfo,
+                    cutoutInfo
                 )
             ) {
                 return false
             }
 
-            const otherArea =
-                PcbScene3dDrillCutoutFilter.#absolutePolygonArea(otherCutout)
-
             return (
-                otherArea >
-                    area + PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON ||
-                (Math.abs(otherArea - area) <=
+                otherCutoutInfo.area >
+                    cutoutInfo.area +
+                        PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON ||
+                (Math.abs(otherCutoutInfo.area - cutoutInfo.area) <=
                     PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON &&
-                    otherIndex < index)
+                    otherCutoutInfo.index < cutoutInfo.index)
             )
         })
     }
 
     /**
-     * Resolves the absolute area of a polygon.
-     * @param {{ x: number, y: number }[]} points Polygon points.
-     * @returns {number}
-     */
-    static #absolutePolygonArea(points) {
-        let area = 0
-
-        for (let index = 0; index < points.length; index += 1) {
-            const current = points[index]
-            const next = points[(index + 1) % points.length]
-            area +=
-                Number(current.x || 0) * Number(next.y || 0) -
-                Number(next.x || 0) * Number(current.y || 0)
-        }
-
-        return Math.abs(area) / 2
-    }
-
-    /**
      * Returns true when a fill hole represents one known drill cutout.
-     * @param {{ x: number, y: number }[]} hole
-     * @param {{ x: number, y: number }[][]} drillCutouts
+     * @param {{ points: { x: number, y: number }[], bounds: object, centroid: { x: number, y: number }, area: number, index: number }} holeInfo Fill-hole metadata.
+     * @param {{ points: { x: number, y: number }[], bounds: object, centroid: { x: number, y: number }, area: number, index: number }[]} drillCutoutInfos Drill-cutout metadata.
      * @returns {boolean}
      */
-    static #isDrillHole(hole, drillCutouts) {
-        return drillCutouts.some((cutout) =>
-            PcbScene3dDrillCutoutFilter.#doesHoleCoverCutout(hole, cutout)
+    static #isDrillHoleInfo(holeInfo, drillCutoutInfos) {
+        return drillCutoutInfos.some((cutoutInfo) =>
+            PcbScene3dDrillCutoutFilter.#doesHoleInfoCoverCutout(
+                holeInfo,
+                cutoutInfo
+            )
         )
     }
 
     /**
      * Returns true when an authored hole already clears one drill cutout.
-     * @param {{ x: number, y: number }[]} hole
-     * @param {{ x: number, y: number }[]} cutout
+     * @param {{ points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }} holeInfo Fill-hole metadata.
+     * @param {{ points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, centroid: { x: number, y: number } }} cutoutInfo Drill-cutout metadata.
      * @returns {boolean}
      */
-    static #doesHoleCoverCutout(hole, cutout) {
+    static #doesHoleInfoCoverCutout(holeInfo, cutoutInfo) {
         return (
-            Array.isArray(hole) &&
-            hole.length >= 3 &&
-            Array.isArray(cutout) &&
-            cutout.length >= 3 &&
             PcbScene3dDrillCutoutFilter.#boundsContain(
-                PcbScene3dDrillCutoutFilter.#resolvePolygonBounds(hole),
-                PcbScene3dDrillCutoutFilter.#resolvePolygonBounds(cutout)
+                holeInfo.bounds,
+                cutoutInfo.bounds
             ) &&
             PcbScene3dDrillCutoutFilter.#isPointInsideOrOnPolygon(
-                PcbScene3dDrillCutoutFilter.#resolvePolygonCentroid(cutout),
-                hole
+                cutoutInfo.centroid,
+                holeInfo.points
             ) &&
-            cutout.every((point) =>
+            cutoutInfo.points.every((point) =>
                 PcbScene3dDrillCutoutFilter.#isPointInsideOrOnPolygon(
                     point,
-                    hole
+                    holeInfo.points
                 )
             )
         )
@@ -204,49 +267,6 @@ export class PcbScene3dDrillCutoutFilter {
             outer.maxY >=
                 inner.maxY - PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON
         )
-    }
-
-    /**
-     * Resolves axis-aligned polygon bounds.
-     * @param {{ x: number, y: number }[]} points Polygon points.
-     * @returns {{ minX: number, maxX: number, minY: number, maxY: number }}
-     */
-    static #resolvePolygonBounds(points) {
-        return points.reduce(
-            (bounds, point) => ({
-                minX: Math.min(bounds.minX, Number(point.x || 0)),
-                maxX: Math.max(bounds.maxX, Number(point.x || 0)),
-                minY: Math.min(bounds.minY, Number(point.y || 0)),
-                maxY: Math.max(bounds.maxY, Number(point.y || 0))
-            }),
-            {
-                minX: Infinity,
-                maxX: -Infinity,
-                minY: Infinity,
-                maxY: -Infinity
-            }
-        )
-    }
-
-    /**
-     * Resolves the average center of one polygon.
-     * @param {{ x: number, y: number }[]} points
-     * @returns {{ x: number, y: number }}
-     */
-    static #resolvePolygonCentroid(points) {
-        const totals = points.reduce(
-            (accumulator, point) => ({
-                x: accumulator.x + Number(point.x || 0),
-                y: accumulator.y + Number(point.y || 0)
-            }),
-            { x: 0, y: 0 }
-        )
-        const count = Math.max(points.length, 1)
-
-        return {
-            x: totals.x / count,
-            y: totals.y / count
-        }
     }
 
     /**

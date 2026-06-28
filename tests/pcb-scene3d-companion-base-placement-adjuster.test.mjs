@@ -111,6 +111,102 @@ test('PcbScene3dCompanionBasePlacementAdjuster seats overlapping authored placem
     assert.equal(adjusted.staticBodyPlacements[1].positionMil.z, 35)
 })
 
+test('PcbScene3dCompanionBasePlacementAdjuster leaves bottom repeated full embedded connectors on the board face', () => {
+    const adjusted = PcbScene3dCompanionBasePlacementAdjuster.adjust({
+        board: { thicknessMil: 63 },
+        components: [
+            {
+                designator: 'J1',
+                mountSide: 'bottom',
+                rotationDeg: 0,
+                positionMil: { x: 0, y: 0, z: -31.5 },
+                body: {
+                    family: 'header',
+                    sizeMil: { width: 360, depth: 80, height: 330 }
+                }
+            }
+        ],
+        externalPlacements: [
+            {
+                designator: 'J1',
+                mountSide: 'bottom',
+                positionMil: { x: 0, y: 0, z: -31.5 },
+                projection: {
+                    source: 'pad-fallback',
+                    boundsMil: { width: 360, depth: 80, height: 330 }
+                },
+                externalModel: { origin: 'embedded', name: 'header.step' }
+            },
+            {
+                designator: 'J1',
+                mountSide: 'bottom',
+                positionMil: { x: 100, y: 0, z: -31.5 },
+                projection: {
+                    source: 'model-anchor-fallback',
+                    boundsMil: { width: 0, depth: 0, height: 0 }
+                },
+                externalModel: { origin: 'embedded', name: 'header.step' }
+            }
+        ],
+        staticBodyPlacements: []
+    })
+
+    assert.equal(adjusted.externalPlacements[0].positionMil.z, -31.5)
+    assert.equal(adjusted.externalPlacements[1].positionMil.z, -31.5)
+})
+
+test('PcbScene3dCompanionBasePlacementAdjuster leaves bottom companion neighbors on the board face', () => {
+    const adjusted = PcbScene3dCompanionBasePlacementAdjuster.adjust({
+        board: { thicknessMil: 60 },
+        components: [
+            {
+                designator: 'J9',
+                mountSide: 'bottom',
+                rotationDeg: 0,
+                positionMil: { x: 0, y: 0, z: -54 },
+                body: {
+                    family: 'generic',
+                    sizeMil: { width: 220, depth: 180, height: 48 }
+                }
+            }
+        ],
+        externalPlacements: [
+            {
+                designator: 'J9',
+                mountSide: 'bottom',
+                positionMil: { x: 0, y: 0, z: -30 },
+                projection: {
+                    source: 'model-anchor-fallback',
+                    boundsMil: { width: 0, depth: 0, height: 0 }
+                },
+                externalModel: { origin: 'embedded', name: 'partial.step' }
+            },
+            {
+                designator: 'C9',
+                mountSide: 'bottom',
+                positionMil: { x: 20, y: 10, z: -30 },
+                projection: {
+                    source: 'pad-fallback',
+                    boundsMil: { width: 20, depth: 10, height: 8 }
+                },
+                externalModel: { origin: 'embedded', name: 'chip.step' }
+            }
+        ],
+        staticBodyPlacements: [
+            {
+                designator: 'R9',
+                mountSide: 'bottom',
+                positionMil: { x: -20, y: -10, z: -35 },
+                geometry: { kind: 'extruded-polygon', heightMil: 10 }
+            }
+        ]
+    })
+
+    assert.equal(adjusted.externalPlacements[0].positionMil.z, -30)
+    assert.equal(adjusted.externalPlacements[1].positionMil.z, -30)
+    assert.equal(adjusted.staticBodyPlacements[0].positionMil.z, -35)
+})
+
 test('PcbScene3dCompanionBasePlacementAdjuster leaves authored companion bases in charge', () => {
     const adjusted = PcbScene3dCompanionBasePlacementAdjuster.adjust(
         createScene(

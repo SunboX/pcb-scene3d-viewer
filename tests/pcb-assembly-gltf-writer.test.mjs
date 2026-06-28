@@ -20,6 +20,45 @@ function createBoardMesh() {
 }
 
 /**
+ * Builds one deterministic wide board mesh.
+ * @returns {object}
+ */
+function createWideBoardMesh() {
+    return PcbAssemblyMeshUtils.box('wide-board', {
+        width: 8000,
+        depth: 800,
+        height: 40,
+        color: [0.05, 0.32, 0.18]
+    })
+}
+
+/**
+ * Finds the first camera node in a GLTF document.
+ * @param {object} gltf GLTF JSON document.
+ * @returns {object}
+ */
+function findCameraNode(gltf) {
+    const node = gltf.nodes.find((candidate) =>
+        Number.isInteger(candidate.camera)
+    )
+    assert.ok(node)
+    return node
+}
+
+/**
+ * Computes camera distance from the origin.
+ * @param {object} node GLTF camera node.
+ * @returns {number}
+ */
+function cameraDistance(node) {
+    return Math.hypot(
+        Number(node.translation?.[0] || 0),
+        Number(node.translation?.[1] || 0),
+        Number(node.translation?.[2] || 0)
+    )
+}
+
+/**
  * Decodes the embedded binary buffer from a JSON GLTF document.
  * @param {object} gltf GLTF JSON document.
  * @returns {Buffer}
@@ -98,6 +137,24 @@ function parseGlbJson(glb) {
     return JSON.parse(buffer.toString('utf8', 20, 20 + jsonLength).trim())
 }
 
+/**
+ * Extracts the binary chunk from a binary GLB.
+ * @param {Uint8Array} glb Binary GLB.
+ * @returns {Buffer}
+ */
+function parseGlbBinaryChunk(glb) {
+    const buffer = Buffer.from(glb)
+    const jsonLength = buffer.readUInt32LE(12)
+    const binHeaderOffset = 20 + jsonLength
+    const binLength = buffer.readUInt32LE(binHeaderOffset)
+
+    assert.equal(
+        buffer.toString('utf8', binHeaderOffset + 4, binHeaderOffset + 7),
+        'BIN'
+    )
+    return buffer.subarray(binHeaderOffset + 8, binHeaderOffset + 8 + binLength)
+}
+
 test('PcbAssemblyGltfWriter writes embedded JSON GLTF with exported PCB axes', () => {
     const gltf = PcbAssemblyGltfWriter.write({
         name: 'fake-board',
@@ -167,6 +224,39 @@ test('PcbAssemblyGltfWriter preserves texture-backed board materials', () => {
     assert.equal(gltf.textures[0].source, 0)
     assert.ok(texturedPrimitive)
     assert.ok(Number.isInteger(texturedPrimitive.attributes.TEXCOORD_0))
+})
+
+test('PcbAssemblyGltfWriter packs texture images into binary GLB buffer views', () => {
+    const imageBytes = Buffer.from('fake-png')
+    const textureUri = 'data:image/png;base64,' + imageBytes.toString('base64')
+    const glb = PcbAssemblyGltfWriter.write({
+        name: 'textured-board',
+        meshes: [
+            {
+                ...createBoardMesh(),
+                texture: {
+                    top: textureUri,
+                    bottom: textureUri
+                }
+            }
+        ],
+        format: 'glb'
+    })
+    const gltf = parseGlbJson(glb)
+    const binaryChunk = parseGlbBinaryChunk(glb)
+    const image = gltf.images[0]
+
+    assert.equal(image.uri, undefined)
+    assert.equal(image.mimeType, 'image/png')
+    assert.equal(Number.isInteger(image.bufferView), true)
+    const imageBufferView = gltf.bufferViews[image.bufferView]
+    const imageData = binaryChunk.subarray(
+        imageBufferView.byteOffset,
+        imageBufferView.byteOffset + imageBufferView.byteLength
+    )
+
+    assert.equal(imageBufferView.target, undefined)
+    assert.deepEqual(imageData, imageBytes)
 })
 
 test('PcbAssemblyGltfWriter preserves translucent mesh material alpha', () => {
@@ -239,6 +329,76 @@ test('PcbAssemblyGltfWriter can add default camera and light nodes', () => {
         gltf.scenes[0].nodes.includes(gltf.nodes.indexOf(lightNode)),
         true
     )
+})
+
+test('PcbAssemblyGltfWriter fits scene cameras using FOV and aspect ratio', () => {
+    const wideAspect = PcbAssemblyGltfWriter.write({
+        name: 'wide-framed-board',
+        meshes: [createWideBoardMesh()],
+        format: 'gltf',
+        includeSceneMetadata: true,
+        sceneCameraAspectRatio: 4,
+        sceneCameraFovDegrees: 45
+    })
+    const narrowAspect = PcbAssemblyGltfWriter.write({
+        name: 'narrow-framed-board',
+        meshes: [createWideBoardMesh()],
+        format: 'gltf',
+        includeSceneMetadata: true,
+        sceneCameraAspectRatio: 0.25,
+        sceneCameraFovDegrees: 45
+    })
+
+    assert.equal(wideAspect.cameras[0].perspective.aspectRatio, 4)
+    assert.equal(
+        Math.round(wideAspect.cameras[0].perspective.yfov * 1000),
+        Math.round((Math.PI / 4) * 1000)
+    )
+    assert.ok(
+        cameraDistance(findCameraNode(narrowAspect)) >
+            cameraDistance(findCameraNode(wideAspect)) * 3
+    )
+})
+
+test('PcbAssemblyGltfWriter fits default scene cameras for square viewers', () => {
+    const defaultCamera = PcbAssemblyGltfWriter.write({
+        name: 'default-framed-board',
+        meshes: [createWideBoardMesh()],
+        format: 'gltf',
+        includeSceneMetadata: true
+    })
+    const squareCamera = PcbAssemblyGltfWriter.write({
+        name: 'square-framed-board',
+        meshes: [createWideBoardMesh()],
+        format: 'gltf',
+        includeSceneMetadata: true,
+        sceneCameraAspectRatio: 1
+    })
+
+    assert.equal(defaultCamera.cameras[0].perspective.aspectRatio, undefined)
+    assert.ok(
+        Math.abs(
+            cameraDistance(findCameraNode(defaultCamera)) -
+                cameraDistance(findCameraNode(squareCamera))
+        ) < 0.001
+    )
+})
+
+test('PcbAssemblyGltfWriter supports top export camera preset metadata', () => {
+    const gltf = PcbAssemblyGltfWriter.write({
+        name: 'top-framed-board',
+        meshes: [createWideBoardMesh()],
+        format: 'gltf',
+        includeSceneMetadata: true,
+        sceneCameraPreset: 'top',
+        sceneCameraAspectRatio: 1
+    })
+    const cameraNode = findCameraNode(gltf)
+
+    assert.ok(Math.abs(cameraNode.translation[0]) < 0.001)
+    assert.ok(cameraNode.translation[1] > 0)
+    assert.ok(Math.abs(cameraNode.translation[2]) < 0.001)
+    assert.equal(cameraNode.rotation.every(Number.isFinite), true)
 })
 
 test('PcbAssemblyGltfValidator accepts exported textured GLB payloads', () => {

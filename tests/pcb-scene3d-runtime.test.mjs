@@ -795,7 +795,7 @@ test('PcbScene3dRuntime uses board face, edge, and plated-hole copper materials'
         assert.equal(boardMesh.material[0].options.color, 0x17396b)
         assert.equal(boardMesh.material[1].options.color, 0xf7f9d1)
         assert.equal(boardMesh.material[2].options.color, 0xd9a61d)
-        assert.equal(boardMesh.material[0].options.side, 'FrontSide')
+        assert.equal(boardMesh.material[0].options.side, 'DoubleSide')
         assert.equal(boardMesh.material[1].options.side, 'DoubleSide')
         assert.equal(boardMesh.material[2].options.side, 'DoubleSide')
     } finally {

@@ -85,6 +85,33 @@ function square(centerX, centerY, radius) {
     ]
 }
 
+/**
+ * Builds a circle whose coordinate reads are counted.
+ * @param {number} centerX Center X.
+ * @param {number} centerY Center Y.
+ * @param {number} radius Circle radius.
+ * @param {{ count: number }} readCounter Coordinate read counter.
+ * @returns {{ x: number, y: number }[]}
+ */
+function countedCircle(centerX, centerY, radius, readCounter) {
+    return Array.from({ length: 16 }, (_, index) => {
+        const angle = (Math.PI * 2 * index) / 16
+        const x = centerX + Math.cos(angle) * radius
+        const y = centerY + Math.sin(angle) * radius
+
+        return {
+            get x() {
+                readCounter.count += 1
+                return x
+            },
+            get y() {
+                readCounter.count += 1
+                return y
+            }
+        }
+    })
+}
+
 test('PcbScene3dDrillCutoutFilter keeps separated rounded pad cutouts', () => {
     const cutouts = [
         roundedRectangle(0, 0, 60, 120, 30),
@@ -103,5 +130,26 @@ test('PcbScene3dDrillCutoutFilter removes truly nested cutouts', () => {
     assert.equal(
         PcbScene3dDrillCutoutFilter.removeNestedCutouts(cutouts).length,
         1
+    )
+})
+
+test('PcbScene3dDrillCutoutFilter reuses polygon metadata for dense separated cutouts', () => {
+    const readCounter = { count: 0 }
+    const cutouts = Array.from({ length: 80 }, (_, index) =>
+        countedCircle(
+            (index % 20) * 100,
+            Math.floor(index / 20) * 100,
+            20,
+            readCounter
+        )
+    )
+
+    assert.equal(
+        PcbScene3dDrillCutoutFilter.removeNestedCutouts(cutouts).length,
+        80
+    )
+    assert.ok(
+        readCounter.count < 20000,
+        'Expected bounded coordinate reads, got ' + readCounter.count
     )
 })

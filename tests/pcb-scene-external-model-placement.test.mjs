@@ -3,6 +3,8 @@ import test from 'node:test'
 import * as THREE from 'three'
 import { PcbScene3dExternalModels } from '../src/PcbScene3dExternalModels.mjs'
 
+const DEFAULT_MODEL_Z_CLEARANCE_MIL = 0.03 * (1000 / 25.4)
+
 /**
  * Resolves the model group from a placement face group.
  * @param {THREE.Group} faceGroup Placement face group.
@@ -273,7 +275,9 @@ test('PcbScene3dExternalModels does not re-bias explicit owner-anchor offsets', 
 
     assert.equal(modelGroup.position.x, -325)
     assert.equal(modelGroup.position.y, 325)
-    assert.equal(modelGroup.position.z, 0)
+    assert.ok(
+        Math.abs(modelGroup.position.z - DEFAULT_MODEL_Z_CLEARANCE_MIL) < 0.001
+    )
     assert.ok(Math.abs(modelGroup.rotation.x - Math.PI / 2) < 0.000001)
     assert.equal(modelGroup.rotation.z, -0)
 })
@@ -334,6 +338,80 @@ test('PcbScene3dExternalModels centers owner model-anchor fallbacks after load',
                                 -0.078, -0.01, 0, 0.111, -0.01, 0, 0.111, 0.187,
                                 0.079, -0.078, -0.01, 0, 0.111, 0.187, 0.079,
                                 -0.078, 0.187, 0.079
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    externalModelsGroup.updateMatrixWorld(true)
+    const center = new THREE.Box3()
+        .setFromObject(wrapperGroup)
+        .getCenter(new THREE.Vector3())
+
+    assert.ok(Math.abs(center.x) < 0.001)
+    assert.ok(Math.abs(center.y) < 0.001)
+    assert.equal(wrapperGroup.userData.scene3dPadFallbackCenterRepair, true)
+})
+
+test('PcbScene3dExternalModels centers owner model-bounds fallbacks after load', async () => {
+    const externalModelsGroup = new THREE.Group()
+
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            components: [
+                {
+                    designator: 'U1',
+                    positionMil: { x: 0, y: 0, z: -31.5 }
+                }
+            ],
+            externalPlacements: [
+                {
+                    designator: 'U1',
+                    mountSide: 'bottom',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: -31.5 },
+                    projection: {
+                        source: 'model-bounds',
+                        boundsMil: { width: 452, depth: 38, height: 452 }
+                    },
+                    modelTransform: {
+                        rotationDeg: { x: -90, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        ownerAnchorOffsetMil: { x: 226, y: 226 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'owner-bounds-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/owner-bounds-body'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [
+                                0, 0, 0, 0.452, 0, 0, 0.452, 0.038, 0.452, 0, 0,
+                                0, 0.452, 0.038, 0.452, 0, 0.038, 0.452
                             ],
                             normals: [],
                             indices: [0, 1, 2, 3, 4, 5],
@@ -567,4 +645,192 @@ test('PcbScene3dExternalModels keeps embedded source Y frames stable in bottom v
 
     assert.ok(placedBounds.min.y > -930)
     assert.ok(placedBounds.max.y > 15)
+})
+
+test('PcbScene3dExternalModels preserves repeated drilled-pad body anchors', async () => {
+    const externalModelsGroup = new THREE.Group()
+
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            board: {
+                centerX: 0,
+                centerY: 0
+            },
+            components: [
+                {
+                    designator: 'J1',
+                    componentIndex: 7,
+                    positionMil: { x: 0, y: 0, z: -31.5 },
+                    body: {
+                        family: 'connector',
+                        sizeMil: { width: 300, depth: 100, height: 420 }
+                    }
+                }
+            ],
+            externalPlacements: [0, 100, 200].map((x) => ({
+                designator: 'J1',
+                mountSide: 'bottom',
+                rotationDeg: 0,
+                positionMil: { x, y: 0, z: -31.5 },
+                projection: {
+                    source: 'model-bounds',
+                    boundsMil: { width: 100, depth: 100, height: 420 }
+                },
+                modelTransform: {
+                    rotationDeg: { x: 0, y: 0, z: 0 },
+                    offsetMil: { x: 0, y: 0, z: 0 },
+                    scale: { x: 1, y: 1, z: 1 }
+                },
+                externalModel: {
+                    origin: 'embedded',
+                    name: 'pin-body.step',
+                    format: 'step',
+                    payloadText: 'ISO-10303-21;',
+                    sourceStream: 'Models/pin-body'
+                }
+            })),
+            detail: {
+                pads: [0, 100, 200].map((x) => ({
+                    componentIndex: 7,
+                    x,
+                    y: 0,
+                    sizeTopX: 64,
+                    sizeTopY: 64,
+                    sizeMidX: 64,
+                    sizeMidY: 64,
+                    sizeBottomX: 64,
+                    sizeBottomY: 64,
+                    holeDiameter: 36
+                }))
+            }
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'pin-body',
+                            color: [0.05, 0.05, 0.05],
+                            positions: [
+                                0.02, 0.01, 0, 0.12, 0.01, 0, 0.12, 0.11, 0.42,
+                                0.02, 0.01, 0, 0.12, 0.11, 0.42, 0.02, 0.11,
+                                0.42
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+    assert.deepEqual(
+        externalModelsGroup.children.map((group) => group.position.x),
+        [0, 100, 200]
+    )
+    assert.deepEqual(
+        externalModelsGroup.children.map((group) => group.position.y),
+        [0, 0, 0]
+    )
+})
+
+test('PcbScene3dExternalModels preserves split drilled-pad body model anchors', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const padXs = [0, 100, 200, 300]
+
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            board: {
+                centerX: 0,
+                centerY: 0
+            },
+            components: [
+                {
+                    designator: 'J1',
+                    componentIndex: 7,
+                    positionMil: { x: 0, y: 0, z: -31.5 },
+                    body: {
+                        family: 'connector',
+                        sizeMil: { width: 400, depth: 100, height: 420 }
+                    }
+                }
+            ],
+            externalPlacements: padXs.map((x, index) => ({
+                designator: 'J1',
+                mountSide: 'bottom',
+                rotationDeg: 0,
+                positionMil: { x, y: 0, z: -31.5 },
+                projection: {
+                    source: 'model-bounds',
+                    boundsMil: { width: 100, depth: 100, height: 420 }
+                },
+                modelTransform: {
+                    rotationDeg: { x: 0, y: 0, z: 0 },
+                    offsetMil: { x: 0, y: 0, z: 0 },
+                    scale: { x: 1, y: 1, z: 1 }
+                },
+                externalModel: {
+                    origin: 'embedded',
+                    name: index === 0 ? 'pin-one-body.step' : 'pin-body.step',
+                    format: 'step',
+                    payloadText: 'ISO-10303-21;',
+                    sourceStream:
+                        index === 0 ? 'Models/pin-one' : 'Models/pin-body'
+                }
+            })),
+            detail: {
+                pads: padXs.map((x) => ({
+                    componentIndex: 7,
+                    x,
+                    y: 0,
+                    sizeTopX: 64,
+                    sizeTopY: 64,
+                    sizeMidX: 64,
+                    sizeMidY: 64,
+                    sizeBottomX: 64,
+                    sizeBottomY: 64,
+                    holeDiameter: 36
+                }))
+            }
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'pin-body',
+                            color: [0.05, 0.05, 0.05],
+                            positions: [
+                                0.02, 0.01, 0, 0.12, 0.01, 0, 0.12, 0.11, 0.42,
+                                0.02, 0.01, 0, 0.12, 0.11, 0.42, 0.02, 0.11,
+                                0.42
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+    assert.deepEqual(
+        externalModelsGroup.children.map((group) => group.position.x),
+        padXs
+    )
+    assert.deepEqual(
+        externalModelsGroup.children.map((group) => group.position.y),
+        [0, 0, 0, 0]
+    )
 })

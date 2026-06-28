@@ -1,3 +1,5 @@
+import { PcbScene3dExternalPlacementDefaults } from './PcbScene3dExternalPlacementDefaults.mjs'
+
 /**
  * Applies scene-aware mount-plane corrections after generic model seating.
  */
@@ -7,6 +9,11 @@ export class PcbScene3dModelSeatingPolicy {
     static #CONTACT_PAD_MIN_VERTEX_COUNT = 6
     static #CONTACT_PAD_MIN_OFFSET_MIL = 5
     static #SUPPORT_BUCKET_MIL = 5
+    static #BOTTOM_RAISED_CONTACT_MIN_GAP_MIL = 20
+    static #BOTTOM_RAISED_CONTACT_WINDOW_MAX_MIL = 240
+    static #BOTTOM_RAISED_CONTACT_WINDOW_RATIO = 0.55
+    static #BOTTOM_SUPPORT_MIN_AREA_RATIO = 0.2
+    static #HORIZONTAL_NORMAL_MIN_RATIO = 0.65
     static #ZERO_PLANE_MIN_DOMINANCE = 1.5
     static #ZERO_PLANE_MIN_RESET_GAP_MIL = 20
     static #AUTHORED_Z_OFFSET_EPSILON_MIL = 0.001
@@ -35,11 +42,10 @@ export class PcbScene3dModelSeatingPolicy {
      * @returns {void}
      */
     static applyPostSeat(THREE, modelGroup, options = {}) {
-        if (
-            !PcbScene3dModelSeatingPolicy.#isAltiumScene(
-                options?.sceneDescription
-            )
-        ) {
+        const sceneDescription = options?.sceneDescription
+        const placement = options?.placement
+
+        if (!PcbScene3dModelSeatingPolicy.#isAltiumScene(sceneDescription)) {
             return
         }
 
@@ -47,13 +53,14 @@ export class PcbScene3dModelSeatingPolicy {
             PcbScene3dModelSeatingPolicy.#preferContactPadPlane(
                 THREE,
                 modelGroup,
-                options?.placement
+                placement
             )
         ) {
             PcbScene3dModelSeatingPolicy.#keepBottomGeometryBelowBoardFace(
                 THREE,
                 modelGroup,
-                options?.placement
+                placement,
+                sceneDescription
             )
             return
         }
@@ -61,12 +68,13 @@ export class PcbScene3dModelSeatingPolicy {
         PcbScene3dModelSeatingPolicy.#preferDominantZeroBodyPlane(
             THREE,
             modelGroup,
-            options?.placement
+            placement
         )
         PcbScene3dModelSeatingPolicy.#keepBottomGeometryBelowBoardFace(
             THREE,
             modelGroup,
-            options?.placement
+            placement,
+            sceneDescription
         )
     }
 
@@ -290,9 +298,15 @@ export class PcbScene3dModelSeatingPolicy {
      * @param {any} THREE Three.js namespace.
      * @param {any} modelGroup Loaded model group.
      * @param {object | null | undefined} placement Current placement.
+     * @param {object | null | undefined} sceneDescription Scene description.
      * @returns {void}
      */
-    static #keepBottomGeometryBelowBoardFace(THREE, modelGroup, placement) {
+    static #keepBottomGeometryBelowBoardFace(
+        THREE,
+        modelGroup,
+        placement,
+        sceneDescription
+    ) {
         if (
             String(placement?.mountSide || '').toLowerCase() !== 'bottom' ||
             !modelGroup?.position
@@ -304,32 +318,395 @@ export class PcbScene3dModelSeatingPolicy {
             THREE,
             modelGroup
         )
-        const minZ = PcbScene3dModelSeatingPolicy.#resolveMinZ(values)
-        const currentMinZ = minZ + Number(modelGroup.position.z || 0)
+        const boardFacePlane =
+            PcbScene3dModelSeatingPolicy.#resolveBottomBoardFacePlane(
+                THREE,
+                modelGroup,
+                values,
+                placement,
+                sceneDescription
+            )
+        const currentPlaneZ =
+            boardFacePlane + Number(modelGroup.position.z || 0)
 
-        if (!Number.isFinite(currentMinZ) || currentMinZ >= 0) {
+        if (!Number.isFinite(currentPlaneZ)) {
             return
         }
 
-        modelGroup.position.z -= currentMinZ
+        modelGroup.position.z -= currentPlaneZ
         modelGroup.updateMatrixWorld?.(true)
     }
 
     /**
-     * Resolves the minimum finite Z from a vertex collection.
+     * Resolves the bottom-side local plane that should sit on the board face.
+     * @param {any} THREE Three.js namespace.
+     * @param {any} modelGroup Loaded model group.
      * @param {number[]} values Z values.
+     * @param {object | null | undefined} placement Current placement.
+     * @param {object | null | undefined} sceneDescription Scene description.
      * @returns {number}
      */
-    static #resolveMinZ(values) {
-        let minZ = Number.POSITIVE_INFINITY
+    static #resolveBottomBoardFacePlane(
+        THREE,
+        modelGroup,
+        values,
+        placement,
+        sceneDescription
+    ) {
+        const extents = PcbScene3dModelSeatingPolicy.#resolveZExtents(values)
+        const supportPlane =
+            PcbScene3dModelSeatingPolicy.#hasThroughHoleMountEvidence(
+                sceneDescription,
+                placement
+            )
+                ? PcbScene3dModelSeatingPolicy.#resolveDominantRaisedSupportPlane(
+                      THREE,
+                      modelGroup,
+                      extents
+                  )
+                : null
 
-        ;(Array.isArray(values) ? values : []).forEach((value) => {
-            if (Number.isFinite(value)) {
-                minZ = Math.min(minZ, value)
+        return Number.isFinite(supportPlane) ? supportPlane : extents.minZ
+    }
+
+    /**
+     * Checks whether sparse lower geometry is allowed to pass through the PCB.
+     * @param {object | null | undefined} sceneDescription Scene description.
+     * @param {object | null | undefined} placement Current placement.
+     * @returns {boolean}
+     */
+    static #hasThroughHoleMountEvidence(sceneDescription, placement) {
+        const designator = String(placement?.designator || '').trim()
+        const component = PcbScene3dModelSeatingPolicy.#resolveComponent(
+            sceneDescription,
+            designator
+        )
+        const componentIndex = Number(component?.componentIndex)
+        const pads =
+            PcbScene3dModelSeatingPolicy.#resolveScenePads(sceneDescription)
+
+        return pads.some((pad) => {
+            if (
+                !PcbScene3dModelSeatingPolicy.#padMatchesPlacement(
+                    pad,
+                    designator,
+                    componentIndex
+                )
+            ) {
+                return false
+            }
+
+            return PcbScene3dModelSeatingPolicy.#hasDrilledPadOpening(pad)
+        })
+    }
+
+    /**
+     * Finds a scene component by designator.
+     * @param {object | null | undefined} sceneDescription Scene description.
+     * @param {string} designator Placement designator.
+     * @returns {object | null}
+     */
+    static #resolveComponent(sceneDescription, designator) {
+        if (!designator || !Array.isArray(sceneDescription?.components)) {
+            return null
+        }
+
+        return (
+            sceneDescription.components.find(
+                (component) =>
+                    String(component?.designator || '').trim() === designator
+            ) || null
+        )
+    }
+
+    /**
+     * Resolves normalized PCB pad records from a scene.
+     * @param {object | null | undefined} sceneDescription Scene description.
+     * @returns {object[]}
+     */
+    static #resolveScenePads(sceneDescription) {
+        if (Array.isArray(sceneDescription?.detail?.pads)) {
+            return sceneDescription.detail.pads
+        }
+
+        return Array.isArray(sceneDescription?.pads)
+            ? sceneDescription.pads
+            : []
+    }
+
+    /**
+     * Checks whether one pad belongs to the current external placement.
+     * @param {object} pad Pad record.
+     * @param {string} designator Placement designator.
+     * @param {number} componentIndex Placement component index.
+     * @returns {boolean}
+     */
+    static #padMatchesPlacement(pad, designator, componentIndex) {
+        if (
+            Number.isFinite(componentIndex) &&
+            Number(pad?.componentIndex) === componentIndex
+        ) {
+            return true
+        }
+
+        if (!designator) {
+            return false
+        }
+
+        return [
+            pad?.designator,
+            pad?.ownerDesignator,
+            pad?.componentDesignator,
+            pad?.refdes,
+            pad?.reference
+        ].some((value) => String(value || '').trim() === designator)
+    }
+
+    /**
+     * Checks whether one pad has a drilled or slotted through-board opening.
+     * @param {object} pad Pad record.
+     * @returns {boolean}
+     */
+    static #hasDrilledPadOpening(pad) {
+        const holeGeometry = pad?.holeGeometry || {}
+
+        return [
+            pad?.holeDiameter,
+            pad?.drillDiameter,
+            pad?.holeSlotLength,
+            pad?.slotLength,
+            holeGeometry?.diameter,
+            holeGeometry?.length,
+            holeGeometry?.slotLength
+        ].some((value) => Number(value || 0) > 0)
+    }
+
+    /**
+     * Finds a broad housing/support plane above sparse raised contact geometry.
+     * @param {any} THREE Three.js namespace.
+     * @param {any} modelGroup Loaded model group.
+     * @param {{ minZ: number, maxZ: number }} extents Z extents.
+     * @returns {number | null}
+     */
+    static #resolveDominantRaisedSupportPlane(THREE, modelGroup, extents) {
+        const minZ = Number(extents?.minZ)
+        const maxZ = Number(extents?.maxZ)
+        const height = maxZ - minZ
+        if (!Number.isFinite(height) || height <= 0) {
+            return null
+        }
+
+        const supportAreas =
+            PcbScene3dModelSeatingPolicy.#collectHorizontalTriangleAreas(
+                THREE,
+                modelGroup
+            )
+        const maxArea =
+            PcbScene3dModelSeatingPolicy.#resolveMaxBucketArea(supportAreas)
+        if (!(maxArea > 0)) {
+            return null
+        }
+
+        const windowSize = Math.min(
+            PcbScene3dModelSeatingPolicy.#BOTTOM_RAISED_CONTACT_WINDOW_MAX_MIL,
+            height *
+                PcbScene3dModelSeatingPolicy.#BOTTOM_RAISED_CONTACT_WINDOW_RATIO
+        )
+        const minSupportArea =
+            maxArea *
+            PcbScene3dModelSeatingPolicy.#BOTTOM_SUPPORT_MIN_AREA_RATIO
+        const candidates = [...supportAreas.entries()]
+            .filter(([bucketZ, area]) => {
+                const gap = bucketZ - minZ
+
+                return (
+                    gap >=
+                        PcbScene3dModelSeatingPolicy
+                            .#BOTTOM_RAISED_CONTACT_MIN_GAP_MIL &&
+                    gap <= windowSize &&
+                    area >= minSupportArea
+                )
+            })
+            .sort((left, right) => left[0] - right[0] || right[1] - left[1])
+
+        return candidates.length ? candidates[0][0] : null
+    }
+
+    /**
+     * Collects horizontal triangle area by transformed Z bucket.
+     * @param {any} THREE Three.js namespace.
+     * @param {any} modelGroup Loaded model group.
+     * @returns {Map<number, number>}
+     */
+    static #collectHorizontalTriangleAreas(THREE, modelGroup) {
+        const areas = new Map()
+        if (!THREE?.Vector3 || typeof modelGroup?.traverse !== 'function') {
+            return areas
+        }
+
+        modelGroup.updateMatrixWorld?.(true)
+        modelGroup.parent?.updateMatrixWorld?.(true)
+        const currentZ = Number(modelGroup?.position?.z || 0)
+        const parentInverse =
+            THREE?.Matrix4 && modelGroup.parent?.matrixWorld
+                ? new THREE.Matrix4()
+                      .copy(modelGroup.parent.matrixWorld)
+                      .invert()
+                : null
+        const first = new THREE.Vector3()
+        const second = new THREE.Vector3()
+        const third = new THREE.Vector3()
+        const firstEdge = new THREE.Vector3()
+        const secondEdge = new THREE.Vector3()
+        const normalArea = new THREE.Vector3()
+
+        modelGroup.traverse((object) => {
+            const position = object?.geometry?.attributes?.position
+            if (!position || !object?.matrixWorld) {
+                return
+            }
+
+            const index = object?.geometry?.index || null
+            const triangleCount = Math.floor(
+                Number((index || position).count || 0) / 3
+            )
+            for (
+                let triangleIndex = 0;
+                triangleIndex < triangleCount;
+                triangleIndex += 1
+            ) {
+                PcbScene3dModelSeatingPolicy.#readTriangleVertices(
+                    position,
+                    index,
+                    triangleIndex,
+                    first,
+                    second,
+                    third
+                )
+                ;[first, second, third].forEach((vertex) => {
+                    vertex.applyMatrix4(object.matrixWorld)
+                    if (parentInverse) {
+                        vertex.applyMatrix4(parentInverse)
+                    }
+                    vertex.z -= currentZ
+                })
+                firstEdge.subVectors(second, first)
+                secondEdge.subVectors(third, first)
+                normalArea.crossVectors(firstEdge, secondEdge)
+
+                const doubleArea = normalArea.length()
+                if (
+                    !(doubleArea > 0) ||
+                    Math.abs(normalArea.z) / doubleArea <
+                        PcbScene3dModelSeatingPolicy
+                            .#HORIZONTAL_NORMAL_MIN_RATIO
+                ) {
+                    continue
+                }
+
+                const bucketZ = PcbScene3dModelSeatingPolicy.#bucketZ(
+                    (first.z + second.z + third.z) / 3
+                )
+                areas.set(bucketZ, (areas.get(bucketZ) || 0) + doubleArea / 2)
             }
         })
 
-        return minZ
+        return areas
+    }
+
+    /**
+     * Reads one triangle's position vertices.
+     * @param {any} position Position attribute.
+     * @param {any} index Index attribute.
+     * @param {number} triangleIndex Triangle index.
+     * @param {any} first First target vector.
+     * @param {any} second Second target vector.
+     * @param {any} third Third target vector.
+     * @returns {void}
+     */
+    static #readTriangleVertices(
+        position,
+        index,
+        triangleIndex,
+        first,
+        second,
+        third
+    ) {
+        first.fromBufferAttribute(
+            position,
+            PcbScene3dModelSeatingPolicy.#triangleVertexIndex(
+                index,
+                triangleIndex,
+                0
+            )
+        )
+        second.fromBufferAttribute(
+            position,
+            PcbScene3dModelSeatingPolicy.#triangleVertexIndex(
+                index,
+                triangleIndex,
+                1
+            )
+        )
+        third.fromBufferAttribute(
+            position,
+            PcbScene3dModelSeatingPolicy.#triangleVertexIndex(
+                index,
+                triangleIndex,
+                2
+            )
+        )
+    }
+
+    /**
+     * Resolves a triangle vertex index from indexed or flat geometry.
+     * @param {any} index Index attribute.
+     * @param {number} triangleIndex Triangle index.
+     * @param {number} vertexOffset Vertex offset in the triangle.
+     * @returns {number}
+     */
+    static #triangleVertexIndex(index, triangleIndex, vertexOffset) {
+        const flatIndex = triangleIndex * 3 + vertexOffset
+
+        return index ? Number(index.getX(flatIndex) || 0) : flatIndex
+    }
+
+    /**
+     * Resolves the largest horizontal support area bucket.
+     * @param {Map<number, number>} areas Bucketed areas.
+     * @returns {number}
+     */
+    static #resolveMaxBucketArea(areas) {
+        let maxArea = 0
+
+        areas?.forEach?.((area) => {
+            maxArea = Math.max(maxArea, Number(area || 0))
+        })
+
+        return maxArea
+    }
+
+    /**
+     * Resolves minimum and maximum finite Z from a vertex collection.
+     * @param {number[]} values Z values.
+     * @returns {{ minZ: number, maxZ: number }}
+     */
+    static #resolveZExtents(values) {
+        const extents = {
+            minZ: Number.POSITIVE_INFINITY,
+            maxZ: Number.NEGATIVE_INFINITY
+        }
+
+        ;(Array.isArray(values) ? values : []).forEach((value) => {
+            if (!Number.isFinite(value)) {
+                return
+            }
+
+            extents.minZ = Math.min(extents.minZ, value)
+            extents.maxZ = Math.max(extents.maxZ, value)
+        })
+
+        return extents
     }
 
     /**
@@ -354,9 +731,9 @@ export class PcbScene3dModelSeatingPolicy {
      * @returns {number}
      */
     static #resolveModelOffsetZ(placement) {
-        const offsetMil = placement?.modelTransform?.offsetMil || {}
-
-        return Number(offsetMil.z ?? placement?.modelTransform?.dzMil ?? 0)
+        return PcbScene3dExternalPlacementDefaults.authoredOffsetZMil(
+            placement?.modelTransform
+        )
     }
 
     /**

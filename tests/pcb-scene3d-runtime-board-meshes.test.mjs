@@ -3,10 +3,10 @@ import test from 'node:test'
 import * as THREE from 'three'
 import { PcbScene3dRuntimeBoardMeshes } from '../src/PcbScene3dRuntimeBoardMeshes.mjs'
 
-test('PcbScene3dRuntimeBoardMeshes keeps ordinary board faces front-sided in every preset', () => {
+test('PcbScene3dRuntimeBoardMeshes renders generated board faces double-sided', () => {
     assert.equal(
         PcbScene3dRuntimeBoardMeshes.resolveBoardFaceSide(THREE, 'bottom', {}),
-        THREE.FrontSide
+        THREE.DoubleSide
     )
 })
 

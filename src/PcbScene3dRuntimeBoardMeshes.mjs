@@ -14,8 +14,11 @@ export class PcbScene3dRuntimeBoardMeshes {
      * @returns {any}
      */
     static resolveBoardFaceSide(THREE, preset, sceneDescription) {
-        return Boolean(sceneDescription?.boardAssemblyModel) &&
-            String(preset || '').toLowerCase() === 'bottom'
+        if (!sceneDescription?.boardAssemblyModel) {
+            return THREE.DoubleSide
+        }
+
+        return String(preset || '').toLowerCase() === 'bottom'
             ? THREE.BackSide
             : THREE.FrontSide
     }
@@ -102,7 +105,11 @@ export class PcbScene3dRuntimeBoardMeshes {
             new THREE.MeshStandardMaterial({
                 ...solderMaskMaterialOptions,
                 color: surfaceColor,
-                side: THREE.FrontSide
+                side: PcbScene3dRuntimeBoardMeshes.resolveBoardFaceSide(
+                    THREE,
+                    'isometric',
+                    sceneDescription
+                )
             }),
             new THREE.MeshStandardMaterial({
                 ...edgeMaterialOptions,

@@ -1,11 +1,12 @@
 import { PcbScene3dBoardAssemblyPresentation } from './PcbScene3dBoardAssemblyPresentation.mjs'
 import { PcbScene3dBoardAssemblyPlacement } from './PcbScene3dBoardAssemblyPlacement.mjs'
 import { PcbScene3dBoardAssemblyTransform } from './PcbScene3dBoardAssemblyTransform.mjs'
-import { PcbScene3dBufferAttributeFactory } from './PcbScene3dBufferAttributeFactory.mjs'
+import { PcbScene3dExternalModelGroupLoader } from './PcbScene3dExternalModelGroupLoader.mjs'
 import { PcbScene3dExternalModelOpacity } from './PcbScene3dExternalModelOpacity.mjs'
 import { PcbScene3dExternalModelPlacementRepair } from './PcbScene3dExternalModelPlacementRepair.mjs'
 import { PcbScene3dExternalModelLoadOrder } from './PcbScene3dExternalModelLoadOrder.mjs'
 import { PcbScene3dExternalModelSourceOriginPolicy } from './PcbScene3dExternalModelSourceOriginPolicy.mjs'
+import { PcbScene3dExternalPlacementDefaults } from './PcbScene3dExternalPlacementDefaults.mjs'
 import { PcbScene3dModelBounds } from './PcbScene3dModelBounds.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 import { PcbScene3dStepLoader } from './PcbScene3dStepLoader.mjs'
@@ -110,24 +111,29 @@ export class PcbScene3dExternalModels {
      * @returns {any[]}
      */
     static #resolvePlacements(sceneDescription) {
-        const boardAssemblyPlacement =
-            PcbScene3dBoardAssemblyPlacement.build(sceneDescription)
+        const renderSceneDescription =
+            PcbScene3dExternalPlacementDefaults.apply(sceneDescription)
+        const boardAssemblyPlacement = PcbScene3dBoardAssemblyPlacement.build(
+            renderSceneDescription
+        )
         if (boardAssemblyPlacement) {
             return [boardAssemblyPlacement]
         }
 
         const explicitPlacements = Array.isArray(
-            sceneDescription?.externalPlacements
+            renderSceneDescription?.externalPlacements
         )
-            ? sceneDescription.externalPlacements
+            ? renderSceneDescription.externalPlacements
             : []
         const explicitDesignators = new Set(
             explicitPlacements
                 .map((placement) => String(placement?.designator || '').trim())
                 .filter(Boolean)
         )
-        const fallbackPlacements = Array.isArray(sceneDescription?.components)
-            ? sceneDescription.components
+        const fallbackPlacements = Array.isArray(
+            renderSceneDescription?.components
+        )
+            ? renderSceneDescription.components
                   .filter(
                       (component) =>
                           component?.externalModel &&
@@ -247,23 +253,12 @@ export class PcbScene3dExternalModels {
      * @returns {Promise<any>}
      */
     static async #loadModelGroup(THREE, model, stepLoader) {
-        if (model.format === 'wrl') {
-            if (!model.file) {
-                throw new Error('Resolved WRL model file is unavailable.')
-            }
-
-            return PcbScene3dExternalModels.#loadVrmlModel(model.file)
-        }
-
-        if (model.format === 'step') {
-            return PcbScene3dExternalModels.#loadStepModel(
-                THREE,
-                model,
-                stepLoader
-            )
-        }
-
-        throw new Error('Unsupported external model format.')
+        return PcbScene3dExternalModelGroupLoader.load(
+            THREE,
+            model,
+            stepLoader,
+            new URL(import.meta.url).searchParams.get('v') || ''
+        )
     }
 
     /**
@@ -745,252 +740,5 @@ export class PcbScene3dExternalModels {
         await new Promise((resolve) => {
             setTimeout(resolve, 0)
         })
-    }
-
-    /**
-     * Loads one VRML model from a browser file.
-     * @param {File | Blob} file
-     * @returns {Promise<any>}
-     */
-    static async #loadVrmlModel(file) {
-        const versionKey = new URL(import.meta.url).searchParams.get('v') || ''
-        const [{ VRMLLoader }] = await Promise.all([
-            import(
-                '/node_modules/three/examples/jsm/loaders/VRMLLoader.js' +
-                    (versionKey ? '?v=' + encodeURIComponent(versionKey) : '')
-            )
-        ])
-        const loader = new VRMLLoader()
-        const objectUrl = URL.createObjectURL(file)
-
-        try {
-            return await new Promise((resolve, reject) => {
-                loader.load(
-                    objectUrl,
-                    (loadedScene) => resolve(loadedScene),
-                    undefined,
-                    reject
-                )
-            })
-        } finally {
-            URL.revokeObjectURL(objectUrl)
-        }
-    }
-
-    /**
-     * Loads one STEP model and converts its meshes into Three objects.
-     * @param {any} THREE
-     * @param {any} model
-     * @param {PcbScene3dStepLoader} stepLoader
-     * @returns {Promise<any>}
-     */
-    static async #loadStepModel(THREE, model, stepLoader) {
-        const loadedModel = Array.isArray(model?.preparedMeshPayloads)
-            ? { meshPayloads: model.preparedMeshPayloads }
-            : await stepLoader.loadModel(model)
-        const group = new THREE.Group()
-        const sourceBounds = PcbScene3dModelBounds.measureSourceBoundsMil(
-            loadedModel.meshPayloads
-        )
-        group.scale.setScalar(1000)
-        if (sourceBounds) {
-            group.userData.scene3dSourceBoundsMil = sourceBounds
-        }
-
-        loadedModel.meshPayloads.forEach((meshPayload) => {
-            const geometry = new THREE.BufferGeometry()
-            geometry.setAttribute(
-                'position',
-                PcbScene3dBufferAttributeFactory.createFloat32(
-                    THREE,
-                    meshPayload.positions,
-                    3
-                )
-            )
-            geometry.setIndex(
-                PcbScene3dBufferAttributeFactory.createUint32(
-                    THREE,
-                    meshPayload.indices,
-                    1
-                )
-            )
-
-            if (meshPayload.normals.length) {
-                geometry.setAttribute(
-                    'normal',
-                    PcbScene3dBufferAttributeFactory.createFloat32(
-                        THREE,
-                        meshPayload.normals,
-                        3
-                    )
-                )
-            } else {
-                geometry.computeVertexNormals()
-            }
-            geometry.computeBoundingSphere()
-
-            const materials = PcbScene3dExternalModels.#buildStepMeshMaterials(
-                THREE,
-                geometry,
-                meshPayload
-            )
-            const mesh = new THREE.Mesh(
-                geometry,
-                materials.length > 1 ? materials : materials[0]
-            )
-            group.add(mesh)
-        })
-
-        return group
-    }
-
-    /**
-     * Builds the material set for one STEP mesh and assigns face-color groups
-     * when the importer exposes them.
-     * @param {any} THREE
-     * @param {any} geometry
-     * @param {{ color?: number[] | null, indices?: ArrayLike<number>, faceColors?: { first: number, last: number, color: number[] | null }[] }} meshPayload
-     * @returns {any[]}
-     */
-    static #buildStepMeshMaterials(THREE, geometry, meshPayload) {
-        const defaultColor = PcbScene3dExternalModels.#resolveMeshColor(
-            THREE,
-            meshPayload?.color
-        )
-        const defaultMaterial = PcbScene3dExternalModels.#createStepMaterial(
-            THREE,
-            defaultColor
-        )
-        const faceColors = Array.isArray(meshPayload?.faceColors)
-            ? meshPayload.faceColors.filter((faceColor) =>
-                  PcbScene3dExternalModels.#isValidFaceColorRange(
-                      faceColor,
-                      meshPayload?.indices
-                  )
-              )
-            : []
-
-        if (!faceColors.length) {
-            return [defaultMaterial]
-        }
-
-        const materials = [defaultMaterial]
-        faceColors.forEach((faceColor) => {
-            const resolvedColor =
-                Array.isArray(faceColor?.color) && faceColor.color.length >= 3
-                    ? PcbScene3dExternalModels.#resolveMeshColor(
-                          THREE,
-                          faceColor.color
-                      )
-                    : defaultColor
-
-            materials.push(
-                PcbScene3dExternalModels.#createStepMaterial(
-                    THREE,
-                    resolvedColor
-                )
-            )
-        })
-
-        PcbScene3dExternalModels.#applyFaceColorGroups(
-            geometry,
-            meshPayload?.indices || [],
-            faceColors
-        )
-
-        return materials
-    }
-
-    /**
-     * Creates one standard material for imported STEP geometry.
-     * @param {any} THREE
-     * @param {any} color
-     * @returns {any}
-     */
-    static #createStepMaterial(THREE, color) {
-        const options = {
-            color,
-            roughness: 0.56,
-            metalness: 0.14
-        }
-
-        if (THREE.DoubleSide !== undefined) {
-            options.side = THREE.DoubleSide
-        }
-
-        return new THREE.MeshStandardMaterial(options)
-    }
-
-    /**
-     * Applies grouped material ranges for face-colored STEP triangles.
-     * @param {any} geometry
-     * @param {ArrayLike<number>} indices
-     * @param {{ first: number, last: number }[]} faceColors
-     * @returns {void}
-     */
-    static #applyFaceColorGroups(geometry, indices, faceColors) {
-        const triangleCount = Math.floor(Number(indices?.length || 0) / 3)
-        let triangleIndex = 0
-        let faceColorIndex = 0
-        while (triangleIndex < triangleCount) {
-            const firstIndex = triangleIndex
-            let lastIndex = triangleCount
-            let materialIndex = 0
-            if (faceColorIndex < faceColors.length) {
-                const currentFaceColor = faceColors[faceColorIndex]
-                if (triangleIndex < currentFaceColor.first) {
-                    lastIndex = currentFaceColor.first
-                } else {
-                    lastIndex = Math.min(
-                        currentFaceColor.last + 1,
-                        triangleCount
-                    )
-                    materialIndex = faceColorIndex + 1
-                    faceColorIndex += 1
-                }
-            }
-            geometry.addGroup(
-                firstIndex * 3,
-                Math.max(lastIndex - firstIndex, 0) * 3,
-                materialIndex
-            )
-            triangleIndex = lastIndex
-        }
-    }
-
-    /**
-     * Returns true when one face-color range overlaps valid triangle indices.
-     * @param {{ first?: number, last?: number }} faceColor
-     * @param {ArrayLike<number> | undefined} indices
-     * @returns {boolean}
-     */
-    static #isValidFaceColorRange(faceColor, indices) {
-        const first = Number(faceColor?.first)
-        const last = Number(faceColor?.last)
-        const triangleCount = Math.floor(Number(indices?.length || 0) / 3)
-        return (
-            Number.isInteger(first) &&
-            Number.isInteger(last) &&
-            first >= 0 &&
-            last >= first &&
-            first < triangleCount
-        )
-    }
-
-    /**
-     * Resolves one STEP mesh color into a Three-friendly color value.
-     * @param {any} THREE
-     * @param {number[] | null} color
-     * @returns {any}
-     */
-    static #resolveMeshColor(THREE, color) {
-        if (!Array.isArray(color) || color.length < 3) {
-            return 0xc8c8c8
-        }
-        return new THREE.Color(
-            Number(color[0] || 0),
-            Number(color[1] || 0),
-            Number(color[2] || 0)
-        )
     }
 }

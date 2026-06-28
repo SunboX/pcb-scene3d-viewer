@@ -1,6 +1,7 @@
 import { PcbModelArchiveExporter } from './PcbModelArchiveExporter.mjs'
 import { PcbScene3dAdjustmentControlBinder } from './PcbScene3dAdjustmentControlBinder.mjs'
 import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs'
+import { PcbScene3dExternalPlacementDefaults } from './PcbScene3dExternalPlacementDefaults.mjs'
 import { PcbScene3dInteractionHints } from './PcbScene3dInteractionHints.mjs'
 import { PcbScene3dRuntime } from './PcbScene3dRuntime.mjs'
 import { PcbScene3dSelectionInspectorRenderer } from './PcbScene3dSelectionInspectorRenderer.mjs'
@@ -903,11 +904,14 @@ export class PcbScene3dController {
      * @returns {any}
      */
     static #normalizeSceneDescription(sceneDescription) {
-        return PcbScene3dCircuitJsonAdapter.isDirectCircuitJsonModel(
-            sceneDescription
-        )
-            ? PcbScene3dCircuitJsonAdapter.build(sceneDescription)
-            : sceneDescription
+        const normalizedScene =
+            PcbScene3dCircuitJsonAdapter.isDirectCircuitJsonModel(
+                sceneDescription
+            )
+                ? PcbScene3dCircuitJsonAdapter.build(sceneDescription)
+                : sceneDescription
+
+        return PcbScene3dExternalPlacementDefaults.apply(normalizedScene)
     }
 
     /**

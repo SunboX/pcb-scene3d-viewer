@@ -1,6 +1,7 @@
 import { PcbScene3dComponentAdjustment } from './PcbScene3dComponentAdjustment.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 import { PcbScene3dTransparentMeshSplitter } from './PcbScene3dTransparentMeshSplitter.mjs'
+import { PcbScene3dTransparentMountFaceCuller } from './PcbScene3dTransparentMountFaceCuller.mjs'
 
 /**
  * Builds authored static component-body render roots.
@@ -70,6 +71,13 @@ export class PcbScene3dStaticBodyFactory {
         )
         adjustmentGroup.add(renderObject)
         mountRig.faceGroup.add(adjustmentGroup)
+        if (transparent) {
+            PcbScene3dTransparentMountFaceCuller.apply(
+                THREE,
+                placement,
+                mountRig.rootGroup
+            )
+        }
 
         return {
             rootGroup: mountRig.rootGroup,

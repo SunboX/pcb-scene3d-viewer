@@ -11,6 +11,7 @@ import { PcbScene3dDetailCoordinateNormalizer } from './PcbScene3dDetailCoordina
 import { PcbScene3dDrillVoidFactory } from './PcbScene3dDrillVoidFactory.mjs'
 import { PcbScene3dExternalCompanionFallback } from './PcbScene3dExternalCompanionFallback.mjs'
 import { PcbScene3dExternalModels } from './PcbScene3dExternalModels.mjs'
+import { PcbScene3dExternalPlacementDefaults } from './PcbScene3dExternalPlacementDefaults.mjs'
 import { PcbScene3dFallbackBodyFactory } from './PcbScene3dFallbackBodyFactory.mjs'
 import { PcbScene3dFallbackVisibility } from './PcbScene3dFallbackVisibility.mjs'
 import { PcbScene3dInteractionHints } from './PcbScene3dInteractionHints.mjs'
@@ -250,7 +251,6 @@ export class PcbScene3dRuntime {
         this.#groups.clear()
         this.#settleReady()
     }
-
     /**
      * Initializes the async Three.js scene.
      * @returns {Promise<void>}
@@ -960,11 +960,13 @@ export class PcbScene3dRuntime {
      * @returns {any}
      */
     static #normalizeSceneDescription(sceneDescription) {
-        return PcbScene3dCircuitJsonAdapter.isDirectCircuitJsonModel(
-            sceneDescription
-        )
-            ? PcbScene3dCircuitJsonAdapter.build(sceneDescription)
-            : sceneDescription
+        const normalizedScene =
+            PcbScene3dCircuitJsonAdapter.isDirectCircuitJsonModel(
+                sceneDescription
+            )
+                ? PcbScene3dCircuitJsonAdapter.build(sceneDescription)
+                : sceneDescription
+        return PcbScene3dExternalPlacementDefaults.apply(normalizedScene)
     }
 
     /**

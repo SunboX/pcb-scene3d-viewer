@@ -13,9 +13,10 @@ export class PcbScene3dExternalModelCenteringPolicy {
             return true
         }
 
-        return (
-            source === 'model-anchor-fallback' &&
-            Boolean(placement?.modelTransform?.ownerAnchorOffsetMil)
-        )
+        if (!placement?.modelTransform?.ownerAnchorOffsetMil) {
+            return false
+        }
+
+        return source === 'model-anchor-fallback' || source === 'model-bounds'
     }
 }

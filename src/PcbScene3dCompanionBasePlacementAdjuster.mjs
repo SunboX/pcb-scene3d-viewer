@@ -74,6 +74,14 @@ export class PcbScene3dCompanionBasePlacementAdjuster {
             return null
         }
 
+        if (
+            PcbScene3dCompanionBasePlacementAdjuster.#isBottomSide(
+                component?.mountSide
+            )
+        ) {
+            return null
+        }
+
         return {
             designator: String(component?.designator || '').trim(),
             mountSide: String(component?.mountSide || 'top').toLowerCase(),

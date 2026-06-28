@@ -3,6 +3,21 @@ import test from 'node:test'
 import * as THREE from 'three'
 import { PcbScene3dExternalModels } from '../src/PcbScene3dExternalModels.mjs'
 
+const DEFAULT_MODEL_Z_CLEARANCE_MIL = 0.03 * (1000 / 25.4)
+
+/**
+ * Asserts two numbers are close enough for transformed scene coordinates.
+ * @param {number} actual Actual value.
+ * @param {number} expected Expected value.
+ * @returns {void}
+ */
+function assertNearlyEqual(actual, expected) {
+    assert.ok(
+        Math.abs(Number(actual) - Number(expected)) < 0.001,
+        `expected ${actual} to be close to ${expected}`
+    )
+}
+
 /**
  * Resolves the model group from a placement face group.
  * @param {THREE.Group} faceGroup Placement face group.
@@ -49,6 +64,103 @@ function buildLeadedBodyPayload() {
     }
 
     positions.push(-0.1, -0.1, 0.236, 0.1, -0.1, 0.236, 0.1, 0.1, 0.236)
+
+    return {
+        name: 'body',
+        color: [0.2, 0.2, 0.2],
+        positions,
+        normals: [],
+        indices: Array.from(
+            { length: positions.length / 3 },
+            (_, index) => index
+        ),
+        faceColors: []
+    }
+}
+
+/**
+ * Builds a fake bottom connector with sparse raised contacts above a broad
+ * housing face.
+ * @returns {{ name: string, color: number[], positions: number[], normals: never[], indices: number[], faceColors: never[] }}
+ */
+function buildRaisedContactConnectorPayload() {
+    const positions = [
+        -0.01, -0.01, 0.08, 0.01, -0.01, 0.08, 0, 0.01, 0.08, -0.12, -0.1, 0.05,
+        0.12, -0.1, 0.05, 0.12, 0.1, 0.05, -0.12, -0.1, 0.05, 0.12, 0.1, 0.05,
+        -0.12, 0.1, 0.05, -0.12, -0.1, 0, 0.12, -0.1, 0, 0.12, 0.1, 0, -0.12,
+        -0.1, 0, 0.12, 0.1, 0, -0.12, 0.1, 0
+    ]
+
+    return {
+        name: 'body',
+        color: [0.2, 0.2, 0.2],
+        positions,
+        normals: [],
+        indices: Array.from(
+            { length: positions.length / 3 },
+            (_, index) => index
+        ),
+        faceColors: []
+    }
+}
+
+/**
+ * Builds a fake bottom through-hole header with sparse pin tails below a
+ * board-facing shoulder and a larger plastic top face.
+ * @returns {{ name: string, color: number[], positions: number[], normals: never[], indices: number[], faceColors: never[] }}
+ */
+function buildLongPinBodyPayload() {
+    const positions = [
+        -0.01, -0.01, -0.118, 0.01, -0.01, -0.118, 0, 0.01, -0.118
+    ]
+
+    for (let index = 0; index < 4; index += 1) {
+        positions.push(
+            -0.12,
+            -0.1,
+            0,
+            0.12,
+            -0.1,
+            0,
+            0.12,
+            0.1,
+            0,
+            -0.12,
+            -0.1,
+            0,
+            0.12,
+            0.1,
+            0,
+            -0.12,
+            0.1,
+            0
+        )
+    }
+
+    for (let index = 0; index < 14; index += 1) {
+        positions.push(
+            -0.12,
+            -0.1,
+            0.09,
+            0.12,
+            -0.1,
+            0.09,
+            0.12,
+            0.1,
+            0.09,
+            -0.12,
+            -0.1,
+            0.09,
+            0.12,
+            0.1,
+            0.09,
+            -0.12,
+            0.1,
+            0.09
+        )
+    }
+
+    positions.push(-0.12, -0.1, 0.336, 0.12, -0.1, 0.336, 0.12, 0.1, 0.336)
 
     return {
         name: 'body',
@@ -222,6 +334,123 @@ test('PcbScene3dExternalModels seats dominant body planes above sparse lower lea
     assert.equal(modelGroup.position.z, 0)
 })
 
+test('PcbScene3dExternalModels applies default Altium family component Z clearance', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium-pcbdoc',
+            externalPlacements: [
+                {
+                    designator: 'U1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 31.5 },
+                    modelTransform: {
+                        rotationDeg: { x: 0, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'flat-altium-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/flat-altium-body'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0],
+                            normals: [],
+                            indices: [0, 1, 2],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assertNearlyEqual(modelGroup.position.z, DEFAULT_MODEL_Z_CLEARANCE_MIL)
+})
+
+test('PcbScene3dExternalModels applies default KiCad component Z clearance', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'kicad',
+            coordinateSystem: 'kicad-3d-y-up',
+            externalPlacements: [
+                {
+                    designator: 'J1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 31.5 },
+                    modelTransform: {
+                        rotationDeg: { x: 0, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'session',
+                        name: 'flat-kicad-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/flat-kicad-body'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0],
+                            normals: [],
+                            indices: [0, 1, 2],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assertNearlyEqual(modelGroup.position.z, DEFAULT_MODEL_Z_CLEARANCE_MIL)
+})
+
 test('PcbScene3dExternalModels keeps bottom sparse leads below the board face', async () => {
     const externalModelsGroup = new THREE.Group()
     const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
@@ -277,11 +506,131 @@ test('PcbScene3dExternalModels keeps bottom sparse leads below the board face', 
     const faceGroup = sideGroup.children[0]
     const modelGroup = resolvePlacedModelGroup(faceGroup)
 
-    assert.equal(Math.round(modelGroup.position.z * 10) / 10, 15)
+    assertNearlyEqual(modelGroup.position.z, 15 + DEFAULT_MODEL_Z_CLEARANCE_MIL)
     assert.ok(
         placedBounds.max.z <= -31.5 + 0.001,
         'bottom geometry must remain below the PCB underside'
     )
+})
+
+test('PcbScene3dExternalModels seats bottom connector housings above sparse raised contacts', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            board: { thicknessMil: 63 },
+            components: [{ designator: 'J6', componentIndex: 6 }],
+            detail: {
+                pads: [
+                    { componentIndex: 6, holeDiameter: 0 },
+                    { componentIndex: 6, holeDiameter: 0 }
+                ]
+            },
+            externalPlacements: [
+                {
+                    designator: 'J6',
+                    mountSide: 'bottom',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: -31.5 },
+                    modelTransform: {
+                        rotationDeg: { x: -180, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'raised-contact-connector.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/raised-contact-connector'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [buildRaisedContactConnectorPayload()]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    externalModelsGroup.updateMatrixWorld(true)
+    const placedBounds = new THREE.Box3().setFromObject(externalModelsGroup)
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assertNearlyEqual(modelGroup.position.z, 80 + DEFAULT_MODEL_Z_CLEARANCE_MIL)
+    assert.ok(
+        placedBounds.max.z <= -31.5 + 0.001,
+        'bottom connector geometry must remain below the PCB underside'
+    )
+})
+
+test('PcbScene3dExternalModels seats bottom through-hole bodies above long sparse pins', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            board: { thicknessMil: 63 },
+            components: [{ designator: 'J8', componentIndex: 8 }],
+            detail: {
+                pads: [
+                    { componentIndex: 8, holeDiameter: 30 },
+                    { componentIndex: 8, holeDiameter: 30 }
+                ]
+            },
+            externalPlacements: [
+                {
+                    designator: 'J8',
+                    mountSide: 'bottom',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: -31.5 },
+                    modelTransform: {
+                        rotationDeg: { x: 0, y: 0, z: 0 },
+                        offsetMil: { x: 0, y: 0, z: 0 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'long-pin-body.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/long-pin-body'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [buildLongPinBodyPayload()]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assertNearlyEqual(modelGroup.position.z, DEFAULT_MODEL_Z_CLEARANCE_MIL)
 })
 
 test('PcbScene3dExternalModels preserves source-origin model Z placement', async () => {
@@ -342,7 +691,7 @@ test('PcbScene3dExternalModels preserves source-origin model Z placement', async
     const faceGroup = sideGroup.children[0]
     const modelGroup = resolvePlacedModelGroup(faceGroup)
 
-    assert.equal(modelGroup.position.z, 0)
+    assertNearlyEqual(modelGroup.position.z, DEFAULT_MODEL_Z_CLEARANCE_MIL)
 })
 
 test('PcbScene3dExternalModels seats source-specific contact pads on the face', async () => {
@@ -406,7 +755,10 @@ test('PcbScene3dExternalModels seats source-specific contact pads on the face', 
     const faceGroup = sideGroup.children[0]
     const modelGroup = resolvePlacedModelGroup(faceGroup)
 
-    assert.ok(Math.abs(modelGroup.position.z + 20) < 0.001)
+    assertNearlyEqual(
+        modelGroup.position.z,
+        -20 + DEFAULT_MODEL_Z_CLEARANCE_MIL
+    )
 })
 
 test('PcbScene3dExternalModels prefers source-specific zero body planes', async () => {
@@ -469,5 +821,5 @@ test('PcbScene3dExternalModels prefers source-specific zero body planes', async 
     const faceGroup = sideGroup.children[0]
     const modelGroup = resolvePlacedModelGroup(faceGroup)
 
-    assert.equal(modelGroup.position.z, 0)
+    assertNearlyEqual(modelGroup.position.z, DEFAULT_MODEL_Z_CLEARANCE_MIL)
 })

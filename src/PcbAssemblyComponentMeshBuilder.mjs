@@ -1,4 +1,5 @@
 import { PcbAssemblyMeshUtils } from './PcbAssemblyMeshUtils.mjs'
+import { PcbScene3dExternalPlacementDefaults } from './PcbScene3dExternalPlacementDefaults.mjs'
 import { PcbScene3dFootprintBodyBuilder } from './PcbScene3dFootprintBodyBuilder.mjs'
 
 const COMPONENT_COLOR = [0.55, 0.56, 0.58]
@@ -15,10 +16,12 @@ export class PcbAssemblyComponentMeshBuilder {
      * @returns {Promise<{ meshes: object[], diagnostics: object[] }>}
      */
     static async build(sceneDescription, options = {}, progress = null) {
+        const renderSceneDescription =
+            PcbScene3dExternalPlacementDefaults.apply(sceneDescription)
         const diagnostics = []
         const meshes =
             PcbAssemblyComponentMeshBuilder.#buildFallbackComponentMeshes(
-                sceneDescription,
+                renderSceneDescription,
                 options
             )
         const loader =
@@ -29,7 +32,7 @@ export class PcbAssemblyComponentMeshBuilder {
         if (loader && options.includeModels !== false) {
             meshes.push(
                 ...(await PcbAssemblyComponentMeshBuilder.#buildModelMeshes(
-                    sceneDescription,
+                    renderSceneDescription,
                     loader,
                     diagnostics,
                     progress
@@ -39,7 +42,7 @@ export class PcbAssemblyComponentMeshBuilder {
 
         if (options.includeModels !== false) {
             PcbAssemblyComponentMeshBuilder.#appendMissingModelDiagnostics(
-                sceneDescription,
+                renderSceneDescription,
                 diagnostics
             )
         }

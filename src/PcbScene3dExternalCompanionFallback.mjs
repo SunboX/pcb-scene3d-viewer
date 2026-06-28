@@ -28,9 +28,21 @@ export class PcbScene3dExternalCompanionFallback {
             return false
         }
 
-        return PcbScene3dExternalCompanionFallback.#externalPlacements(
-            sceneDescription
-        ).some(
+        const externalPlacements =
+            PcbScene3dExternalCompanionFallback.#externalPlacements(
+                sceneDescription
+            )
+
+        if (
+            PcbScene3dExternalCompanionFallback.#hasCompleteEmbeddedPlacement(
+                externalPlacements,
+                designator
+            )
+        ) {
+            return false
+        }
+
+        return externalPlacements.some(
             (placement) =>
                 PcbScene3dExternalCompanionFallback.#normalizedDesignator(
                     placement?.designator
@@ -188,6 +200,39 @@ export class PcbScene3dExternalCompanionFallback {
                 Number(bounds.depth || 0),
                 Number(bounds.height || 0)
             ) <= 0
+        )
+    }
+
+    /**
+     * Checks whether the same component already has a complete embedded model.
+     * @param {object[]} placements External model placements.
+     * @param {string} designator Normalized component designator.
+     * @returns {boolean}
+     */
+    static #hasCompleteEmbeddedPlacement(placements, designator) {
+        return (Array.isArray(placements) ? placements : []).some(
+            (placement) =>
+                PcbScene3dExternalCompanionFallback.#normalizedDesignator(
+                    placement?.designator
+                ) === designator &&
+                String(placement?.externalModel?.origin || '').toLowerCase() ===
+                    'embedded' &&
+                PcbScene3dExternalCompanionFallback.#hasPositiveBounds(
+                    placement?.projection?.boundsMil
+                )
+        )
+    }
+
+    /**
+     * Checks whether projection bounds describe a complete renderable model.
+     * @param {{ width?: number, depth?: number, height?: number } | undefined} bounds Projection bounds.
+     * @returns {boolean}
+     */
+    static #hasPositiveBounds(bounds) {
+        return (
+            Number(bounds?.width || 0) > 0 &&
+            Number(bounds?.depth || 0) > 0 &&
+            Number(bounds?.height || 0) > 0
         )
     }
 

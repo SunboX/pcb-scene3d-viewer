@@ -352,6 +352,76 @@ test('PcbScene3dExternalModels applies placement opacity to STEP materials', asy
     assert.equal(importedMesh.material.depthWrite, false)
 })
 
+test('PcbScene3dExternalModels hides mount-facing faces on translucent STEP solids', async () => {
+    const externalModelsGroup = new THREE.Group()
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            externalPlacements: [
+                {
+                    designator: 'MECH1',
+                    mountSide: 'top',
+                    rotationDeg: 0,
+                    positionMil: { x: 0, y: 0, z: 0 },
+                    bodyOpacity: 0.24,
+                    modelTransform: {},
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'translucent-solid.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/0'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'translucent solid',
+                            color: [0.8, 0.8, 0.8],
+                            positions: [
+                                0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1,
+                                0, 1, 0, 1, 1, 1, 1, 1
+                            ],
+                            normals: [
+                                0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 1,
+                                0, 0, 1, 0, 0, 1, 0, 0, 1
+                            ],
+                            indices: [0, 1, 2, 2, 1, 3, 4, 5, 6, 6, 5, 7],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    const importedMeshes = []
+    externalModelsGroup.traverse((object) => {
+        if (object?.geometry) {
+            importedMeshes.push(object)
+        }
+    })
+    const hiddenMeshes = importedMeshes.filter((mesh) => mesh.visible === false)
+    const visibleMeshes = importedMeshes.filter(
+        (mesh) => mesh.visible !== false
+    )
+
+    assert.deepEqual(diagnostics, [])
+    assert.equal(importedMeshes.length, 2)
+    assert.equal(hiddenMeshes.length, 1)
+    assert.equal(visibleMeshes.length, 1)
+    assert.equal(
+        hiddenMeshes[0].userData.scene3dMountFacingTransparentFace,
+        true
+    )
+    assert.equal(hiddenMeshes[0].position.z < visibleMeshes[0].position.z, true)
+})
+
 test('PcbScene3dExternalModels splits translucent STEP meshes into sortable chunks', async () => {
     const externalModelsGroup = new THREE.Group()
     const diagnostics = await PcbScene3dExternalModels.loadIntoScene({

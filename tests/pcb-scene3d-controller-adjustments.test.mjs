@@ -317,9 +317,10 @@ class FakeViewportNode {
 
 /**
  * Creates a controller mounted to a fake scene with an external adjustment host.
+ * @param {{ sourceFormat?: string, coordinateSystem?: string, modelOffsetZMil?: number }} [options] Fake scene options.
  * @returns {{ controller: PcbScene3dController, rootNode: FakeSceneRootNode, adjustmentHostNode: FakeSelectionNode, adjustmentCalls: any[], runtimeSelections: string[], runtimeHooks: any }}
  */
-function createExternalHostController() {
+function createExternalHostController(options = {}) {
     const rootNode = new FakeSceneRootNode()
     const viewportNode = new FakeViewportNode(rootNode)
     const adjustmentHostNode = new FakeSelectionNode()
@@ -337,6 +338,12 @@ function createExternalHostController() {
         },
         {
             buildScene: () => ({
+                ...(options.sourceFormat
+                    ? { sourceFormat: options.sourceFormat }
+                    : {}),
+                ...(options.coordinateSystem
+                    ? { coordinateSystem: options.coordinateSystem }
+                    : {}),
                 board: {},
                 components: [
                     {
@@ -363,7 +370,13 @@ function createExternalHostController() {
                         bodyRotationDeg: 0,
                         modelTransform: {
                             rotationDeg: { x: 90, y: 0, z: 180 },
-                            offsetMil: { x: 0, y: 0, z: 39.3700787402 },
+                            offsetMil: {
+                                x: 0,
+                                y: 0,
+                                z: Number(
+                                    options.modelOffsetZMil ?? 39.3700787402
+                                )
+                            },
                             scale: { x: 1, y: 1, z: 1 }
                         },
                         externalModel: {
@@ -406,6 +419,22 @@ function createExternalHostController() {
         runtimeHooks
     }
 }
+
+test('PcbScene3dController shows default Altium component Z clearance in transform controls', () => {
+    const { controller, adjustmentHostNode } = createExternalHostController({
+        sourceFormat: 'altium',
+        modelOffsetZMil: 0
+    })
+
+    assert.equal(
+        adjustmentHostNode.querySelector(
+            '[data-scene-3d-adjustment="offset.z"]'
+        )?.value,
+        '0.030000'
+    )
+
+    controller.dispose()
+})
 
 test('PcbScene3dController edits selected component 3D transform parameters through an external host', () => {
     const { controller, rootNode, adjustmentHostNode, adjustmentCalls } =
