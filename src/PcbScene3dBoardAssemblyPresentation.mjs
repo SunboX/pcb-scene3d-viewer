@@ -19,9 +19,10 @@ export class PcbScene3dBoardAssemblyPresentation {
      * PCB-derived substrate, copper, and silkscreen remain the visual source.
      * @param {any} modelGroup Loaded board assembly group.
      * @param {{ widthMil?: number, heightMil?: number, thicknessMil?: number } | null | undefined} board Board dimensions.
+     * @param {{ sourceFormat?: string }} [options] Presentation options.
      * @returns {void}
      */
-    static apply(modelGroup, board) {
+    static apply(modelGroup, board, options = {}) {
         const meshRecords =
             PcbScene3dBoardAssemblyPresentation.#collectMeshRecords(modelGroup)
         const boardBounds =
@@ -30,7 +31,10 @@ export class PcbScene3dBoardAssemblyPresentation {
                 board
             )
         const surfaceColor =
-            PcbScene3dBoardAssemblyPresentation.#resolveSurfaceColor(board)
+            PcbScene3dBoardAssemblyPresentation.#resolveSurfaceColor(
+                board,
+                options
+            )
         const edgeColor =
             PcbScene3dBoardAssemblyPresentation.#resolveEdgeColor(board)
         const importedSurfaceColor =
@@ -412,11 +416,13 @@ export class PcbScene3dBoardAssemblyPresentation {
     /**
      * Resolves the app-level substrate color for board assembly meshes.
      * @param {{ surfaceColor?: number } | null | undefined} board Board dimensions.
+     * @param {{ sourceFormat?: string }} options Presentation options.
      * @returns {number}
      */
-    static #resolveSurfaceColor(board) {
+    static #resolveSurfaceColor(board, options) {
         return PcbScene3dBoardMaterialPalette.resolveSurfaceColor(board, {
-            hasBoardAssemblyModel: true
+            hasBoardAssemblyModel: true,
+            sourceFormat: options?.sourceFormat
         })
     }
 

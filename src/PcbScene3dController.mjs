@@ -474,6 +474,7 @@ export class PcbScene3dController {
                 this.#handleRuntimeSelection(selection),
             translate: this.#translate
         })
+        this.#applyInitialToggles()
         if (!this.#autoSearchMissingModels) {
             this.#runtime?.setToggle?.('model-search-models', false)
         }
@@ -559,6 +560,25 @@ export class PcbScene3dController {
                 type: 'change',
                 listener
             })
+        })
+    }
+
+    /**
+     * Synchronizes runtime visibility with the shell's initial checkbox state.
+     * @returns {void}
+     */
+    #applyInitialToggles() {
+        const toggles =
+            this.#rootNode?.querySelectorAll('[data-scene-3d-toggle]') || []
+
+        toggles.forEach((toggle) => {
+            const toggleName =
+                toggle?.getAttribute?.('data-scene-3d-toggle') || ''
+            if (!toggleName) {
+                return
+            }
+
+            this.#runtime?.setToggle?.(toggleName, Boolean(toggle.checked))
         })
     }
 

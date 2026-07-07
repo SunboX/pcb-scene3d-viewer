@@ -12,11 +12,21 @@ test('PcbScene3dBoardMaterialPalette keeps authored surface color without board 
     )
 })
 
-test('PcbScene3dBoardMaterialPalette uses procedural mask color with board assembly', () => {
+test('PcbScene3dBoardMaterialPalette keeps Altium board assembly surface color', () => {
     assert.equal(
         PcbScene3dBoardMaterialPalette.resolveSurfaceColor(
             { surfaceColor: 0x17396b },
-            { hasBoardAssemblyModel: true }
+            { hasBoardAssemblyModel: true, sourceFormat: 'altium' }
+        ),
+        0x17396b
+    )
+})
+
+test('PcbScene3dBoardMaterialPalette uses procedural mask color with generated board assembly', () => {
+    assert.equal(
+        PcbScene3dBoardMaterialPalette.resolveSurfaceColor(
+            { surfaceColor: 0x17396b },
+            { hasBoardAssemblyModel: true, sourceFormat: 'gerber' }
         ),
         0x2a5f27
     )

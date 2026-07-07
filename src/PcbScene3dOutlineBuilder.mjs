@@ -30,8 +30,29 @@ export class PcbScene3dOutlineBuilder {
                 y: firstPoint.y
             }
         ]
+        let currentPoint = firstPoint
 
         for (const segment of segments) {
+            const startPoint = PcbScene3dOutlineBuilder.#segmentStartPoint(
+                segment,
+                centerX,
+                centerY
+            )
+            if (
+                startPoint &&
+                PcbScene3dOutlineBuilder.#distanceBetween(
+                    currentPoint,
+                    startPoint
+                ) >= PcbScene3dOutlineBuilder.#DEGENERATE_LINE_EPSILON
+            ) {
+                commands.push({
+                    type: 'move',
+                    x: startPoint.x,
+                    y: startPoint.y
+                })
+                currentPoint = startPoint
+            }
+
             if (segment.type === 'arc') {
                 const arcCommand = PcbScene3dOutlineBuilder.#buildArcCommand(
                     segment,
@@ -40,6 +61,8 @@ export class PcbScene3dOutlineBuilder {
                 )
                 if (arcCommand) {
                     commands.push(arcCommand)
+                    currentPoint =
+                        PcbScene3dOutlineBuilder.#commandEndPoint(arcCommand)
                 }
                 continue
             }
@@ -51,10 +74,41 @@ export class PcbScene3dOutlineBuilder {
             )
             if (lineCommand) {
                 commands.push(lineCommand)
+                currentPoint =
+                    PcbScene3dOutlineBuilder.#commandEndPoint(lineCommand)
             }
         }
 
         return commands
+    }
+
+    /**
+     * Converts one segment start into local centered scene coordinates.
+     * @param {Record<string, number | string>} segment Source segment.
+     * @param {number} centerX Board center X.
+     * @param {number} centerY Board center Y.
+     * @returns {{ x: number, y: number } | null}
+     */
+    static #segmentStartPoint(segment, centerX, centerY) {
+        const x = Number(segment?.x1)
+        const y = Number(segment?.y1)
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            return null
+        }
+
+        return PcbScene3dOutlineBuilder.#toLocalPoint(x, y, centerX, centerY)
+    }
+
+    /**
+     * Resolves one generated command's endpoint.
+     * @param {Record<string, number | boolean>} command Outline command.
+     * @returns {{ x: number, y: number }}
+     */
+    static #commandEndPoint(command) {
+        return {
+            x: Number(command.endX ?? command.x ?? 0),
+            y: Number(command.endY ?? command.y ?? 0)
+        }
     }
 
     /**

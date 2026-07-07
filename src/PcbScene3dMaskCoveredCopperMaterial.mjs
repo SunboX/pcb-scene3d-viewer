@@ -6,7 +6,7 @@ import { PcbScene3dMaterialFinish } from './PcbScene3dMaterialFinish.mjs'
 export class PcbScene3dMaskCoveredCopperMaterial {
     static #COPPER_COLOR = 0xd9a61d
     static #DEFAULT_SOLDER_MASK_COLOR = 0x2a5f27
-    static #COPPER_BLEND = 0.2
+    static #COPPER_BLEND = 0.04
 
     /**
      * Builds a mask-covered copper material.

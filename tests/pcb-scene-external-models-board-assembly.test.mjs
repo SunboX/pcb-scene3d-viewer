@@ -215,6 +215,7 @@ test('PcbScene3dExternalModels mirrors Altium board assembly source Y into detai
 
     assert.equal(wrapperGroup.position.x, -500)
     assert.equal(wrapperGroup.position.y, 250)
+    assert.equal(modelGroup.children[0].material[0].color.getHex(), 0x17396b)
     assert.deepEqual(Array.from(componentMesh.geometry.index.array), [0, 2, 1])
     assert.deepEqual(
         Array.from(componentPositions)

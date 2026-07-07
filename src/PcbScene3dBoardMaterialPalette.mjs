@@ -7,17 +7,32 @@ export class PcbScene3dBoardMaterialPalette {
     /**
      * Resolves the solder-mask face color for the generated board shell.
      * @param {{ surfaceColor?: number } | undefined} board Board metadata.
-     * @param {{ hasBoardAssemblyModel?: boolean }} [options] Scene options.
+     * @param {{ hasBoardAssemblyModel?: boolean, sourceFormat?: string }} [options] Scene options.
      * @returns {number}
      */
     static resolveSurfaceColor(board, options = {}) {
-        if (options.hasBoardAssemblyModel) {
+        if (
+            options.hasBoardAssemblyModel &&
+            !PcbScene3dBoardMaterialPalette.#shouldPreserveAuthoredSurfaceColor(
+                options
+            )
+        ) {
             return PcbScene3dBoardMaterialPalette.#DEFAULT_SURFACE_COLOR
         }
 
         return Number.isInteger(board?.surfaceColor)
             ? board.surfaceColor
             : PcbScene3dBoardMaterialPalette.#DEFAULT_SURFACE_COLOR
+    }
+
+    /**
+     * Returns true when the source format supplies display-stable board colors.
+     * @param {{ sourceFormat?: string }} options Scene options.
+     * @returns {boolean}
+     */
+    static #shouldPreserveAuthoredSurfaceColor(options) {
+        const sourceFormat = String(options?.sourceFormat || '').toLowerCase()
+        return sourceFormat === 'altium' || sourceFormat.startsWith('altium-')
     }
 
     /**

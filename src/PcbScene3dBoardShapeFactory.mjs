@@ -1,4 +1,5 @@
 import { PcbScene3dBoardEdgeCutoutBuilder } from './PcbScene3dBoardEdgeCutoutBuilder.mjs'
+import { PcbScene3dBoardCutoutPathFactory } from './PcbScene3dBoardCutoutPathFactory.mjs'
 import { PcbScene3dDrillPathFactory } from './PcbScene3dDrillPathFactory.mjs'
 import { PcbScene3dOutlineBuilder } from './PcbScene3dOutlineBuilder.mjs'
 
@@ -36,6 +37,11 @@ export class PcbScene3dBoardShapeFactory {
         )
         const contourPoints =
             PcbScene3dBoardEdgeCutoutBuilder.resolveShapePoints(baseShape)
+        const boardCutouts = PcbScene3dBoardCutoutPathFactory.resolve(
+            THREE,
+            board,
+            normalizeBoardPoint
+        )
         const drillCutouts = PcbScene3dBoardShapeFactory.#resolveDrillCutouts(
             THREE,
             detail,
@@ -61,12 +67,20 @@ export class PcbScene3dBoardShapeFactory {
         const finalContourPoints = edgeCutouts.length
             ? PcbScene3dBoardEdgeCutoutBuilder.resolveShapePoints(shape)
             : contourPoints
-
+        for (const cutout of boardCutouts) {
+            if (
+                PcbScene3dBoardEdgeCutoutBuilder.isHoleInsideContour(
+                    cutout.points,
+                    finalContourPoints
+                )
+            ) {
+                shape.holes.push(cutout.path)
+            }
+        }
         for (const cutout of drillCutouts) {
             if (edgeCutouts.includes(cutout)) {
                 continue
             }
-
             if (
                 !cutout.isCircular ||
                 PcbScene3dBoardEdgeCutoutBuilder.isHoleInsideContour(
@@ -77,7 +91,6 @@ export class PcbScene3dBoardShapeFactory {
                 shape.holes.push(cutout.path)
             }
         }
-
         return shape
     }
 

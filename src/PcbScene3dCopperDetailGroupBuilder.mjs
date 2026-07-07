@@ -25,9 +25,14 @@ export class PcbScene3dCopperDetailGroupBuilder {
      */
     static build(THREE, sceneDescription, topZ, normalizePoint) {
         const group = new THREE.Group()
-        const drillCutouts = PcbScene3dCopperDrillCutoutBuilder.resolve(
-            sceneDescription?.detail
-        )
+        const drillCutouts = [
+            ...PcbScene3dCopperDrillCutoutBuilder.resolve(
+                sceneDescription?.detail
+            ),
+            ...PcbScene3dCopperDetailGroupBuilder.#resolveBoardCutouts(
+                sceneDescription?.board
+            )
+        ]
         const coveredGroup =
             PcbScene3dCopperDetailGroupBuilder.#buildCoveredGroup(
                 THREE,
@@ -188,6 +193,43 @@ export class PcbScene3dCopperDetailGroupBuilder {
     }
 
     /**
+     * Resolves explicit through-board cutouts that copper detail must not cover.
+     * @param {{ cutouts?: any[] } | undefined} board Board metadata.
+     * @returns {{ x: number, y: number }[][]}
+     */
+    static #resolveBoardCutouts(board) {
+        return (Array.isArray(board?.cutouts) ? board.cutouts : [])
+            .map((cutout) =>
+                PcbScene3dCopperDetailGroupBuilder.#resolveBoardCutoutPoints(
+                    cutout
+                )
+            )
+            .filter((points) => points.length >= 3)
+    }
+
+    /**
+     * Resolves one explicit board cutout loop in source board coordinates.
+     * @param {any} cutout Cutout source.
+     * @returns {{ x: number, y: number }[]}
+     */
+    static #resolveBoardCutoutPoints(cutout) {
+        const points = Array.isArray(cutout?.points)
+            ? cutout.points
+            : Array.isArray(cutout?.vertices)
+              ? cutout.vertices
+              : Array.isArray(cutout)
+                ? cutout
+                : []
+
+        return points
+            .map((point) => ({
+                x: Number(point?.x ?? point?.[0]),
+                y: Number(point?.y ?? point?.[1])
+            }))
+            .filter((point) => Number.isFinite(point.x + point.y))
+    }
+
+    /**
      * Resolves solder-mask material options for covered copper relief.
      * @param {object} sceneDescription Scene description.
      * @returns {{ solderMaskColor: number }}
@@ -199,7 +241,8 @@ export class PcbScene3dCopperDetailGroupBuilder {
                 {
                     hasBoardAssemblyModel: Boolean(
                         sceneDescription?.boardAssemblyModel
-                    )
+                    ),
+                    sourceFormat: sceneDescription?.sourceFormat
                 }
             )
         }

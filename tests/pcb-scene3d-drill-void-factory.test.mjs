@@ -3,7 +3,27 @@ import test from 'node:test'
 import { PcbScene3dDrillVoidFactory } from '../src/PcbScene3dDrillVoidFactory.mjs'
 import * as THREE from 'three'
 
-test('PcbScene3dDrillVoidFactory builds open circular drill interiors', () => {
+/**
+ * Filters direct group children by geometry type.
+ * @param {any} group Source group.
+ * @param {string} type Geometry type.
+ * @returns {any[]}
+ */
+function childrenByGeometryType(group, type) {
+    return group.children.filter((child) => child.geometry?.type === type)
+}
+
+/**
+ * Filters direct group children by object name.
+ * @param {any} group Source group.
+ * @param {string} name Object name.
+ * @returns {any[]}
+ */
+function childrenByName(group, name) {
+    return group.children.filter((child) => child.name === name)
+}
+
+test('PcbScene3dDrillVoidFactory builds open circular drill interiors without aperture caps', () => {
     const group = PcbScene3dDrillVoidFactory.buildGroup(
         THREE,
         {
@@ -17,13 +37,18 @@ test('PcbScene3dDrillVoidFactory builds open circular drill interiors', () => {
     )
 
     assert.equal(group.name, 'drill-voids')
-    assert.equal(group.children.length, 2)
-    assert.equal(group.children[0].geometry.type, 'CylinderGeometry')
-    assert.equal(group.children[0].geometry.parameters.openEnded, true)
-    assert.equal(group.children[0].rotation.x, Math.PI / 2)
-    assert.equal(group.children[0].position.x, 20)
-    assert.equal(group.children[0].position.y, 30)
-    assert.equal(group.children[0].position.z, 0)
+    const interiors = childrenByGeometryType(group, 'CylinderGeometry')
+    const topShadows = childrenByName(group, 'drill-void-shadow-top')
+    const bottomShadows = childrenByName(group, 'drill-void-shadow-bottom')
+
+    assert.equal(interiors.length, 2)
+    assert.equal(topShadows.length, 0)
+    assert.equal(bottomShadows.length, 0)
+    assert.equal(interiors[0].geometry.parameters.openEnded, true)
+    assert.equal(interiors[0].rotation.x, Math.PI / 2)
+    assert.equal(interiors[0].position.x, 20)
+    assert.equal(interiors[0].position.y, 30)
+    assert.equal(interiors[0].position.z, 0)
 })
 
 test('PcbScene3dDrillVoidFactory skips slotted interiors without capping them', () => {
@@ -51,7 +76,7 @@ test('PcbScene3dDrillVoidFactory skips slotted interiors without capping them', 
     assert.equal(group.children.length, 0)
 })
 
-test('PcbScene3dDrillVoidFactory leaves plated drill interiors to copper barrels', () => {
+test('PcbScene3dDrillVoidFactory keeps plated drill holes open like through holes', () => {
     const group = PcbScene3dDrillVoidFactory.buildGroup(
         THREE,
         {
@@ -78,13 +103,21 @@ test('PcbScene3dDrillVoidFactory leaves plated drill interiors to copper barrels
         { enabled: true }
     )
 
-    assert.equal(group.children.length, 2)
+    const interiors = childrenByGeometryType(group, 'CylinderGeometry')
+    const topShadows = childrenByName(group, 'drill-void-shadow-top')
+    const bottomShadows = childrenByName(group, 'drill-void-shadow-bottom')
+
+    assert.equal(interiors.length, 4)
+    assert.equal(topShadows.length, 0)
+    assert.equal(bottomShadows.length, 0)
     assert.deepEqual(
-        group.children
+        interiors
             .map((child) => [child.position.x, child.position.y])
             .sort((left, right) => left[0] - right[0]),
         [
+            [-20, -5],
             [-6, -5],
+            [20, 30],
             [26, 30]
         ]
     )
@@ -109,9 +142,13 @@ test('PcbScene3dDrillVoidFactory skips edge-cutout drill interiors', () => {
         }
     )
 
-    assert.equal(group.children.length, 1)
-    assert.equal(group.children[0].position.x, 0)
-    assert.equal(group.children[0].position.y, 0)
+    const interiors = childrenByGeometryType(group, 'CylinderGeometry')
+    const shadows = childrenByName(group, 'drill-void-shadow-top')
+
+    assert.equal(interiors.length, 1)
+    assert.equal(shadows.length, 0)
+    assert.equal(interiors[0].position.x, 0)
+    assert.equal(interiors[0].position.y, 0)
 })
 
 test('PcbScene3dDrillVoidFactory stays empty when disabled', () => {

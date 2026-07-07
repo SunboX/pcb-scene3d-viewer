@@ -57,6 +57,37 @@ test('renderScene3d emits viewport and control chrome for the 3D scene', () => {
 })
 
 /**
+ * Verifies host applications can choose a conservative initial component
+ * model state without removing the user-facing control.
+ */
+test('renderScene3d accepts an unchecked external model initial toggle', () => {
+    const markup = PcbScene3dShellRenderer.render(
+        {
+            pcb: {
+                boardOutline: { widthMil: 1200, heightMil: 800, segments: [] },
+                components: [{ designator: 'U1' }]
+            },
+            bom: []
+        },
+        null,
+        {
+            initialToggles: {
+                'external-models': false
+            }
+        }
+    )
+
+    assert.match(
+        markup,
+        /<input type="checkbox" data-scene-3d-toggle="external-models" \/>External models/
+    )
+    assert.doesNotMatch(
+        markup,
+        /<input type="checkbox" checked data-scene-3d-toggle="external-models" \/>External models/
+    )
+})
+
+/**
  * Verifies the viewer stylesheet includes the interactive 3D scene shell.
  */
 test('scene3d stylesheet defines viewport, controls, and canvas layout', async () => {

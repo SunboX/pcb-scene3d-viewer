@@ -82,3 +82,20 @@ test('PcbScene3dOutlineBuilder keeps rounded board corners ordered and stable', 
     assert.ok(Math.abs((firstArc?.startAngleRad || 0) - Math.PI) < 0.001)
     assert.ok(Math.abs((firstArc?.endAngleRad || 0) + Math.PI / 2) < 0.001)
 })
+
+test('PcbScene3dOutlineBuilder starts a new path for disconnected outline segments', () => {
+    const commands = PcbScene3dOutlineBuilder.buildCommands({
+        centerX: 0,
+        centerY: 0,
+        segments: [
+            { type: 'line', x1: 0, y1: 0, x2: 10, y2: 0 },
+            { type: 'line', x1: 100, y1: 100, x2: 110, y2: 100 }
+        ]
+    })
+
+    assert.deepEqual(
+        commands.map((command) => command.type),
+        ['move', 'line', 'move', 'line']
+    )
+    assert.deepEqual(commands[2], { type: 'move', x: 100, y: 100 })
+})

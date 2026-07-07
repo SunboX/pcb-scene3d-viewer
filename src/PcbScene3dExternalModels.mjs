@@ -281,7 +281,8 @@ export class PcbScene3dExternalModels {
             return PcbScene3dExternalModels.#buildBoardAssemblyWrapper(
                 THREE,
                 placement,
-                modelGroup
+                modelGroup,
+                sceneDescription
             )
         }
 
@@ -371,13 +372,25 @@ export class PcbScene3dExternalModels {
      * @param {any} THREE
      * @param {{ positionMil?: { x?: number, y?: number, z?: number }, board?: { widthMil?: number, heightMil?: number, thicknessMil?: number }, sourceFrameScale?: { y?: number } }} placement
      * @param {any} modelGroup
+     * @param {{ sourceFormat?: string } | null | undefined} sceneDescription Scene description.
      * @returns {any}
      */
-    static #buildBoardAssemblyWrapper(THREE, placement, modelGroup) {
+    static #buildBoardAssemblyWrapper(
+        THREE,
+        placement,
+        modelGroup,
+        sceneDescription
+    ) {
         const wrapperGroup = new THREE.Group()
         const positionMil = placement?.positionMil || {}
 
-        PcbScene3dBoardAssemblyPresentation.apply(modelGroup, placement?.board)
+        PcbScene3dBoardAssemblyPresentation.apply(
+            modelGroup,
+            placement?.board,
+            {
+                sourceFormat: sceneDescription?.sourceFormat
+            }
+        )
         PcbScene3dBoardAssemblyTransform.apply(modelGroup, placement)
         wrapperGroup.position.set(
             Number(positionMil.x || 0),

@@ -1,4 +1,5 @@
 import { PcbScene3dBoardMaterialPalette } from './PcbScene3dBoardMaterialPalette.mjs'
+import { PcbScene3dBoardCutoutPathFactory } from './PcbScene3dBoardCutoutPathFactory.mjs'
 import { PcbScene3dCutoutGeometryFilter } from './PcbScene3dCutoutGeometryFilter.mjs'
 import { PcbScene3dDrillPathFactory } from './PcbScene3dDrillPathFactory.mjs'
 import { PcbScene3dMaterialFinish } from './PcbScene3dMaterialFinish.mjs'
@@ -51,12 +52,14 @@ export class PcbScene3dBoardSolderMaskFactory {
         const topMaterial = PcbScene3dBoardSolderMaskFactory.#buildMaterial(
             THREE,
             board,
-            THREE.FrontSide
+            THREE.FrontSide,
+            sceneDescription?.sourceFormat
         )
         const bottomMaterial = PcbScene3dBoardSolderMaskFactory.#buildMaterial(
             THREE,
             board,
-            THREE.BackSide
+            THREE.BackSide,
+            sceneDescription?.sourceFormat
         )
         const z = Number(board?.thicknessMil || 0) / 2
 
@@ -148,6 +151,11 @@ export class PcbScene3dBoardSolderMaskFactory {
         )
         const contourPoints =
             PcbScene3dBoardSolderMaskFactory.#resolveShapePoints(shape)
+        const boardCutouts = PcbScene3dBoardCutoutPathFactory.resolve(
+            THREE,
+            board,
+            normalizeBoardPoint
+        )
         const drillCutouts =
             PcbScene3dBoardSolderMaskFactory.#resolveDrillCutouts(
                 THREE,
@@ -155,8 +163,8 @@ export class PcbScene3dBoardSolderMaskFactory {
                 normalizeBoardPoint
             )
         const { shapeHoles, clippingCutouts } =
-            PcbScene3dBoardSolderMaskFactory.#partitionDrillCutouts(
-                drillCutouts,
+            PcbScene3dBoardSolderMaskFactory.#partitionCutouts(
+                [...boardCutouts, ...drillCutouts],
                 contourPoints
             )
 
@@ -395,16 +403,16 @@ export class PcbScene3dBoardSolderMaskFactory {
     }
 
     /**
-     * Splits drill cutouts into safe shape holes and fallback clip polygons.
-     * @param {{ path: any, points: { x: number, y: number }[] }[]} drillCutouts
+     * Splits cutouts into safe shape holes and fallback clip polygons.
+     * @param {{ path: any, points: { x: number, y: number }[] }[]} cutouts
      * @param {{ x: number, y: number }[]} contourPoints
      * @returns {{ shapeHoles: { path: any, points: { x: number, y: number }[] }[], clippingCutouts: { path: any, points: { x: number, y: number }[] }[] }}
      */
-    static #partitionDrillCutouts(drillCutouts, contourPoints) {
+    static #partitionCutouts(cutouts, contourPoints) {
         const shapeHoles = []
         const clippingCutouts = []
 
-        for (const cutout of Array.isArray(drillCutouts) ? drillCutouts : []) {
+        for (const cutout of Array.isArray(cutouts) ? cutouts : []) {
             if (
                 PcbScene3dBoardSolderMaskFactory.#isHoleInsideContour(
                     cutout.points,
@@ -596,12 +604,14 @@ export class PcbScene3dBoardSolderMaskFactory {
      * @param {any} THREE
      * @param {{ surfaceColor?: number }} board Board metadata.
      * @param {number} side Rendered material side.
+     * @param {string | undefined} sourceFormat Scene source format.
      * @returns {any}
      */
-    static #buildMaterial(THREE, board, side) {
+    static #buildMaterial(THREE, board, side, sourceFormat) {
         return new THREE.MeshStandardMaterial({
             color: PcbScene3dBoardMaterialPalette.resolveSurfaceColor(board, {
-                hasBoardAssemblyModel: true
+                hasBoardAssemblyModel: true,
+                sourceFormat
             }),
             ...PcbScene3dMaterialFinish.semiMatteSolderMaskProperties(),
             polygonOffset: true,

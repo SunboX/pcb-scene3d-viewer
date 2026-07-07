@@ -61,6 +61,32 @@ test('PcbScene3dBoardSolderMaskFactory builds coplanar drilled board-assembly ma
     )
 })
 
+test('PcbScene3dBoardSolderMaskFactory keeps Altium mask face color', () => {
+    const group = PcbScene3dBoardSolderMaskFactory.buildGroup(
+        THREE,
+        {
+            sourceFormat: 'altium',
+            board: {
+                widthMil: 1000,
+                heightMil: 500,
+                thicknessMil: 62,
+                centerX: 500,
+                centerY: 250,
+                surfaceColor: 0x17396b,
+                segments: []
+            },
+            boardAssemblyModel: { name: 'assembly.step' },
+            detail: {
+                pads: [],
+                vias: []
+            }
+        },
+        (x, y) => ({ x: x - 500, y: 250 - y })
+    )
+
+    assert.equal(group.children[0].material.color.getHex(), 0x17396b)
+})
+
 test('PcbScene3dBoardSolderMaskFactory keeps edge drill apertures anchored', () => {
     const group = PcbScene3dBoardSolderMaskFactory.buildGroup(
         THREE,
@@ -120,6 +146,50 @@ test('PcbScene3dBoardSolderMaskFactory cuts edge drills out of the mask surface'
         countTrianglesCoveringPoint(group.children[0], drillCenter),
         0,
         'Expected the solder-mask mesh to leave the drilled opening empty'
+    )
+})
+
+test('PcbScene3dBoardSolderMaskFactory cuts explicit board cutouts out of the mask surface', () => {
+    const group = PcbScene3dBoardSolderMaskFactory.buildGroup(
+        THREE,
+        {
+            board: {
+                widthMil: 100,
+                heightMil: 80,
+                thicknessMil: 12,
+                centerX: 50,
+                centerY: 40,
+                surfaceColor: 0x17396b,
+                segments: [],
+                cutouts: [
+                    {
+                        points: [
+                            { x: 42, y: 32 },
+                            { x: 58, y: 32 },
+                            { x: 58, y: 48 },
+                            { x: 42, y: 48 }
+                        ]
+                    }
+                ]
+            },
+            boardAssemblyModel: { name: 'assembly.step' },
+            detail: {
+                pads: [],
+                vias: []
+            }
+        },
+        (x, y) => ({ x: x - 50, y: y - 40 })
+    )
+
+    assert.equal(group.children[0].geometry.parameters.shapes.holes.length, 1)
+    assert.equal(
+        countTrianglesCoveringPoint(group.children[0], { x: 0, y: 0 }),
+        0,
+        'Expected the solder-mask mesh to leave the explicit cutout empty'
+    )
+    assert.ok(
+        countTrianglesCoveringPoint(group.children[0], { x: 20, y: 0 }) > 0,
+        'Expected mask outside the explicit cutout to remain present'
     )
 })
 

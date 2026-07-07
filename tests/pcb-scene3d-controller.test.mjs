@@ -250,14 +250,17 @@ class FakeSceneRootNode {
     /** @type {FakeSelectionNode} */
     #selectionNode
 
-    constructor() {
+    /**
+     * @param {FakeToggle[]} [toggles]
+     */
+    constructor(toggles = [new FakeToggle('external-models', true)]) {
         this.#buttons = [
             new FakeButton('top'),
             new FakeButton('bottom'),
             new FakeButton('isometric')
         ]
         this.#exportButton = new FakeExportButton()
-        this.#toggles = [new FakeToggle('external-models', true)]
+        this.#toggles = toggles
         this.#diagnosticsNode = new FakeDiagnosticsNode()
         this.#selectionNode = new FakeSelectionNode()
     }
@@ -369,7 +372,6 @@ test('PcbScene3dController forwards presets, toggles, and diagnostics', () => {
         toggles: [],
         disposed: false
     }
-
     const controller = new PcbScene3dController(
         viewportNode,
         { pcb: { boardOutline: {}, components: [] } },
@@ -417,6 +419,7 @@ test('PcbScene3dController forwards presets, toggles, and diagnostics', () => {
     assert.equal(rootNode.getButtons()[2].getAttribute('aria-pressed'), 'true')
     assert.equal(rootNode.getButtons()[2].classList.contains('is-active'), true)
     assert.deepEqual(runtimeCalls.toggles, [
+        ['external-models', true],
         ['external-models', false],
         ['model-search-models', false],
         ['model-search-models', true]
@@ -425,9 +428,7 @@ test('PcbScene3dController forwards presets, toggles, and diagnostics', () => {
         rootNode.getDiagnosticsNode().textContent,
         /Missing external model/
     )
-
     controller.dispose()
-
     assert.equal(runtimeCalls.disposed, true)
 })
 
@@ -993,6 +994,5 @@ test('PcbScene3dController reports when no models are available for ZIP export',
         rootNode.getDiagnosticsNode().textContent,
         /No STEP or WRL models were resolved for export\./
     )
-
     controller.dispose()
 })

@@ -9,13 +9,16 @@ export class PcbScene3dGeometryZCompressor {
      * Rewrites mask-covered copper relief below exposed copper height.
      * @param {any | null} mesh Mesh with a position attribute.
      * @param {number} sourceCenterZ Original geometry center Z.
+     * @param {{ centerOffsetMil?: number }} [options] Compression options.
      * @returns {void}
      */
-    static compressMaskCoveredCopperMesh(mesh, sourceCenterZ) {
+    static compressMaskCoveredCopperMesh(mesh, sourceCenterZ, options = {}) {
         PcbScene3dGeometryZCompressor.compressMesh(
             mesh,
             sourceCenterZ,
-            sourceCenterZ + MASK_COVERED_CENTER_OFFSET_MIL,
+            sourceCenterZ +
+                MASK_COVERED_CENTER_OFFSET_MIL +
+                Number(options?.centerOffsetMil || 0),
             MASK_COVERED_THICKNESS_MIL
         )
     }

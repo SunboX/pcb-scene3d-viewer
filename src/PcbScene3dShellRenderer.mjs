@@ -8,9 +8,10 @@ export class PcbScene3dShellRenderer {
      * Renders the interactive 3D scene shell.
      * @param {{ pcb?: { boardOutline: { widthMil: number, heightMil: number }, components: { designator: string }[] }, bom: { quantity: number }[] }} documentModel
      * @param {((key: string) => string) | null} [translate] Translation lookup.
+     * @param {{ initialToggles?: { 'external-models'?: boolean, 'fallback-bodies'?: boolean, copper?: boolean } }} [options] Rendering options.
      * @returns {string}
      */
-    static render(documentModel, translate = null) {
+    static render(documentModel, translate = null, options = {}) {
         const t = PcbScene3dText.createTranslator(translate)
         const pcb = documentModel?.pcb
         if (!pcb) {
@@ -71,13 +72,27 @@ export class PcbScene3dShellRenderer {
             '<aside class="scene-3d__controls" aria-label="' +
             PcbScene3dShellRenderer.#escapeHtml(t('scene3d.controlsAria')) +
             '">' +
-            '<label class="scene-3d__toggle"><input type="checkbox" checked data-scene-3d-toggle="external-models" />' +
+            '<label class="scene-3d__toggle"><input type="checkbox"' +
+            PcbScene3dShellRenderer.#checkedAttribute(
+                options,
+                'external-models',
+                true
+            ) +
+            ' data-scene-3d-toggle="external-models" />' +
             PcbScene3dShellRenderer.#escapeHtml(t('scene3d.externalModels')) +
             '</label>' +
-            '<label class="scene-3d__toggle"><input type="checkbox" data-scene-3d-toggle="fallback-bodies" />' +
+            '<label class="scene-3d__toggle"><input type="checkbox"' +
+            PcbScene3dShellRenderer.#checkedAttribute(
+                options,
+                'fallback-bodies',
+                false
+            ) +
+            ' data-scene-3d-toggle="fallback-bodies" />' +
             PcbScene3dShellRenderer.#escapeHtml(t('scene3d.fallbackBodies')) +
             '</label>' +
-            '<label class="scene-3d__toggle"><input type="checkbox" checked data-scene-3d-toggle="copper" />' +
+            '<label class="scene-3d__toggle"><input type="checkbox"' +
+            PcbScene3dShellRenderer.#checkedAttribute(options, 'copper', true) +
+            ' data-scene-3d-toggle="copper" />' +
             PcbScene3dShellRenderer.#escapeHtml(t('scene3d.copperDetail')) +
             '</label>' +
             '<section class="scene-3d__selection" aria-live="polite"><h4 class="scene-3d__selection-title">' +
@@ -112,6 +127,25 @@ export class PcbScene3dShellRenderer {
             bomRows +
             '</dd></div></dl></section>'
         )
+    }
+
+    /**
+     * Returns the checkbox checked attribute for one scene toggle.
+     * @param {{ initialToggles?: Record<string, boolean> }} options Renderer options.
+     * @param {string} toggleName Toggle identifier.
+     * @param {boolean} defaultChecked Package default state.
+     * @returns {string}
+     */
+    static #checkedAttribute(options, toggleName, defaultChecked) {
+        const initialToggles = options?.initialToggles || {}
+        const checked = Object.prototype.hasOwnProperty.call(
+            initialToggles,
+            toggleName
+        )
+            ? initialToggles[toggleName] === true
+            : defaultChecked
+
+        return checked ? ' checked' : ''
     }
 
     /**

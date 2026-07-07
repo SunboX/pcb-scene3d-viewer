@@ -68,6 +68,41 @@ test('PcbScene3dBoardShapeFactory cuts circular and slotted drills into the boar
     )
 })
 
+test('PcbScene3dBoardShapeFactory cuts explicit board cutouts into the board shape', () => {
+    const shape = PcbScene3dBoardShapeFactory.buildShape(
+        THREE,
+        {
+            widthMil: 100,
+            heightMil: 80,
+            segments: [],
+            cutouts: [
+                {
+                    points: [
+                        { x: 45, y: 35 },
+                        { x: 55, y: 35 },
+                        { x: 55, y: 45 },
+                        { x: 45, y: 45 }
+                    ]
+                }
+            ]
+        },
+        {},
+        (x, y) => ({ x: x - 50, y: y - 40 })
+    )
+
+    assert.equal(shape.holes.length, 1)
+    assert.deepEqual(
+        shape.holes[0].getPoints().map((point) => [point.x, point.y]),
+        [
+            [-5, -5],
+            [5, -5],
+            [5, 5],
+            [-5, 5],
+            [-5, -5]
+        ]
+    )
+})
+
 test('PcbScene3dBoardShapeFactory keeps board drill walls without filling the aperture', () => {
     const geometry = PcbScene3dBoardShapeFactory.buildGeometry(
         THREE,

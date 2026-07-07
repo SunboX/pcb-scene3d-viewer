@@ -33,15 +33,13 @@ export class PcbScene3dDrillVoidFactory {
             return group
         }
 
-        const material = PcbScene3dDrillVoidFactory.#buildMaterial(
+        const material = PcbScene3dDrillVoidFactory.#buildInteriorMaterial(
             THREE,
             options
         )
         const geometryCache = new Map()
         const depth = Math.max(Math.abs(Number(topZ) - Number(bottomZ)), 1)
         const centerZ = (Number(topZ || 0) + Number(bottomZ || 0)) / 2
-        const platedDrillKeys =
-            PcbScene3dDrillVoidFactory.#buildPlatedDrillKeySet(detail)
         const edgeDrillKeys = PcbScene3dDrillVoidFactory.#buildEdgeDrillKeySet(
             THREE,
             detail,
@@ -52,9 +50,7 @@ export class PcbScene3dDrillVoidFactory {
         PcbScene3dDrillPathFactory.resolveBoardDrillSpecs(detail).forEach(
             (drillSpec) => {
                 if (
-                    platedDrillKeys.has(
-                        PcbScene3dDrillVoidFactory.#drillKey(drillSpec)
-                    ) ||
+                    PcbScene3dDrillVoidFactory.#isSlottedDrill(drillSpec) ||
                     edgeDrillKeys.has(
                         PcbScene3dDrillVoidFactory.#drillKey(drillSpec)
                     )
@@ -102,63 +98,6 @@ export class PcbScene3dDrillVoidFactory {
     }
 
     /**
-     * Builds a lookup for drill holes that already have copper barrel geometry.
-     * @param {{ pads?: any[], vias?: any[] }} detail
-     * @returns {Set<string>}
-     */
-    static #buildPlatedDrillKeySet(detail) {
-        const platedDrills = new Set()
-
-        for (const via of detail?.vias || []) {
-            if (PcbScene3dDrillVoidFactory.#hasViaCopperAnnulus(via)) {
-                platedDrills.add(PcbScene3dDrillVoidFactory.#drillKey(via))
-            }
-        }
-
-        for (const pad of detail?.pads || []) {
-            if (PcbScene3dDrillVoidFactory.#hasPadCopperAnnulus(pad)) {
-                platedDrills.add(PcbScene3dDrillVoidFactory.#drillKey(pad))
-            }
-        }
-
-        return platedDrills
-    }
-
-    /**
-     * Checks whether one via has a copper annulus around its drill.
-     * @param {any} via Via primitive.
-     * @returns {boolean}
-     */
-    static #hasViaCopperAnnulus(via) {
-        const holeDiameter = Number(via?.holeDiameter || 0)
-        return (
-            holeDiameter > 0 &&
-            Number(via?.diameter || 0) > holeDiameter + 0.001
-        )
-    }
-
-    /**
-     * Checks whether one pad has copper larger than its drill aperture.
-     * @param {any} pad Pad primitive.
-     * @returns {boolean}
-     */
-    static #hasPadCopperAnnulus(pad) {
-        const holeDiameter = Number(pad?.holeDiameter || 0)
-        if (holeDiameter <= 0) {
-            return false
-        }
-
-        return [
-            pad?.sizeTopX,
-            pad?.sizeTopY,
-            pad?.sizeMidX,
-            pad?.sizeMidY,
-            pad?.sizeBottomX,
-            pad?.sizeBottomY
-        ].some((size) => Number(size || 0) > holeDiameter + 0.001)
-    }
-
-    /**
      * Builds a stable lookup key for one circular drill.
      * @param {{ x?: number, y?: number, holeDiameter?: number, diameter?: number }} drill
      * @returns {string}
@@ -177,7 +116,7 @@ export class PcbScene3dDrillVoidFactory {
      * @param {{ color?: number }} options
      * @returns {any}
      */
-    static #buildMaterial(THREE, options) {
+    static #buildInteriorMaterial(THREE, options) {
         return new THREE.MeshStandardMaterial({
             color: Number.isInteger(options?.color)
                 ? options.color
@@ -186,6 +125,18 @@ export class PcbScene3dDrillVoidFactory {
             metalness: 0,
             side: THREE.DoubleSide
         })
+    }
+
+    /**
+     * Checks whether one drill is a routed slot.
+     * @param {{ diameter?: number, slotLength?: number | null }} drillSpec Drill spec.
+     * @returns {boolean}
+     */
+    static #isSlottedDrill(drillSpec) {
+        return (
+            Number(drillSpec?.slotLength || 0) >
+            Number(drillSpec?.diameter || 0) + 0.001
+        )
     }
 
     /**
@@ -208,13 +159,6 @@ export class PcbScene3dDrillVoidFactory {
         material,
         normalizeBoardPoint
     ) {
-        if (
-            Number(drillSpec?.slotLength || 0) >
-            Number(drillSpec?.diameter || 0) + 0.001
-        ) {
-            return null
-        }
-
         const point = normalizeBoardPoint(
             Number(drillSpec?.x || 0),
             Number(drillSpec?.y || 0)

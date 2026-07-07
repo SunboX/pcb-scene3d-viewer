@@ -367,7 +367,7 @@ export class PcbScene3dRuntime {
                 -board.thicknessMil / 2,
                 (x, y) => this.#normalizeDetailPoint(x, y),
                 {
-                    enabled: Boolean(this.#sceneDescription.boardAssemblyModel),
+                    enabled: true,
                     board
                 }
             )

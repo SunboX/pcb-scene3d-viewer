@@ -212,6 +212,66 @@ test('PcbScene3dCopperDetailGroupBuilder passes exposed pad occlusions to covere
     }
 })
 
+test('PcbScene3dCopperDetailGroupBuilder passes Altium mask color to covered copper', () => {
+    const originalBuildMaskCoveredGroup =
+        PcbScene3dCopperFactory.buildMaskCoveredGroup
+    const originalBuildGroup = PcbScene3dCopperFactory.buildGroup
+    const originalBuildViaGroup = PcbScene3dViaFactory.buildGroup
+    const captured = {}
+
+    PcbScene3dCopperFactory.buildMaskCoveredGroup = (
+        _three,
+        _detail,
+        _topZ,
+        _bottomZ,
+        _normalizePoint,
+        options
+    ) => {
+        captured.options = options
+        const group = new FakeGroup()
+        group.add(new FakeGroup())
+        return group
+    }
+    PcbScene3dCopperFactory.buildGroup = () => new FakeGroup()
+    PcbScene3dViaFactory.buildGroup = () => new FakeGroup()
+
+    try {
+        PcbScene3dCopperDetailGroupBuilder.build(
+            { Group: FakeGroup },
+            {
+                sourceFormat: 'altium',
+                boardAssemblyModel: { name: 'assembly.step' },
+                board: { surfaceColor: 0x17396b, thicknessMil: 63 },
+                detail: {
+                    silkscreen: {},
+                    tracks: [
+                        {
+                            x1: 0,
+                            y1: 0,
+                            x2: 100,
+                            y2: 0,
+                            width: 10,
+                            layerId: 1
+                        }
+                    ],
+                    arcs: [],
+                    pads: [],
+                    vias: []
+                }
+            },
+            31,
+            (x, y) => ({ x, y })
+        )
+
+        assert.equal(captured.options.solderMaskColor, 0x17396b)
+    } finally {
+        PcbScene3dViaFactory.buildGroup = originalBuildViaGroup
+        PcbScene3dCopperFactory.buildGroup = originalBuildGroup
+        PcbScene3dCopperFactory.buildMaskCoveredGroup =
+            originalBuildMaskCoveredGroup
+    }
+})
+
 test('PcbScene3dCopperDetailGroupBuilder omits large silkscreen artwork from covered copper occlusions', () => {
     const originalBuildMaskCoveredGroup =
         PcbScene3dCopperFactory.buildMaskCoveredGroup
@@ -295,7 +355,7 @@ test('PcbScene3dCopperDetailGroupBuilder omits large silkscreen artwork from cov
     }
 })
 
-test('PcbScene3dCopperDetailGroupBuilder passes drill cutouts to copper groups', () => {
+test('PcbScene3dCopperDetailGroupBuilder passes board void cutouts to copper groups', () => {
     const originalBuildMaskCoveredGroup =
         PcbScene3dCopperFactory.buildMaskCoveredGroup
     const originalBuildGroup = PcbScene3dCopperFactory.buildGroup
@@ -360,17 +420,30 @@ test('PcbScene3dCopperDetailGroupBuilder passes drill cutouts to copper groups',
             { Group: FakeGroup },
             {
                 sourceFormat: 'kicad',
-                board: { surfaceColor: 0xffffff },
+                board: {
+                    surfaceColor: 0xffffff,
+                    cutouts: [
+                        {
+                            points: [
+                                { x: 10, y: 10 },
+                                { x: 30, y: 10 },
+                                { x: 30, y: 30 },
+                                { x: 10, y: 30 }
+                            ]
+                        }
+                    ]
+                },
                 detail: sceneDetail
             },
             31,
             (x, y) => ({ x, y })
         )
 
-        assert.equal(captured.coveredOptions.drillCutouts.length, 1)
-        assert.equal(captured.exposedOptions.drillCutouts.length, 1)
+        assert.equal(captured.coveredOptions.drillCutouts.length, 2)
+        assert.equal(captured.exposedOptions.drillCutouts.length, 2)
 
         const drillCutout = captured.coveredOptions.drillCutouts[0]
+        const boardCutout = captured.coveredOptions.drillCutouts[1]
         const radius = Math.max(
             ...drillCutout.map((point) =>
                 Math.hypot(point.x - 40, point.y - 60)
@@ -379,6 +452,15 @@ test('PcbScene3dCopperDetailGroupBuilder passes drill cutouts to copper groups',
 
         assert.ok(drillCutout.length >= 8)
         assert.ok(Math.abs(radius - 9) < 0.001)
+        assert.deepEqual(
+            boardCutout.map((point) => [point.x, point.y]),
+            [
+                [10, 10],
+                [30, 10],
+                [30, 30],
+                [10, 30]
+            ]
+        )
     } finally {
         PcbScene3dMaskCoveredCopperMaterial.build = originalBuildCoveredMaterial
         PcbScene3dViaFactory.buildGroup = originalBuildViaGroup

@@ -463,7 +463,7 @@ test('PcbScene3dCopperFactory renders mask-covered traces with a solder-mask cop
     const bounds = resolveBounds(trackMesh.geometry.attributes.position.array)
 
     assert.equal(trackMesh.name, 'mask-covered-copper-tracks')
-    assert.equal(trackMesh.material.color.getHex(), 0x4d6d25)
+    assert.equal(trackMesh.material.color.getHex(), 0x247330)
     assert.equal(trackMesh.material.metalness, 0)
     assert.equal(trackMesh.material.roughness, 0.56)
     assert.notEqual(trackMesh.material.polygonOffset, true)
@@ -533,7 +533,7 @@ test('PcbScene3dCopperFactory renders mask-covered copper fills with solder-mask
     assert.ok(fillMesh)
 
     const bounds = resolveBounds(fillMesh.geometry.attributes.position.array)
-    assert.equal(fillMesh.material.color.getHex(), 0x4d6d25)
+    assert.equal(fillMesh.material.color.getHex(), 0x296d2d)
     assert.equal(fillMesh.material.metalness, 0)
     assert.equal(fillMesh.material.roughness, 0.56)
     assert.ok(bounds.minX <= 0)
