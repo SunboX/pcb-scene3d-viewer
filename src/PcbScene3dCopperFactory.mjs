@@ -1,4 +1,5 @@
 import { PcbScene3dArcUtils } from './PcbScene3dArcUtils.mjs'
+import { PcbScene3dCopperPrismBuilder } from './PcbScene3dCopperPrismBuilder.mjs'
 import { PcbScene3dPadFactory } from './PcbScene3dPadFactory.mjs'
 import { PcbScene3dCopperTextFactory } from './PcbScene3dCopperTextFactory.mjs'
 import { PcbScene3dMaskCoveredCopperMaterial } from './PcbScene3dMaskCoveredCopperMaterial.mjs'
@@ -7,6 +8,7 @@ import { PcbScene3dCopperLayerFilter } from './PcbScene3dCopperLayerFilter.mjs'
 import { PcbScene3dCopperFillMeshBuilder } from './PcbScene3dCopperFillMeshBuilder.mjs'
 import { PcbScene3dMaskCoveredCopperSideGroupBuilder } from './PcbScene3dMaskCoveredCopperSideGroupBuilder.mjs'
 import { PcbScene3dCopperDrillCutoutBuilder } from './PcbScene3dCopperDrillCutoutBuilder.mjs'
+import { PcbScene3dCopperFillAreaClipper } from './PcbScene3dCopperFillAreaClipper.mjs'
 
 /**
  * Builds copper-detail meshes for the interactive 3D PCB scene.
@@ -15,7 +17,6 @@ export class PcbScene3dCopperFactory {
     static #ARC_SEGMENT_DEGREES = 3
     static #FULL_CIRCLE_EPSILON = 0.001
     static #ROUND_CAP_SEGMENTS = 16
-    static #COPPER_THICKNESS_MIL = 2.2
     static #COPPER_COLOR = 0xd9a61d
 
     /**
@@ -23,7 +24,7 @@ export class PcbScene3dCopperFactory {
      * @returns {number}
      */
     static visualHalfThicknessMil() {
-        return PcbScene3dCopperFactory.#COPPER_THICKNESS_MIL / 2
+        return PcbScene3dCopperPrismBuilder.halfThicknessMil()
     }
 
     /**
@@ -101,7 +102,7 @@ export class PcbScene3dCopperFactory {
      * @param {number} topZ
      * @param {number} bottomZ
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
-     * @param {{ solderMaskColor?: number, occlusionCutouts?: object, drillCutouts?: any[], drillDetail?: object }} [options]
+     * @param {{ solderMaskColor?: number, occlusionCutouts?: object, drillCutouts?: any[], drillDetail?: object, unionCoveredLayerPrimitives?: boolean }} [options]
      * @returns {any}
      */
     static buildMaskCoveredGroup(
@@ -149,7 +150,8 @@ export class PcbScene3dCopperFactory {
             normalizeBoardPoint,
             false,
             material,
-            topCutouts
+            topCutouts,
+            options
         )
         const bottomGroup = PcbScene3dCopperFactory.#buildMaskCoveredSideGroup(
             THREE,
@@ -168,7 +170,8 @@ export class PcbScene3dCopperFactory {
             normalizeBoardPoint,
             true,
             material,
-            bottomCutouts
+            bottomCutouts,
+            options
         )
 
         if (topGroup.children.length) group.add(topGroup)
@@ -221,7 +224,7 @@ export class PcbScene3dCopperFactory {
             THREE,
             detail?.fills || [],
             z,
-            PcbScene3dCopperFactory.#COPPER_THICKNESS_MIL,
+            PcbScene3dCopperPrismBuilder.thicknessMil(),
             normalizeBoardPoint,
             mirrorY,
             PcbScene3dCopperFactory.#buildMaterial(THREE),
@@ -268,6 +271,7 @@ export class PcbScene3dCopperFactory {
      * @param {boolean} mirrorY
      * @param {any} material Shared covered-trace material.
      * @param {{ x: number, y: number }[][]} occlusionCutouts Silkscreen ink polygons covering this copper.
+     * @param {{ unionCoveredLayerPrimitives?: boolean }} [options] Build options.
      * @returns {any}
      */
     static #buildMaskCoveredSideGroup(
@@ -277,9 +281,10 @@ export class PcbScene3dCopperFactory {
         normalizeBoardPoint,
         mirrorY,
         material,
-        occlusionCutouts
+        occlusionCutouts,
+        options = {}
     ) {
-        const trackMesh = PcbScene3dCopperFactory.#buildTrackMesh(
+        let trackMesh = PcbScene3dCopperFactory.#buildTrackMesh(
             THREE,
             detail?.tracks || [],
             z,
@@ -288,7 +293,7 @@ export class PcbScene3dCopperFactory {
             material,
             occlusionCutouts
         )
-        const arcMesh = PcbScene3dCopperFactory.#buildArcMesh(
+        let arcMesh = PcbScene3dCopperFactory.#buildArcMesh(
             THREE,
             detail?.arcs || [],
             z,
@@ -297,15 +302,42 @@ export class PcbScene3dCopperFactory {
             material,
             occlusionCutouts
         )
+        if (
+            PcbScene3dCopperFactory.#shouldUnionCoveredLayerPrimitives(options)
+        ) {
+            trackMesh = PcbScene3dCopperFillAreaClipper.filter(
+                THREE,
+                trackMesh,
+                detail?.fills || [],
+                normalizeBoardPoint,
+                mirrorY,
+                { subdividePartialTriangles: false }
+            )
+            arcMesh = PcbScene3dCopperFillAreaClipper.filter(
+                THREE,
+                arcMesh,
+                detail?.fills || [],
+                normalizeBoardPoint,
+                mirrorY,
+                { subdividePartialTriangles: false }
+            )
+        }
         const fillMesh = PcbScene3dCopperFillMeshBuilder.build(
             THREE,
             detail?.fills || [],
             z,
-            PcbScene3dCopperFactory.#COPPER_THICKNESS_MIL,
+            PcbScene3dCopperPrismBuilder.thicknessMil(),
             normalizeBoardPoint,
             mirrorY,
             material,
-            occlusionCutouts
+            occlusionCutouts,
+            {
+                surfaceOnly: true,
+                clipContainedFillOverlaps:
+                    PcbScene3dCopperFactory.#shouldUnionCoveredLayerPrimitives(
+                        options
+                    )
+            }
         )
         return PcbScene3dMaskCoveredCopperSideGroupBuilder.build(THREE, {
             trackMesh,
@@ -323,6 +355,15 @@ export class PcbScene3dCopperFactory {
      */
     static #usesYUpGlyphs(options) {
         return String(options?.coordinateSystem || '') === 'kicad-3d-y-up'
+    }
+
+    /**
+     * Checks whether covered primitives should render as one layer union.
+     * @param {{ unionCoveredLayerPrimitives?: boolean } | undefined} options Build options.
+     * @returns {boolean}
+     */
+    static #shouldUnionCoveredLayerPrimitives(options) {
+        return options?.unionCoveredLayerPrimitives === true
     }
 
     /**
@@ -524,13 +565,13 @@ export class PcbScene3dCopperFactory {
             { x: start.x - normalX, y: start.y - normalY },
             z
         )
-        PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+        PcbScene3dCopperPrismBuilder.appendBoundarySideTriangles(
             positions,
             { x: start.x + normalX, y: start.y + normalY },
             { x: end.x + normalX, y: end.y + normalY },
             z
         )
-        PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+        PcbScene3dCopperPrismBuilder.appendBoundarySideTriangles(
             positions,
             { x: end.x - normalX, y: end.y - normalY },
             { x: start.x - normalX, y: start.y - normalY },
@@ -608,14 +649,14 @@ export class PcbScene3dCopperFactory {
             }
 
             if (innerRadius <= 0.001) {
-                PcbScene3dCopperFactory.#appendTriangle(
+                PcbScene3dCopperPrismBuilder.appendTriangle(
                     positions,
                     { x: center.x, y: center.y },
                     outerStart,
                     outerEnd,
                     z
                 )
-                PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+                PcbScene3dCopperPrismBuilder.appendBoundarySideTriangles(
                     positions,
                     outerStart,
                     outerEnd,
@@ -641,13 +682,13 @@ export class PcbScene3dCopperFactory {
                 innerStart,
                 z
             )
-            PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+            PcbScene3dCopperPrismBuilder.appendBoundarySideTriangles(
                 positions,
                 outerStart,
                 outerEnd,
                 z
             )
-            PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+            PcbScene3dCopperPrismBuilder.appendBoundarySideTriangles(
                 positions,
                 innerEnd,
                 innerStart,
@@ -710,8 +751,8 @@ export class PcbScene3dCopperFactory {
      * @returns {void}
      */
     static #appendQuadTriangles(positions, a, b, c, d, z) {
-        PcbScene3dCopperFactory.#appendTriangle(positions, a, b, c, z)
-        PcbScene3dCopperFactory.#appendTriangle(positions, a, c, d, z)
+        PcbScene3dCopperPrismBuilder.appendTriangle(positions, a, b, c, z)
+        PcbScene3dCopperPrismBuilder.appendTriangle(positions, a, c, d, z)
     }
 
     /**
@@ -738,7 +779,7 @@ export class PcbScene3dCopperFactory {
                 (Math.PI * 2 * (index + 1)) /
                 PcbScene3dCopperFactory.#ROUND_CAP_SEGMENTS
 
-            PcbScene3dCopperFactory.#appendTriangle(
+            PcbScene3dCopperPrismBuilder.appendTriangle(
                 positions,
                 center,
                 {
@@ -751,7 +792,7 @@ export class PcbScene3dCopperFactory {
                 },
                 z
             )
-            PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+            PcbScene3dCopperPrismBuilder.appendBoundarySideTriangles(
                 positions,
                 {
                     x: center.x + Math.cos(startAngle) * safeRadius,
@@ -835,7 +876,7 @@ export class PcbScene3dCopperFactory {
                 endAngle
             )
 
-            PcbScene3dCopperFactory.#appendTriangle(
+            PcbScene3dCopperPrismBuilder.appendTriangle(
                 positions,
                 center,
                 start,
@@ -843,7 +884,7 @@ export class PcbScene3dCopperFactory {
                 z
             )
             if (includeSideWall) {
-                PcbScene3dCopperFactory.#appendBoundarySideTriangles(
+                PcbScene3dCopperPrismBuilder.appendBoundarySideTriangles(
                     positions,
                     start,
                     end,
@@ -916,75 +957,5 @@ export class PcbScene3dCopperFactory {
             x: point.x,
             y: mirrorY ? -point.y : point.y
         }
-    }
-
-    /**
-     * Appends one shallow triangular prism into the position buffer.
-     * @param {number[]} positions Position buffer.
-     * @param {{ x: number, y: number }} a First point.
-     * @param {{ x: number, y: number }} b Second point.
-     * @param {{ x: number, y: number }} c Third point.
-     * @param {number} z Center Z position.
-     * @returns {void}
-     */
-    static #appendTriangle(positions, a, b, c, z) {
-        const halfThickness = PcbScene3dCopperFactory.#COPPER_THICKNESS_MIL / 2
-        const topZ = z + halfThickness
-        const bottomZ = z - halfThickness
-        positions.push(
-            a.x,
-            a.y,
-            topZ,
-            b.x,
-            b.y,
-            topZ,
-            c.x,
-            c.y,
-            topZ,
-            c.x,
-            c.y,
-            bottomZ,
-            b.x,
-            b.y,
-            bottomZ,
-            a.x,
-            a.y,
-            bottomZ
-        )
-    }
-
-    /**
-     * Appends a side wall for one actual copper boundary edge.
-     * @param {number[]} positions Position buffer.
-     * @param {{ x: number, y: number }} start Wall start point.
-     * @param {{ x: number, y: number }} end Wall end point.
-     * @param {number} z Center Z position.
-     * @returns {void}
-     */
-    static #appendBoundarySideTriangles(positions, start, end, z) {
-        const halfThickness = PcbScene3dCopperFactory.#COPPER_THICKNESS_MIL / 2
-        const topZ = z + halfThickness
-        const bottomZ = z - halfThickness
-
-        positions.push(
-            start.x,
-            start.y,
-            topZ,
-            end.x,
-            end.y,
-            topZ,
-            end.x,
-            end.y,
-            bottomZ,
-            start.x,
-            start.y,
-            topZ,
-            end.x,
-            end.y,
-            bottomZ,
-            start.x,
-            start.y,
-            bottomZ
-        )
     }
 }

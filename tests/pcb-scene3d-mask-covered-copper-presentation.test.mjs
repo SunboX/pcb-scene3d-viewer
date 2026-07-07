@@ -35,6 +35,38 @@ function resolveZBounds(positions) {
 }
 
 /**
+ * Resolves distinct rounded Z planes from a packed XYZ position array.
+ * @param {ArrayLike<number>} positions Position buffer.
+ * @returns {Set<string>}
+ */
+function resolveZPlanes(positions) {
+    const planes = new Set()
+    for (let index = 2; index < positions.length; index += 3) {
+        planes.add(Number(positions[index]).toFixed(4))
+    }
+    return planes
+}
+
+/**
+ * Checks whether one triangle spans more than one Z plane.
+ * @param {ArrayLike<number>} positions Position buffer.
+ * @returns {boolean}
+ */
+function hasMixedZTriangle(positions) {
+    for (let index = 0; index < positions.length; index += 9) {
+        const zValues = [
+            positions[index + 2],
+            positions[index + 5],
+            positions[index + 8]
+        ]
+        if (Math.max(...zValues) - Math.min(...zValues) > 0.001) {
+            return true
+        }
+    }
+    return false
+}
+
+/**
  * Resolves one RGB channel tuple from a hex color.
  * @param {number} color Hex color.
  * @returns {{ red: number, green: number, blue: number }}
@@ -99,7 +131,7 @@ function assertMaskDominantCoveredColor(
 }
 
 /**
- * Verifies that broad covered copper pours remain visible on solder mask.
+ * Verifies that broad covered copper pours remain visible through solder mask.
  * @param {number} color Covered-copper fill color.
  * @param {number} solderMaskColor Solder-mask color.
  * @returns {void}
@@ -235,4 +267,75 @@ test('PcbScene3dCopperFactory keeps blue mask-covered copper in the blue palette
         fillMesh.material.color.getHex(),
         solderMaskColor
     )
+})
+
+test('PcbScene3dCopperFactory renders mask-covered pours as flat relief', () => {
+    const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
+        THREE,
+        {
+            tracks: [],
+            arcs: [],
+            fills: [
+                {
+                    layerId: 1,
+                    points: [
+                        { x: 0, y: 0 },
+                        { x: 120, y: 0 },
+                        { x: 120, y: 80 },
+                        { x: 0, y: 80 }
+                    ],
+                    holes: [
+                        [
+                            { x: 40, y: 30 },
+                            { x: 70, y: 30 },
+                            { x: 70, y: 50 },
+                            { x: 40, y: 50 }
+                        ]
+                    ]
+                }
+            ]
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y }),
+        { solderMaskColor: 0x2a5f27 }
+    )
+
+    const fillMesh = findObjectByName(group, 'mask-covered-copper-fills')
+    const positions = fillMesh.geometry.attributes.position.array
+
+    assert.ok(fillMesh)
+    assert.equal(resolveZPlanes(positions).size, 1)
+    assert.equal(hasMixedZTriangle(positions), false)
+})
+
+test('PcbScene3dCopperFactory renders mask-covered traces as flat relief', () => {
+    const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
+        THREE,
+        {
+            tracks: [
+                {
+                    x1: 0,
+                    y1: 0,
+                    x2: 120,
+                    y2: 40,
+                    width: 20,
+                    layerId: 1
+                }
+            ],
+            arcs: [],
+            fills: []
+        },
+        5,
+        -5,
+        (x, y) => ({ x, y }),
+        { solderMaskColor: 0x2a5f27 }
+    )
+
+    const trackMesh = findObjectByName(group, 'mask-covered-copper-tracks')
+    const positions = trackMesh.geometry.attributes.position.array
+
+    assert.ok(trackMesh)
+    assert.equal(resolveZPlanes(positions).size, 1)
+    assert.equal(hasMixedZTriangle(positions), false)
 })

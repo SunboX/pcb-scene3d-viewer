@@ -24,6 +24,7 @@ test('PcbScene3dCopperDetailGroupBuilder passes silkscreen fill occlusions to co
     const originalBuildMaskCoveredGroup =
         PcbScene3dCopperFactory.buildMaskCoveredGroup
     const originalBuildGroup = PcbScene3dCopperFactory.buildGroup
+    const originalBuildViaGroup = PcbScene3dViaFactory.buildGroup
     const captured = {}
 
     PcbScene3dCopperFactory.buildMaskCoveredGroup = (
@@ -40,6 +41,7 @@ test('PcbScene3dCopperDetailGroupBuilder passes silkscreen fill occlusions to co
         return group
     }
     PcbScene3dCopperFactory.buildGroup = () => new FakeGroup()
+    PcbScene3dViaFactory.buildGroup = () => new FakeGroup()
 
     try {
         PcbScene3dCopperDetailGroupBuilder.build(
@@ -99,6 +101,56 @@ test('PcbScene3dCopperDetailGroupBuilder passes silkscreen fill occlusions to co
         PcbScene3dCopperFactory.buildGroup = originalBuildGroup
         PcbScene3dCopperFactory.buildMaskCoveredGroup =
             originalBuildMaskCoveredGroup
+        PcbScene3dViaFactory.buildGroup = originalBuildViaGroup
+    }
+})
+
+test('PcbScene3dCopperDetailGroupBuilder enables Gerber covered copper layer union', () => {
+    const originalBuildMaskCoveredGroup =
+        PcbScene3dCopperFactory.buildMaskCoveredGroup
+    const originalBuildGroup = PcbScene3dCopperFactory.buildGroup
+    const originalBuildViaGroup = PcbScene3dViaFactory.buildGroup
+    const captured = {}
+
+    PcbScene3dCopperFactory.buildMaskCoveredGroup = (
+        _three,
+        _detail,
+        _topZ,
+        _bottomZ,
+        _normalizePoint,
+        options
+    ) => {
+        captured.options = options
+        return new FakeGroup()
+    }
+    PcbScene3dCopperFactory.buildGroup = () => new FakeGroup()
+    PcbScene3dViaFactory.buildGroup = () => new FakeGroup()
+
+    try {
+        PcbScene3dCopperDetailGroupBuilder.build(
+            { Group: FakeGroup },
+            {
+                sourceFormat: 'gerber',
+                board: { surfaceColor: 0x2a5f27 },
+                detail: {
+                    silkscreen: {},
+                    tracks: [],
+                    arcs: [],
+                    fills: [],
+                    pads: [],
+                    vias: []
+                }
+            },
+            31,
+            (x, y) => ({ x, y })
+        )
+
+        assert.equal(captured.options.unionCoveredLayerPrimitives, true)
+    } finally {
+        PcbScene3dCopperFactory.buildGroup = originalBuildGroup
+        PcbScene3dCopperFactory.buildMaskCoveredGroup =
+            originalBuildMaskCoveredGroup
+        PcbScene3dViaFactory.buildGroup = originalBuildViaGroup
     }
 })
 

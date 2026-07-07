@@ -1,4 +1,5 @@
 import { PcbScene3dGeometryZCompressor } from './PcbScene3dGeometryZCompressor.mjs'
+import { PcbScene3dMaskCoveredCopperSurfaceFilter } from './PcbScene3dMaskCoveredCopperSurfaceFilter.mjs'
 
 /**
  * Builds side-specific copper relief groups that sit below solder mask.
@@ -98,10 +99,10 @@ export class PcbScene3dMaskCoveredCopperSideGroupBuilder {
         if (!mesh) {
             return
         }
-
         PcbScene3dGeometryZCompressor.compressMaskCoveredCopperMesh(mesh, z, {
             centerOffsetMil: options.centerOffsetMil
         })
+        PcbScene3dMaskCoveredCopperSurfaceFilter.keepOuterSurface(mesh)
         mesh.name = name
         mesh.renderOrder = Number(options.renderOrder || 0)
         PcbScene3dMaskCoveredCopperSideGroupBuilder.#applyCopperTint(

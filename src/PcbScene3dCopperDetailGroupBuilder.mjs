@@ -96,6 +96,10 @@ export class PcbScene3dCopperDetailGroupBuilder {
                 ),
                 drillCutouts,
                 drillDetail: sceneDescription?.detail,
+                unionCoveredLayerPrimitives:
+                    PcbScene3dCopperDetailGroupBuilder.#usesGerberLayerUnion(
+                        sceneDescription
+                    ),
                 occlusionCutouts:
                     PcbScene3dCopperDetailGroupBuilder.#resolveCoveredCopperOcclusions(
                         sceneDescription?.detail
@@ -133,6 +137,18 @@ export class PcbScene3dCopperDetailGroupBuilder {
                     )
                 )
             }
+        )
+    }
+
+    /**
+     * Checks whether the source format represents copper as Gerber polarity union.
+     * @param {object | undefined} sceneDescription Scene description.
+     * @returns {boolean}
+     */
+    static #usesGerberLayerUnion(sceneDescription) {
+        return (
+            String(sceneDescription?.sourceFormat || '').toLowerCase() ===
+            'gerber'
         )
     }
 
