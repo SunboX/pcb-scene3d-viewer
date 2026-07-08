@@ -10,6 +10,29 @@ export class PcbScene3dMaskCoveredCopperSurfaceFilter {
      * @returns {void}
      */
     static keepOuterSurface(mesh) {
+        PcbScene3dMaskCoveredCopperSurfaceFilter.#filterOuterTriangles(mesh, {
+            keepSideWalls: false
+        })
+    }
+
+    /**
+     * Removes the hidden underside while keeping shallow edge walls.
+     * @param {any | null} mesh Copper relief mesh.
+     * @returns {void}
+     */
+    static keepOuterRelief(mesh) {
+        PcbScene3dMaskCoveredCopperSurfaceFilter.#filterOuterTriangles(mesh, {
+            keepSideWalls: true
+        })
+    }
+
+    /**
+     * Keeps only triangles that are visible above the solder mask.
+     * @param {any | null} mesh Copper relief mesh.
+     * @param {{ keepSideWalls?: boolean }} options Filter options.
+     * @returns {void}
+     */
+    static #filterOuterTriangles(mesh, options) {
         const geometry = mesh?.geometry
         const position = geometry?.getAttribute?.('position')
         const source = position?.array
@@ -17,14 +40,16 @@ export class PcbScene3dMaskCoveredCopperSurfaceFilter {
             return
         }
 
-        const maxZ = PcbScene3dMaskCoveredCopperSurfaceFilter.#maxZ(source)
+        const zBounds =
+            PcbScene3dMaskCoveredCopperSurfaceFilter.#zBounds(source)
         const filtered = []
         for (let index = 0; index + 8 < source.length; index += 9) {
             if (
-                [2, 5, 8].every(
-                    (offset) =>
-                        Math.abs(source[index + offset] - maxZ) <=
-                        PcbScene3dMaskCoveredCopperSurfaceFilter.#Z_EPSILON
+                PcbScene3dMaskCoveredCopperSurfaceFilter.#keepsTriangle(
+                    source,
+                    index,
+                    zBounds,
+                    options
                 )
             ) {
                 filtered.push(...source.slice(index, index + 9))
@@ -50,15 +75,55 @@ export class PcbScene3dMaskCoveredCopperSurfaceFilter {
     }
 
     /**
-     * Resolves the highest Z plane in one packed XYZ buffer.
+     * Checks whether one triangle should stay in the visible relief mesh.
      * @param {ArrayLike<number>} source Position buffer.
-     * @returns {number}
+     * @param {number} index Triangle start index.
+     * @param {{ minZ: number, maxZ: number }} zBounds Geometry Z bounds.
+     * @param {{ keepSideWalls?: boolean }} options Filter options.
+     * @returns {boolean}
      */
-    static #maxZ(source) {
+    static #keepsTriangle(source, index, zBounds, options) {
+        const zValues = [2, 5, 8].map((offset) => source[index + offset])
+        const hasTop = zValues.some((z) =>
+            PcbScene3dMaskCoveredCopperSurfaceFilter.#matchesZ(z, zBounds.maxZ)
+        )
+        const hasBottom = zValues.some((z) =>
+            PcbScene3dMaskCoveredCopperSurfaceFilter.#matchesZ(z, zBounds.minZ)
+        )
+
+        if (hasTop && !hasBottom) {
+            return true
+        }
+
+        return options?.keepSideWalls === true && hasTop && hasBottom
+    }
+
+    /**
+     * Checks whether a Z value matches one target plane.
+     * @param {number} value Candidate Z.
+     * @param {number} target Target Z.
+     * @returns {boolean}
+     */
+    static #matchesZ(value, target) {
+        return (
+            Math.abs(Number(value) - Number(target)) <=
+            PcbScene3dMaskCoveredCopperSurfaceFilter.#Z_EPSILON
+        )
+    }
+
+    /**
+     * Resolves the lowest and highest Z planes in one packed XYZ buffer.
+     * @param {ArrayLike<number>} source Position buffer.
+     * @returns {{ minZ: number, maxZ: number }}
+     */
+    static #zBounds(source) {
+        let minZ = Infinity
         let maxZ = -Infinity
         for (let index = 2; index < source.length; index += 3) {
-            maxZ = Math.max(maxZ, Number(source[index]))
+            const z = Number(source[index])
+            minZ = Math.min(minZ, z)
+            maxZ = Math.max(maxZ, z)
         }
-        return maxZ
+        return { minZ, maxZ }
     }
 }

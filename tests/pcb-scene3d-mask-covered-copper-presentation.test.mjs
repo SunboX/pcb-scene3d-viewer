@@ -221,6 +221,7 @@ test('PcbScene3dCopperFactory keeps mask-covered traces readable over fills', ()
             colorDistance(fillMesh.material.color.getHex(), solderMaskColor)
     )
     assert.ok(trackBounds.maxZ > fillBounds.maxZ)
+    assert.ok(trackBounds.maxZ - fillBounds.maxZ >= 0.4)
     assert.ok(trackMesh.renderOrder > fillMesh.renderOrder)
 })
 
@@ -309,7 +310,7 @@ test('PcbScene3dCopperFactory renders mask-covered pours as flat relief', () => 
     assert.equal(hasMixedZTriangle(positions), false)
 })
 
-test('PcbScene3dCopperFactory renders mask-covered traces as flat relief', () => {
+test('PcbScene3dCopperFactory renders mask-covered traces as raised relief', () => {
     const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
         THREE,
         {
@@ -336,6 +337,6 @@ test('PcbScene3dCopperFactory renders mask-covered traces as flat relief', () =>
     const positions = trackMesh.geometry.attributes.position.array
 
     assert.ok(trackMesh)
-    assert.equal(resolveZPlanes(positions).size, 1)
-    assert.equal(hasMixedZTriangle(positions), false)
+    assert.equal(resolveZPlanes(positions).size, 2)
+    assert.equal(hasMixedZTriangle(positions), true)
 })

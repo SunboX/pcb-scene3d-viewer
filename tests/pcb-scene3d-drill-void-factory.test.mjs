@@ -51,6 +51,30 @@ test('PcbScene3dDrillVoidFactory builds open circular drill interiors without ap
     assert.equal(interiors[0].position.z, 0)
 })
 
+test('PcbScene3dDrillVoidFactory colors drill interiors with board solder mask', () => {
+    const group = PcbScene3dDrillVoidFactory.buildGroup(
+        THREE,
+        {
+            pads: [],
+            vias: [{ x: 70, y: 55, holeDiameter: 8 }]
+        },
+        31,
+        -31,
+        (x, y) => ({ x: x - 50, y: y - 25 }),
+        {
+            enabled: true,
+            board: { widthMil: 100, heightMil: 80, surfaceColor: 0x17396b },
+            hasBoardAssemblyModel: true,
+            sourceFormat: 'altium'
+        }
+    )
+
+    const interiors = childrenByGeometryType(group, 'CylinderGeometry')
+
+    assert.equal(interiors.length, 1)
+    assert.equal(interiors[0].material.color.getHex(), 0x14325e)
+})
+
 test('PcbScene3dDrillVoidFactory skips slotted interiors without capping them', () => {
     const group = PcbScene3dDrillVoidFactory.buildGroup(
         THREE,

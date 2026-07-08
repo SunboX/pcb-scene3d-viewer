@@ -1,4 +1,5 @@
 import { PcbScene3dBoardShapeFactory } from './PcbScene3dBoardShapeFactory.mjs'
+import { PcbScene3dBoardMaterialPalette } from './PcbScene3dBoardMaterialPalette.mjs'
 import { PcbScene3dDrillPathFactory } from './PcbScene3dDrillPathFactory.mjs'
 
 /**
@@ -16,7 +17,7 @@ export class PcbScene3dDrillVoidFactory {
      * @param {number} [topZ]
      * @param {number} [bottomZ]
      * @param {(x: number, y: number) => { x: number, y: number }} [normalizeBoardPoint]
-     * @param {{ enabled?: boolean, color?: number, board?: object }} [options]
+     * @param {{ enabled?: boolean, color?: number, board?: object, hasBoardAssemblyModel?: boolean, sourceFormat?: string }} [options]
      * @returns {any}
      */
     static buildGroup(
@@ -113,18 +114,41 @@ export class PcbScene3dDrillVoidFactory {
     /**
      * Builds the shared drill-interior material.
      * @param {any} THREE
-     * @param {{ color?: number }} options
+     * @param {{ color?: number, board?: object, hasBoardAssemblyModel?: boolean, sourceFormat?: string }} options
      * @returns {any}
      */
     static #buildInteriorMaterial(THREE, options) {
         return new THREE.MeshStandardMaterial({
-            color: Number.isInteger(options?.color)
-                ? options.color
-                : PcbScene3dDrillVoidFactory.#DEFAULT_INTERIOR_COLOR,
+            color: PcbScene3dDrillVoidFactory.#resolveInteriorColor(options),
             roughness: 0.82,
             metalness: 0,
             side: THREE.DoubleSide
         })
+    }
+
+    /**
+     * Resolves the drill-interior display color.
+     * @param {{ color?: number, board?: object, hasBoardAssemblyModel?: boolean, sourceFormat?: string }} options
+     * @returns {number}
+     */
+    static #resolveInteriorColor(options) {
+        if (Number.isInteger(options?.color)) {
+            return options.color
+        }
+
+        if (options?.board) {
+            return PcbScene3dBoardMaterialPalette.resolveBoardSurfaceColor(
+                options.board,
+                {
+                    hasBoardAssemblyModel: Boolean(
+                        options?.hasBoardAssemblyModel
+                    ),
+                    sourceFormat: options?.sourceFormat
+                }
+            )
+        }
+
+        return PcbScene3dDrillVoidFactory.#DEFAULT_INTERIOR_COLOR
     }
 
     /**

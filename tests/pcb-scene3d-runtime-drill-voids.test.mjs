@@ -357,6 +357,8 @@ test('PcbScene3dRuntime enables drill voids for generated Gerber boards', async 
         await runtime.whenReady()
 
         assert.equal(capturedOptions?.enabled, true)
+        assert.equal(capturedOptions?.sourceFormat, 'gerber')
+        assert.equal(capturedOptions?.hasBoardAssemblyModel, false)
     } finally {
         runtime.dispose()
         PcbScene3dDrillVoidFactory.buildGroup = originalBuildDrillVoids

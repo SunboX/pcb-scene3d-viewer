@@ -3,6 +3,7 @@
  */
 export class PcbScene3dBoardMaterialPalette {
     static #DEFAULT_SURFACE_COLOR = 0x2a5f27
+    static #BOARD_SURFACE_DARKEN_RATIO = 0.88
 
     /**
      * Resolves the solder-mask face color for the generated board shell.
@@ -23,6 +24,19 @@ export class PcbScene3dBoardMaterialPalette {
         return Number.isInteger(board?.surfaceColor)
             ? board.surfaceColor
             : PcbScene3dBoardMaterialPalette.#DEFAULT_SURFACE_COLOR
+    }
+
+    /**
+     * Resolves the darker display color for visible board solder-mask faces.
+     * @param {{ surfaceColor?: number } | undefined} board Board metadata.
+     * @param {{ hasBoardAssemblyModel?: boolean, sourceFormat?: string }} [options] Scene options.
+     * @returns {number}
+     */
+    static resolveBoardSurfaceColor(board, options = {}) {
+        return PcbScene3dBoardMaterialPalette.#darkenHexColor(
+            PcbScene3dBoardMaterialPalette.resolveSurfaceColor(board, options),
+            PcbScene3dBoardMaterialPalette.#BOARD_SURFACE_DARKEN_RATIO
+        )
     }
 
     /**
@@ -51,5 +65,20 @@ export class PcbScene3dBoardMaterialPalette {
      */
     static isGeneratedBodyVisible(options = {}) {
         return true
+    }
+
+    /**
+     * Darkens a packed RGB color while preserving its hue.
+     * @param {number} color Packed RGB color.
+     * @param {number} ratio Channel multiplier.
+     * @returns {number}
+     */
+    static #darkenHexColor(color, ratio) {
+        const multiplier = Math.min(Math.max(Number(ratio || 0), 0), 1)
+
+        return [16, 8, 0].reduce((output, shift) => {
+            const channel = Math.round(((color >> shift) & 255) * multiplier)
+            return output | (channel << shift)
+        }, 0)
     }
 }

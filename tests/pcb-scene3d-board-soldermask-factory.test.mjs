@@ -28,7 +28,7 @@ test('PcbScene3dBoardSolderMaskFactory builds coplanar drilled board-assembly ma
     assert.equal(group.name, 'board-solder-mask')
     assert.equal(group.children.length, 2)
     assert.equal(group.children[0].geometry.type, 'ShapeGeometry')
-    assert.equal(group.children[0].material.color.getHex(), 0x2a5f27)
+    assert.equal(group.children[0].material.color.getHex(), 0x255422)
     assert.equal(group.children[0].material.side, THREE.FrontSide)
     assert.equal(group.children[1].material.side, THREE.BackSide)
     assert.equal(group.children[0].material.roughness, 0.56)
@@ -84,7 +84,7 @@ test('PcbScene3dBoardSolderMaskFactory keeps Altium mask face color', () => {
         (x, y) => ({ x: x - 500, y: 250 - y })
     )
 
-    assert.equal(group.children[0].material.color.getHex(), 0x17396b)
+    assert.equal(group.children[0].material.color.getHex(), 0x14325e)
 })
 
 test('PcbScene3dBoardSolderMaskFactory keeps edge drill apertures anchored', () => {

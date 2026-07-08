@@ -10,7 +10,8 @@ export class PcbScene3dMaskCoveredCopperSideGroupBuilder {
     static #TRACK_COPPER_BLEND = 0.7
     static #FILL_RENDER_ORDER = 10
     static #TRACK_RENDER_ORDER = 12
-    static #TRACK_CENTER_OFFSET_MIL = 0.16
+    static #TRACK_CENTER_OFFSET_MIL = 0.25
+    static #TRACK_THICKNESS_MIL = 1.05
 
     /**
      * Builds one side group from prepared mask-covered copper meshes.
@@ -39,6 +40,10 @@ export class PcbScene3dMaskCoveredCopperSideGroupBuilder {
                 centerOffsetMil:
                     PcbScene3dMaskCoveredCopperSideGroupBuilder
                         .#TRACK_CENTER_OFFSET_MIL,
+                thicknessMil:
+                    PcbScene3dMaskCoveredCopperSideGroupBuilder
+                        .#TRACK_THICKNESS_MIL,
+                keepSideWalls: true,
                 copperBlend:
                     PcbScene3dMaskCoveredCopperSideGroupBuilder
                         .#TRACK_COPPER_BLEND,
@@ -56,6 +61,10 @@ export class PcbScene3dMaskCoveredCopperSideGroupBuilder {
                 centerOffsetMil:
                     PcbScene3dMaskCoveredCopperSideGroupBuilder
                         .#TRACK_CENTER_OFFSET_MIL,
+                thicknessMil:
+                    PcbScene3dMaskCoveredCopperSideGroupBuilder
+                        .#TRACK_THICKNESS_MIL,
+                keepSideWalls: true,
                 copperBlend:
                     PcbScene3dMaskCoveredCopperSideGroupBuilder
                         .#TRACK_COPPER_BLEND,
@@ -92,7 +101,7 @@ export class PcbScene3dMaskCoveredCopperSideGroupBuilder {
      * @param {any | null} mesh Mesh to add.
      * @param {string} name Scene object name.
      * @param {number} z Source center Z.
-     * @param {{ centerOffsetMil?: number, copperBlend?: number, renderOrder?: number }} [options] Presentation options.
+     * @param {{ centerOffsetMil?: number, thicknessMil?: number, keepSideWalls?: boolean, copperBlend?: number, renderOrder?: number }} [options] Presentation options.
      * @returns {void}
      */
     static #addCompressedMesh(group, mesh, name, z, options = {}) {
@@ -100,9 +109,14 @@ export class PcbScene3dMaskCoveredCopperSideGroupBuilder {
             return
         }
         PcbScene3dGeometryZCompressor.compressMaskCoveredCopperMesh(mesh, z, {
-            centerOffsetMil: options.centerOffsetMil
+            centerOffsetMil: options.centerOffsetMil,
+            thicknessMil: options.thicknessMil
         })
-        PcbScene3dMaskCoveredCopperSurfaceFilter.keepOuterSurface(mesh)
+        if (options.keepSideWalls === true) {
+            PcbScene3dMaskCoveredCopperSurfaceFilter.keepOuterRelief(mesh)
+        } else {
+            PcbScene3dMaskCoveredCopperSurfaceFilter.keepOuterSurface(mesh)
+        }
         mesh.name = name
         mesh.renderOrder = Number(options.renderOrder || 0)
         PcbScene3dMaskCoveredCopperSideGroupBuilder.#applyCopperTint(

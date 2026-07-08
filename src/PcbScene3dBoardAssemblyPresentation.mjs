@@ -420,7 +420,7 @@ export class PcbScene3dBoardAssemblyPresentation {
      * @returns {number}
      */
     static #resolveSurfaceColor(board, options) {
-        return PcbScene3dBoardMaterialPalette.resolveSurfaceColor(board, {
+        return PcbScene3dBoardMaterialPalette.resolveBoardSurfaceColor(board, {
             hasBoardAssemblyModel: true,
             sourceFormat: options?.sourceFormat
         })

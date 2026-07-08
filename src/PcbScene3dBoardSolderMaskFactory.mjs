@@ -609,10 +609,13 @@ export class PcbScene3dBoardSolderMaskFactory {
      */
     static #buildMaterial(THREE, board, side, sourceFormat) {
         return new THREE.MeshStandardMaterial({
-            color: PcbScene3dBoardMaterialPalette.resolveSurfaceColor(board, {
-                hasBoardAssemblyModel: true,
-                sourceFormat
-            }),
+            color: PcbScene3dBoardMaterialPalette.resolveBoardSurfaceColor(
+                board,
+                {
+                    hasBoardAssemblyModel: true,
+                    sourceFormat
+                }
+            ),
             ...PcbScene3dMaterialFinish.semiMatteSolderMaskProperties(),
             polygonOffset: true,
             polygonOffsetFactor: -1,

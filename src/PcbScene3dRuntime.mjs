@@ -264,7 +264,6 @@ export class PcbScene3dRuntime {
             this.#settleReady()
             return
         }
-
         try {
             const { THREE, OrbitControls } =
                 (await this.#hooks.loadRuntimeModules?.()) ||
@@ -274,7 +273,6 @@ export class PcbScene3dRuntime {
             if (this.#isDisposed || !this.#viewportNode) {
                 return
             }
-
             this.#createRenderer()
             this.#createSceneGraph()
             this.#createControls()
@@ -299,7 +297,6 @@ export class PcbScene3dRuntime {
     #createRenderer() {
         const THREE = this.#three
         const size = PcbScene3dViewportResize.resolveSize(this.#viewportNode)
-
         this.#renderer = new THREE.WebGLRenderer({
             antialias: true,
             alpha: true,
@@ -310,7 +307,6 @@ export class PcbScene3dRuntime {
         this.#renderer.domElement.className = 'scene-3d__canvas'
         this.#renderer.domElement.style.width = '100%'
         this.#renderer.domElement.style.height = '100%'
-
         this.#scene = new THREE.Scene()
         this.#camera = new THREE.PerspectiveCamera(
             38,
@@ -368,7 +364,11 @@ export class PcbScene3dRuntime {
                 (x, y) => this.#normalizeDetailPoint(x, y),
                 {
                     enabled: true,
-                    board
+                    board,
+                    hasBoardAssemblyModel: Boolean(
+                        this.#sceneDescription.boardAssemblyModel
+                    ),
+                    sourceFormat: this.#sceneDescription.sourceFormat
                 }
             )
         )

@@ -97,7 +97,7 @@ export class PcbScene3dRuntimeBoardMeshes {
             : 0xc9ca78
         const surfaceColor = hasBoardAssemblyModel
             ? resolvedEdgeColor
-            : PcbScene3dBoardMaterialPalette.resolveSurfaceColor(board, {
+            : PcbScene3dBoardMaterialPalette.resolveBoardSurfaceColor(board, {
                   hasBoardAssemblyModel
               })
 
