@@ -1,6 +1,8 @@
 import { PcbScene3dCircularCutoutOverlap } from './PcbScene3dCircularCutoutOverlap.mjs'
 import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector.mjs'
 import { PcbScene3dGeometryBoundsResolver } from './PcbScene3dGeometryBoundsResolver.mjs'
+import { PcbScene3dPreparedPolygon } from './PcbScene3dPreparedPolygon.mjs'
+import { PcbScene3dPreparedPolygonSet } from './PcbScene3dPreparedPolygonSet.mjs'
 import { PcbScene3dTerminalCutoutClassifier } from './PcbScene3dTerminalCutoutClassifier.mjs'
 
 /** Clips filled 2D geometry against drill-cutout polygons. */
@@ -8,14 +10,12 @@ export class PcbScene3dCutoutGeometryFilter {
     static #GEOMETRY_EPSILON = 0.001
     static #DEFAULT_MAX_DEPTH = 9
     static #DEFAULT_MAX_EDGE_LENGTH = 4
-    static #SPATIAL_INDEX_MIN_CELL_SIZE = 8
-    static #SPATIAL_INDEX_MAX_CELLS_PER_CUTOUT = 128
     /**
      * Removes triangles that still overlap cutouts after triangulation.
      * @param {any} THREE
      * @param {any} geometry
      * @param {{ x: number, y: number }[][]} cutouts
-     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean }} [options]
+     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean, preparedPolygonCache?: Map }} [options]
      * @returns {any}
      */
     static filter(THREE, geometry, cutouts, options = {}) {
@@ -35,8 +35,10 @@ export class PcbScene3dCutoutGeometryFilter {
         if (!position?.count) {
             return geometry
         }
-        const preparedCutouts =
-            PcbScene3dCutoutGeometryFilter.#prepareCutouts(cutouts)
+        const preparedCutouts = PcbScene3dCutoutGeometryFilter.#prepareCutouts(
+            cutouts,
+            PcbScene3dCutoutGeometryFilter.#resolvePreparedPolygonCache(options)
+        )
         if (
             PcbScene3dGeometryBoundsResolver.missesAllPositionBounds(
                 position,
@@ -45,10 +47,7 @@ export class PcbScene3dCutoutGeometryFilter {
             )
         )
             return geometry
-        const cutoutIndex =
-            PcbScene3dCutoutGeometryFilter.#buildCutoutSpatialIndex(
-                preparedCutouts
-            )
+        const cutoutSet = new PcbScene3dPreparedPolygonSet(preparedCutouts)
         const settings =
             PcbScene3dCutoutGeometryFilter.#resolveSettings(options)
         const positions = []
@@ -66,7 +65,7 @@ export class PcbScene3dCutoutGeometryFilter {
                 settings,
                 0,
                 state,
-                cutoutIndex
+                cutoutSet
             )
         }
         if (!state.changed) {
@@ -82,7 +81,7 @@ export class PcbScene3dCutoutGeometryFilter {
     }
     /**
      * Resolves clipping settings.
-     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean }} options
+     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean, preparedPolygonCache?: Map }} options
      * @returns {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number, discardTerminalOverlaps: boolean }}
      */
     static #resolveSettings(options) {
@@ -105,66 +104,57 @@ export class PcbScene3dCutoutGeometryFilter {
         }
     }
     /**
-     * Prepares cutout polygons with bounds for fast overlap checks.
-     * @param {{ x: number, y: number }[][]} cutouts
-     * @returns {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }[]}
+     * Resolves a supported request-scoped prepared polygon cache.
+     * @param {{ preparedPolygonCache?: Map }} options Request options.
+     * @returns {Map | null}
      */
-    static #prepareCutouts(cutouts) {
+    static #resolvePreparedPolygonCache(options) {
+        return options?.preparedPolygonCache instanceof Map
+            ? options.preparedPolygonCache
+            : null
+    }
+
+    /**
+     * Prepares valid cutout polygons for exact indexed queries.
+     * @param {{ x: number, y: number }[][]} cutouts
+     * @param {Map | null} preparedPolygonCache Request-scoped prepared cache.
+     * @returns {PcbScene3dPreparedPolygon[]}
+     */
+    static #prepareCutouts(cutouts, preparedPolygonCache) {
         return cutouts
             .filter((cutout) => Array.isArray(cutout) && cutout.length >= 3)
-            .map((cutout) => {
-                const circularCutout =
-                    PcbScene3dCutoutCircleDetector.resolve(cutout)
-                return {
-                    points: cutout,
-                    segments:
-                        PcbScene3dCutoutGeometryFilter.#buildCutoutSegments(
-                            cutout
-                        ),
-                    bounds: PcbScene3dCutoutGeometryFilter.#resolveBounds(
-                        cutout
-                    ),
-                    ...circularCutout
+            .map((cutout, sourceIndex) => {
+                let prepared = preparedPolygonCache?.has(cutout)
+                    ? preparedPolygonCache.get(cutout)
+                    : null
+
+                if (!prepared) {
+                    const points = cutout.map((point) => ({
+                        x: Number(point?.x || 0),
+                        y: Number(point?.y || 0)
+                    }))
+                    prepared = new PcbScene3dPreparedPolygon(points, {
+                        source: cutout,
+                        sourceIndex,
+                        epsilon:
+                            PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON,
+                        detectCircle: true
+                    })
+                    preparedPolygonCache?.set(cutout, prepared)
                 }
+
+                return prepared
             })
-    }
-    /**
-     * Builds reusable segment metadata for one cutout polygon.
-     * @param {{ x: number, y: number }[]} points
-     * @returns {{ start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[]}
-     */
-    static #buildCutoutSegments(points) {
-        const segments = []
-        for (let index = 0; index < points.length; index += 1) {
-            const start = points[index]
-            const end = points[(index + 1) % points.length]
-            const dx = end.x - start.x
-            const dy = end.y - start.y
-            segments.push({
-                start,
-                end,
-                dx,
-                dy,
-                lengthSquared: dx * dx + dy * dy,
-                bounds: {
-                    minX: Math.min(start.x, end.x),
-                    maxX: Math.max(start.x, end.x),
-                    minY: Math.min(start.y, end.y),
-                    maxY: Math.max(start.y, end.y)
-                }
-            })
-        }
-        return segments
     }
     /**
      * Appends a triangle, subdividing near cutouts before removal.
      * @param {number[]} positions
      * @param {{ x: number, y: number, z: number }[]} triangle
-     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }[]} cutouts
+     * @param {PcbScene3dPreparedPolygon[]} cutouts
      * @param {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number, discardTerminalOverlaps: boolean }} settings
      * @param {number} depth
      * @param {{ changed: boolean }} state
-     * @param {object | null} [cutoutIndex]
+     * @param {PcbScene3dPreparedPolygonSet | null} [cutoutSet]
      * @returns {void}
      */
     static #appendFilteredTriangle(
@@ -174,15 +164,15 @@ export class PcbScene3dCutoutGeometryFilter {
         settings,
         depth,
         state,
-        cutoutIndex = null
+        cutoutSet = null
     ) {
         const triangleBounds =
             PcbScene3dCutoutGeometryFilter.#resolveBounds(triangle)
-        const candidateCutouts = cutoutIndex
-            ? PcbScene3dCutoutGeometryFilter.#collectCandidateCutouts(
-                  triangleBounds,
-                  cutoutIndex
-              )
+        const candidateCutouts = cutoutSet
+            ? cutoutSet.query(triangleBounds, {
+                  epsilon: PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON,
+                  stable: true
+              })
             : cutouts
         const overlappingCutouts = []
         for (const cutout of candidateCutouts) {
@@ -193,7 +183,8 @@ export class PcbScene3dCutoutGeometryFilter {
                 ) &&
                 PcbScene3dCutoutGeometryFilter.#doesTriangleOverlapCutout(
                     triangle,
-                    cutout
+                    cutout,
+                    triangleBounds
                 )
             ) {
                 overlappingCutouts.push(cutout)
@@ -249,166 +240,6 @@ export class PcbScene3dCutoutGeometryFilter {
                 )
             }
         )
-    }
-
-    /**
-     * Builds a spatial index for prepared cutout bounds.
-     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number } }[]} cutouts
-     * @returns {{ cutouts: object[], cellSize: number, cells: Map<string, number[]>, overflowIndexes: number[], marks: Uint32Array, mark: number }}
-     */
-    static #buildCutoutSpatialIndex(cutouts) {
-        const cellSize =
-            PcbScene3dCutoutGeometryFilter.#resolveSpatialCellSize(cutouts)
-        const cells = new Map()
-        const overflowIndexes = []
-        cutouts.forEach((cutout, index) => {
-            const range = PcbScene3dCutoutGeometryFilter.#resolveCellRange(
-                cutout.bounds,
-                cellSize
-            )
-            const cellCount =
-                (range.maxX - range.minX + 1) * (range.maxY - range.minY + 1)
-            if (
-                cellCount >
-                PcbScene3dCutoutGeometryFilter
-                    .#SPATIAL_INDEX_MAX_CELLS_PER_CUTOUT
-            ) {
-                overflowIndexes.push(index)
-                return
-            }
-            for (let cellX = range.minX; cellX <= range.maxX; cellX += 1) {
-                for (let cellY = range.minY; cellY <= range.maxY; cellY += 1) {
-                    const key = PcbScene3dCutoutGeometryFilter.#cellKey(
-                        cellX,
-                        cellY
-                    )
-                    const bucket = cells.get(key)
-                    if (bucket) {
-                        bucket.push(index)
-                    } else {
-                        cells.set(key, [index])
-                    }
-                }
-            }
-        })
-        return {
-            cutouts,
-            cellSize,
-            cells,
-            overflowIndexes,
-            marks: new Uint32Array(cutouts.length),
-            mark: 0
-        }
-    }
-
-    /**
-     * Collects cutouts whose spatial buckets overlap one triangle bounds box.
-     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} bounds
-     * @param {{ cutouts: object[], cellSize: number, cells: Map<string, number[]>, overflowIndexes: number[], marks: Uint32Array, mark: number }} cutoutIndex
-     * @returns {object[]}
-     */
-    static #collectCandidateCutouts(bounds, cutoutIndex) {
-        const candidates = []
-        const range = PcbScene3dCutoutGeometryFilter.#resolveCellRange(
-            bounds,
-            cutoutIndex.cellSize
-        )
-        cutoutIndex.mark += 1
-        if (cutoutIndex.mark >= 0xffffffff) {
-            cutoutIndex.marks.fill(0)
-            cutoutIndex.mark = 1
-        }
-        for (let cellX = range.minX; cellX <= range.maxX; cellX += 1) {
-            for (let cellY = range.minY; cellY <= range.maxY; cellY += 1) {
-                const bucket = cutoutIndex.cells.get(
-                    PcbScene3dCutoutGeometryFilter.#cellKey(cellX, cellY)
-                )
-                if (bucket) {
-                    for (const index of bucket) {
-                        PcbScene3dCutoutGeometryFilter.#appendCutoutCandidate(
-                            candidates,
-                            cutoutIndex,
-                            index
-                        )
-                    }
-                }
-            }
-        }
-
-        for (const index of cutoutIndex.overflowIndexes) {
-            PcbScene3dCutoutGeometryFilter.#appendCutoutCandidate(
-                candidates,
-                cutoutIndex,
-                index
-            )
-        }
-        return candidates
-    }
-
-    /**
-     * Appends one unique spatial-index cutout candidate.
-     * @param {object[]} candidates
-     * @param {{ cutouts: object[], marks: Uint32Array, mark: number }} cutoutIndex
-     * @param {number} index
-     * @returns {void}
-     */
-    static #appendCutoutCandidate(candidates, cutoutIndex, index) {
-        if (cutoutIndex.marks[index] === cutoutIndex.mark) {
-            return
-        }
-
-        cutoutIndex.marks[index] = cutoutIndex.mark
-        candidates.push(cutoutIndex.cutouts[index])
-    }
-
-    /**
-     * Resolves a spatial index cell size from typical cutout spans.
-     * @param {{ bounds: { minX: number, maxX: number, minY: number, maxY: number } }[]} cutouts
-     * @returns {number}
-     */
-    static #resolveSpatialCellSize(cutouts) {
-        const spans = cutouts
-            .map((cutout) =>
-                Math.max(
-                    Number(cutout.bounds.maxX) - Number(cutout.bounds.minX),
-                    Number(cutout.bounds.maxY) - Number(cutout.bounds.minY),
-                    0
-                )
-            )
-            .filter((span) => Number.isFinite(span))
-            .sort((left, right) => left - right)
-        const medianSpan = spans[Math.floor(spans.length / 2)] || 0
-
-        return Math.max(
-            medianSpan * 4,
-            PcbScene3dCutoutGeometryFilter.#DEFAULT_MAX_EDGE_LENGTH * 2,
-            PcbScene3dCutoutGeometryFilter.#SPATIAL_INDEX_MIN_CELL_SIZE
-        )
-    }
-
-    /**
-     * Resolves the inclusive spatial cell range for a bounds box.
-     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} bounds
-     * @param {number} cellSize
-     * @returns {{ minX: number, maxX: number, minY: number, maxY: number }}
-     */
-    static #resolveCellRange(bounds, cellSize) {
-        return {
-            minX: Math.floor(Number(bounds.minX) / cellSize),
-            maxX: Math.floor(Number(bounds.maxX) / cellSize),
-            minY: Math.floor(Number(bounds.minY) / cellSize),
-            maxY: Math.floor(Number(bounds.maxY) / cellSize)
-        }
-    }
-
-    /**
-     * Builds one deterministic spatial index key.
-     * @param {number} cellX
-     * @param {number} cellY
-     * @returns {string}
-     */
-    static #cellKey(cellX, cellY) {
-        return `${cellX}:${cellY}`
     }
 
     /**
@@ -572,10 +403,11 @@ export class PcbScene3dCutoutGeometryFilter {
     /**
      * Returns true when one triangle intersects or covers a cutout.
      * @param {{ x: number, y: number }[]} triangle
-     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} cutout
+     * @param {PcbScene3dPreparedPolygon} cutout
+     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} triangleBounds
      * @returns {boolean}
      */
-    static #doesTriangleOverlapCutout(triangle, cutout) {
+    static #doesTriangleOverlapCutout(triangle, cutout, triangleBounds) {
         if (
             !Array.isArray(triangle) ||
             triangle.length !== 3 ||
@@ -604,7 +436,8 @@ export class PcbScene3dCutoutGeometryFilter {
             }
         }
 
-        for (const point of cutout.points) {
+        const vertexCandidates = cutout.queryVertices(triangleBounds, [])
+        for (const point of vertexCandidates) {
             if (
                 PcbScene3dCutoutGeometryFilter.#isPointInsideOrOnTriangle(
                     point,
@@ -624,7 +457,7 @@ export class PcbScene3dCutoutGeometryFilter {
     /**
      * Returns true when a point is inside or on a cutout.
      * @param {{ x: number, y: number }} point
-     * @param {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} cutout
+     * @param {PcbScene3dPreparedPolygon} cutout
      * @returns {boolean}
      */
     static #isPointInsideOrOnCutout(point, cutout) {
@@ -683,7 +516,7 @@ export class PcbScene3dCutoutGeometryFilter {
     /**
      * Returns true when a point lies inside a cutout and away from its border.
      * @param {{ x: number, y: number }} point
-     * @param {{ points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} cutout
+     * @param {PcbScene3dPreparedPolygon} cutout
      * @returns {boolean}
      */
     static #isPointStrictlyInsideCutout(point, cutout) {
@@ -699,35 +532,13 @@ export class PcbScene3dCutoutGeometryFilter {
             )
         }
 
-        const polygon = cutout.points
-
-        let inside = false
-        for (
-            let index = 0, previousIndex = polygon.length - 1;
-            index < polygon.length;
-            previousIndex = index, index += 1
-        ) {
-            const current = polygon[index]
-            const previous = polygon[previousIndex]
-            const intersects =
-                current.y > point.y !== previous.y > point.y &&
-                point.x <
-                    ((previous.x - current.x) * (point.y - current.y)) /
-                        (previous.y - current.y) +
-                        current.x
-
-            if (intersects) {
-                inside = !inside
-            }
-        }
-
-        return inside
+        return cutout.containsPointStrict(point)
     }
 
     /**
      * Returns true when a point lies on a cutout edge.
      * @param {{ x: number, y: number }} point
-     * @param {{ segments: { start: { x: number, y: number }, end: { x: number, y: number }, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }} cutout
+     * @param {PcbScene3dPreparedPolygon} cutout
      * @returns {boolean}
      */
     static #isPointOnCutoutBoundary(point, cutout) {
@@ -744,23 +555,7 @@ export class PcbScene3dCutoutGeometryFilter {
             )
         }
 
-        for (const segment of cutout.segments) {
-            if (
-                PcbScene3dCutoutGeometryFilter.#pointOverlapsBounds(
-                    point,
-                    segment.bounds
-                ) &&
-                PcbScene3dCutoutGeometryFilter.#isPointOnSegment(
-                    point,
-                    segment.start,
-                    segment.end
-                )
-            ) {
-                return true
-            }
-        }
-
-        return false
+        return cutout.isPointOnBoundary(point)
     }
 
     /**
@@ -796,7 +591,7 @@ export class PcbScene3dCutoutGeometryFilter {
     /**
      * Returns true when any triangle and cutout edges intersect.
      * @param {{ x: number, y: number }[]} triangle
-     * @param {{ segments: { start: { x: number, y: number }, end: { x: number, y: number }, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[] }} cutout
+     * @param {PcbScene3dPreparedPolygon} cutout
      * @returns {boolean}
      */
     static #hasIntersectingEdges(triangle, cutout) {
@@ -813,7 +608,11 @@ export class PcbScene3dCutoutGeometryFilter {
                     triangleEnd
                 )
 
-            for (const segment of cutout.segments) {
+            const segmentCandidates = cutout.querySegments(
+                triangleSegmentBounds,
+                []
+            )
+            for (const segment of segmentCandidates) {
                 if (
                     PcbScene3dCutoutGeometryFilter.#boundsOverlap(
                         triangleSegmentBounds,

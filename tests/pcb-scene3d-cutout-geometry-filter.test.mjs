@@ -60,17 +60,30 @@ function buildSquareContour(size, pointsPerSide) {
 test('PcbScene3dCutoutGeometryFilter skips subdivision for fully covered complex triangles', () => {
     const geometry = buildCoveredTriangleGeometry()
     const cutout = buildSquareContour(1000, 160)
+    const preparedPolygonCache = new Map()
     const startedAt = performance.now()
 
     const filteredGeometry = PcbScene3dCutoutGeometryFilter.filter(
         THREE,
         geometry,
-        [cutout],
-        { maxDepth: 9, maxEdgeLength: 2, discardTerminalOverlaps: true }
+        [null, cutout, [{ x: 0, y: 0 }]],
+        {
+            maxDepth: 9,
+            maxEdgeLength: 2,
+            discardTerminalOverlaps: true,
+            preparedPolygonCache
+        }
     )
     const elapsedMs = performance.now() - startedAt
 
     assert.equal(filteredGeometry.getAttribute('position').count, 0)
+    assert.equal(preparedPolygonCache.size, 1)
+    assert.ok(preparedPolygonCache.has(cutout))
+    const preparedCutout = preparedPolygonCache.get(cutout)
+    PcbScene3dCutoutGeometryFilter.filter(THREE, geometry, [cutout], {
+        preparedPolygonCache
+    })
+    assert.strictEqual(preparedPolygonCache.get(cutout), preparedCutout)
     assert.ok(
         elapsedMs < 100,
         `Expected fully covered triangle filtering under 100 ms, got ${elapsedMs.toFixed(
