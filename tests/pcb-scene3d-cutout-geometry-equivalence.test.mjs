@@ -85,6 +85,23 @@ function buildSquareContour(size, pointsPerSide) {
     return points
 }
 
+/**
+ * Builds a concave contour surrounding the origin with an open center arm.
+ * @returns {{ x: number, y: number }[]}
+ */
+function buildConcaveToleranceContour() {
+    return [
+        { x: -1, y: -1 },
+        { x: 1, y: -1 },
+        { x: 1, y: -0.5 },
+        { x: -0.5, y: -0.5 },
+        { x: -0.5, y: 0.5 },
+        { x: 1, y: 0.5 },
+        { x: 1, y: 1 },
+        { x: -1, y: 1 }
+    ]
+}
+
 test('preserves identity for invalid input, empty geometry, and total bounds misses', () => {
     const positions = [0, 0, 1, 2, 0, 2, 0, 2, 3]
     const geometry = buildGeometry(positions)
@@ -169,6 +186,32 @@ test('preserves legacy segment-bounds handling for duplicate cutout vertices', (
         positionArray(result),
         [-0.5, -0.5, 1, 0.5, -0.5, 2, 0, 0.5, 3]
     )
+})
+
+test('matches legacy vertex tolerance for zero-area triangles', () => {
+    const geometry = buildGeometry([0, 0, 1, 0, 0, 2, 0, 0, 3])
+
+    const result = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        geometry,
+        [buildConcaveToleranceContour()],
+        { maxDepth: 0, discardTerminalOverlaps: true }
+    )
+
+    assert.deepEqual(positionArray(result), [])
+})
+
+test('matches legacy vertex tolerance for tiny non-degenerate triangles', () => {
+    const geometry = buildGeometry([0, 0, 1, 0.001, 0, 2, 0, 0.001, 3])
+
+    const result = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        geometry,
+        [buildConcaveToleranceContour()],
+        { maxDepth: 0, discardTerminalOverlaps: true }
+    )
+
+    assert.deepEqual(positionArray(result), [])
 })
 
 test('returns the original indexed geometry when overlapping bounds contain no cutout contact', () => {
