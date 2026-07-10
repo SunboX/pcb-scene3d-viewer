@@ -128,17 +128,22 @@ export class PcbScene3dCutoutGeometryFilter {
                     ? preparedPolygonCache.get(cutout)
                     : null
 
-                if (prepared?.circleDetectionEnabled !== true) {
-                    const points = cutout.map((point) => ({
+                if (
+                    prepared?.circleDetectionEnabled !== true ||
+                    prepared?.pointRepresentation !== 'raw'
+                ) {
+                    const metadataPoints = cutout.map((point) => ({
                         x: Number(point?.x || 0),
                         y: Number(point?.y || 0)
                     }))
-                    prepared = new PcbScene3dPreparedPolygon(points, {
+                    prepared = new PcbScene3dPreparedPolygon(cutout, {
                         source: cutout,
                         sourceIndex,
                         epsilon:
                             PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON,
-                        detectCircle: true
+                        detectCircle: true,
+                        metadataPoints,
+                        pointRepresentation: 'raw'
                     })
                     preparedPolygonCache?.set(cutout, prepared)
                 }
@@ -532,7 +537,10 @@ export class PcbScene3dCutoutGeometryFilter {
             )
         }
 
-        return cutout.containsPointStrict(point)
+        return cutout.containsPointStrict(point, {
+            segmentBoundsEpsilon:
+                PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
+        })
     }
 
     /**
@@ -555,7 +563,10 @@ export class PcbScene3dCutoutGeometryFilter {
             )
         }
 
-        return cutout.isPointOnBoundary(point)
+        return cutout.isPointOnBoundary(point, {
+            segmentBoundsEpsilon:
+                PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
+        })
     }
 
     /**

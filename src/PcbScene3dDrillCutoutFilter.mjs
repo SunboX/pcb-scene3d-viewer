@@ -67,7 +67,7 @@ export class PcbScene3dDrillCutoutFilter {
             ? preparedPolygonCache.get(polygon)
             : null
 
-        if (!prepared) {
+        if (prepared?.pointRepresentation !== 'numeric') {
             const points = polygon.map((point) => ({
                 x: Number(point?.x || 0),
                 y: Number(point?.y || 0)
@@ -76,7 +76,8 @@ export class PcbScene3dDrillCutoutFilter {
                 source: polygon,
                 sourceIndex: index,
                 epsilon: PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON,
-                detectCircle: false
+                detectCircle: false,
+                pointRepresentation: 'numeric'
             })
             preparedPolygonCache?.set(polygon, prepared)
         }

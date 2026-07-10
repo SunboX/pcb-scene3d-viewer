@@ -134,6 +134,43 @@ test('matches legacy coordinate coercion for structurally valid cutouts', () => 
     assert.deepEqual(positionArray(result), [])
 })
 
+test('keeps raw narrow-phase semantics separate from coerced cutout metadata', () => {
+    const geometry = buildGeometry([0.1, 0.1, 1, 0.4, 0.1, 2, 0.1, 0.4, 3])
+    const cutout = [{ x: 1 }, {}, { y: 1 }, {}]
+
+    const result = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        geometry,
+        [cutout],
+        { maxDepth: 0, discardTerminalOverlaps: false }
+    )
+
+    assert.deepEqual(positionArray(result), [])
+})
+
+test('preserves legacy segment-bounds handling for duplicate cutout vertices', () => {
+    const geometry = buildGeometry([-0.5, -0.5, 1, 0.5, -0.5, 2, 0, 0.5, 3])
+    const cutout = [
+        { x: 0, y: 2 },
+        { x: 0, y: 2 },
+        { x: 0, y: 1 },
+        { x: 1, y: 0 }
+    ]
+
+    const result = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        geometry,
+        [cutout],
+        { maxDepth: 0, discardTerminalOverlaps: true }
+    )
+
+    assert.strictEqual(result, geometry)
+    assert.deepEqual(
+        positionArray(result),
+        [-0.5, -0.5, 1, 0.5, -0.5, 2, 0, 0.5, 3]
+    )
+})
+
 test('returns the original indexed geometry when overlapping bounds contain no cutout contact', () => {
     const geometry = buildGeometry(
         [0, 0, 0, 1, 0, 1, 0, 1, 2, 4, 0, 3, 5, 0, 4, 5, 1, 5],
@@ -204,6 +241,39 @@ test('preserves circular output after drill filtering primes a shared prepared c
 
     assert.deepEqual(positionArray(primedResult), positionArray(freshResult))
     assert.notStrictEqual(sharedCache.get(cutout), drillPrepared)
+})
+
+test('preserves drill nesting after geometry filtering primes a shared prepared cache', () => {
+    const outer = [
+        { x: -2, y: -2 },
+        { x: 2, y: -2 },
+        { x: 2, y: 2 },
+        { x: -2, y: 2 }
+    ]
+    const inner = [{ x: 1 }, {}, { y: 1 }, {}]
+    const cutouts = [outer, inner]
+    const freshResult = PcbScene3dDrillCutoutFilter.removeNestedCutouts(cutouts)
+    const sharedCache = new Map()
+    const distantGeometry = buildGeometry([10, 10, 1, 11, 10, 2, 10, 11, 3])
+
+    PcbScene3dCutoutGeometryFilter.filter(THREE, distantGeometry, [outer], {
+        preparedPolygonCache: sharedCache
+    })
+    PcbScene3dCutoutGeometryFilter.filter(THREE, distantGeometry, [inner], {
+        preparedPolygonCache: sharedCache
+    })
+    const geometryPreparedOuter = sharedCache.get(outer)
+    const geometryPreparedInner = sharedCache.get(inner)
+
+    const primedResult = PcbScene3dDrillCutoutFilter.removeNestedCutouts(
+        cutouts,
+        { preparedPolygonCache: sharedCache }
+    )
+
+    assert.deepEqual(freshResult, [outer])
+    assert.deepEqual(primedResult, freshResult)
+    assert.notStrictEqual(sharedCache.get(outer), geometryPreparedOuter)
+    assert.notStrictEqual(sharedCache.get(inner), geometryPreparedInner)
 })
 
 test('matches captured concave and collinear polygon buffers exactly', () => {

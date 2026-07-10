@@ -487,6 +487,123 @@ test('reports whether circle detection was performed for non-circular polygons',
     assert.equal(defaulted.circleDetectionEnabled, false)
 })
 
+test('uses optional metadata points without replacing exact predicate points', () => {
+    const points = [
+        { x: 0, y: 0 },
+        { x: 2, y: 0 },
+        { x: 0, y: 2 },
+        { x: 0, y: 1 }
+    ]
+    const metadataPoints = [
+        { x: -1, y: -1 },
+        { x: 3, y: -1 },
+        { x: 3, y: 3 },
+        { x: -1, y: 3 }
+    ]
+    const polygon = new PcbScene3dPreparedPolygon(points, {
+        metadataPoints,
+        detectCircle: false
+    })
+
+    assert.strictEqual(polygon.points, points)
+    assert.deepEqual(polygon.bounds, {
+        minX: -1,
+        maxX: 3,
+        minY: -1,
+        maxY: 3
+    })
+    assert.deepEqual(polygon.centroid, { x: 1, y: 1 })
+    assert.equal(polygon.signedArea, 16)
+    assert.equal(polygon.area, 16)
+    assert.strictEqual(polygon.segments[0].start, points[0])
+    assert.strictEqual(polygon.segments[0].end, points[1])
+    assert.equal(
+        polygon.containsPointStrict({ x: 2.5, y: 2.5 }),
+        referenceContainsPointStrict({ x: 2.5, y: 2.5 }, points, EPSILON)
+    )
+    assert.equal(
+        polygon.isPointOnBoundary({ x: 3, y: 1 }),
+        referencePointOnBoundary({ x: 3, y: 1 }, points, EPSILON)
+    )
+    assert.deepEqual(
+        polygon.queryVertices(
+            { minX: 2.9, maxX: 3.1, minY: 2.9, maxY: 3.1 },
+            []
+        ),
+        []
+    )
+})
+
+test('reports the prepared point representation for cache compatibility', () => {
+    const rawPoints = [{ x: 1 }, {}, { y: 1 }, {}]
+    const numericPoints = [
+        { x: 1, y: 0 },
+        { x: 0, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: 0 }
+    ]
+    const raw = new PcbScene3dPreparedPolygon(rawPoints, {
+        metadataPoints: numericPoints,
+        pointRepresentation: 'raw'
+    })
+    const numeric = new PcbScene3dPreparedPolygon(numericPoints, {
+        pointRepresentation: 'numeric'
+    })
+    const unspecified = new PcbScene3dPreparedPolygon(numericPoints)
+
+    assert.equal(raw.pointRepresentation, 'raw')
+    assert.equal(numeric.pointRepresentation, 'numeric')
+    assert.equal(unspecified.pointRepresentation, null)
+})
+
+test('keeps raw non-finite vertices and segments candidate-complete', () => {
+    const points = [{ x: 1 }, {}, { y: 1 }, {}]
+    const metadataPoints = [
+        { x: 1, y: 0 },
+        { x: 0, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: 0 }
+    ]
+    const polygon = new PcbScene3dPreparedPolygon(points, {
+        metadataPoints,
+        detectCircle: false
+    })
+    const distantBounds = { minX: 100, maxX: 101, minY: 100, maxY: 101 }
+    const vertexCandidates = polygon.queryVertices(distantBounds, [])
+    const segmentCandidates = polygon.querySegments(distantBounds, [])
+
+    assert.deepEqual(polygon.bounds, {
+        minX: 0,
+        maxX: 1,
+        minY: 0,
+        maxY: 1
+    })
+    for (const point of points) {
+        assert.ok(vertexCandidates.includes(point))
+    }
+    for (const segment of polygon.segments) {
+        assert.ok(segmentCandidates.includes(segment))
+        assert.strictEqual(
+            segment.start,
+            points[polygon.segments.indexOf(segment)]
+        )
+    }
+})
+
+test('runs optional circle detection against exact points', () => {
+    const metadataPoints = sampledCircle(8, 0, 0, 5)
+    const points = metadataPoints.map((point) => ({ ...point }))
+    points[0] = { x: points[0].x }
+    const polygon = new PcbScene3dPreparedPolygon(points, {
+        metadataPoints,
+        detectCircle: true
+    })
+
+    assert.equal(polygon.circleDetectionEnabled, true)
+    assert.equal(polygon.circle, null)
+    assert.equal(polygon.isCircular, false)
+})
+
 test('returns complete segment and vertex broad-phase candidates into targets', () => {
     const points = [
         { x: -5, y: -3 },

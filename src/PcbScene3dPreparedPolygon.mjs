@@ -55,6 +55,9 @@ export class PcbScene3dPreparedPolygon {
     /** @type {boolean} */
     #circleDetectionEnabled
 
+    /** @type {'raw' | 'numeric' | null} */
+    #pointRepresentation
+
     /** @type {PcbScene3dAabbIndex} */
     #segmentIndex
 
@@ -64,7 +67,7 @@ export class PcbScene3dPreparedPolygon {
     /**
      * Prepares reusable polygon metadata without mutating source points.
      * @param {{ x: number, y: number }[]} points
-     * @param {{ source?: *, sourceIndex?: number, epsilon?: number, detectCircle?: boolean }} [options]
+     * @param {{ source?: *, sourceIndex?: number, epsilon?: number, detectCircle?: boolean, metadataPoints?: { x: number, y: number }[], pointRepresentation?: 'raw' | 'numeric' }} [options]
      */
     constructor(points, options = {}) {
         this.#points = Array.isArray(points) ? points : []
@@ -76,12 +79,19 @@ export class PcbScene3dPreparedPolygon {
             options.epsilon ?? PcbScene3dPreparedPolygon.#DEFAULT_EPSILON
         )
 
-        const metadata = PcbScene3dPreparedPolygon.#resolveMetadata(
-            this.#points
-        )
+        const metadataPoints = Array.isArray(options.metadataPoints)
+            ? options.metadataPoints
+            : this.#points
+        const metadata =
+            PcbScene3dPreparedPolygon.#resolveMetadata(metadataPoints)
         this.#bounds = metadata.bounds
         this.#centroid = metadata.centroid
         this.#signedArea = metadata.signedArea
+        this.#pointRepresentation = ['raw', 'numeric'].includes(
+            options.pointRepresentation
+        )
+            ? options.pointRepresentation
+            : null
         this.#segments = PcbScene3dPreparedPolygon.#buildSegments(this.#points)
         this.#segmentIndex = new PcbScene3dAabbIndex(this.#segments, {
             resolveBounds: (segment) =>
@@ -119,11 +129,19 @@ export class PcbScene3dPreparedPolygon {
     }
 
     /**
-     * Returns the caller-prepared numeric points.
+     * Returns the exact points supplied by the caller.
      * @returns {{ x: number, y: number }[]}
      */
     get points() {
         return this.#points
+    }
+
+    /**
+     * Returns the producer-declared exact-point representation for cache reuse.
+     * @returns {'raw' | 'numeric' | null}
+     */
+    get pointRepresentation() {
+        return this.#pointRepresentation
     }
 
     /**
@@ -217,10 +235,11 @@ export class PcbScene3dPreparedPolygon {
     /**
      * Returns true when a point lies strictly inside the polygon.
      * @param {{ x: number, y: number }} point
+     * @param {{ segmentBoundsEpsilon?: number }} [options]
      * @returns {boolean}
      */
-    containsPointStrict(point) {
-        if (this.isPointOnBoundary(point)) {
+    containsPointStrict(point, options = {}) {
+        if (this.isPointOnBoundary(point, options)) {
             return false
         }
 
@@ -235,10 +254,11 @@ export class PcbScene3dPreparedPolygon {
     /**
      * Returns true when a point lies inside or on the polygon boundary.
      * @param {{ x: number, y: number }} point
+     * @param {{ segmentBoundsEpsilon?: number }} [options]
      * @returns {boolean}
      */
-    containsPointOrBoundary(point) {
-        if (this.isPointOnBoundary(point)) {
+    containsPointOrBoundary(point, options = {}) {
+        if (this.isPointOnBoundary(point, options)) {
             return true
         }
 
@@ -253,9 +273,10 @@ export class PcbScene3dPreparedPolygon {
     /**
      * Returns true when a point lies on a polygon segment within tolerance.
      * @param {{ x: number, y: number }} point
+     * @param {{ segmentBoundsEpsilon?: number }} [options]
      * @returns {boolean}
      */
-    isPointOnBoundary(point) {
+    isPointOnBoundary(point, options = {}) {
         const candidates = this.querySegments(
             {
                 minX: point.x,
@@ -265,9 +286,19 @@ export class PcbScene3dPreparedPolygon {
             },
             []
         )
+        const segmentBoundsEpsilon = Number(options.segmentBoundsEpsilon)
+        const requireSegmentBoundsOverlap =
+            Number.isFinite(segmentBoundsEpsilon)
 
-        return candidates.some((segment) =>
-            this.#isPointOnSegment(point, segment)
+        return candidates.some(
+            (segment) =>
+                (!requireSegmentBoundsOverlap ||
+                    PcbScene3dPreparedPolygon.#pointOverlapsBounds(
+                        point,
+                        segment.bounds,
+                        Math.max(0, segmentBoundsEpsilon)
+                    )) &&
+                this.#isPointOnSegment(point, segment)
         )
     }
 
@@ -427,14 +458,10 @@ export class PcbScene3dPreparedPolygon {
     static #resolveSegmentIndexBounds(segment, epsilon) {
         if (
             segment.lengthSquared === 0 ||
-            !Number.isFinite(segment.lengthSquared)
+            !Number.isFinite(segment.lengthSquared) ||
+            !PcbScene3dPreparedPolygon.#hasFiniteBounds(segment.bounds)
         ) {
-            return {
-                minX: -Infinity,
-                maxX: Infinity,
-                minY: -Infinity,
-                maxY: Infinity
-            }
+            return PcbScene3dPreparedPolygon.#resolveAllSpaceBounds()
         }
 
         const margin = Math.max(
@@ -455,11 +482,45 @@ export class PcbScene3dPreparedPolygon {
      * @returns {PcbScene3dPreparedPolygonBounds}
      */
     static #resolvePointBounds(point) {
+        const x = Number(point?.x)
+        const y = Number(point?.y)
+
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            return PcbScene3dPreparedPolygon.#resolveAllSpaceBounds()
+        }
+
         return {
-            minX: point.x,
-            maxX: point.x,
-            minY: point.y,
-            maxY: point.y
+            minX: x,
+            maxX: x,
+            minY: y,
+            maxY: y
+        }
+    }
+
+    /**
+     * Returns true when every bounds coordinate is finite.
+     * @param {PcbScene3dPreparedPolygonBounds} bounds
+     * @returns {boolean}
+     */
+    static #hasFiniteBounds(bounds) {
+        return (
+            Number.isFinite(bounds.minX) &&
+            Number.isFinite(bounds.maxX) &&
+            Number.isFinite(bounds.minY) &&
+            Number.isFinite(bounds.maxY)
+        )
+    }
+
+    /**
+     * Resolves conservative all-space bounds for non-finite exact geometry.
+     * @returns {PcbScene3dPreparedPolygonBounds}
+     */
+    static #resolveAllSpaceBounds() {
+        return {
+            minX: -Infinity,
+            maxX: Infinity,
+            minY: -Infinity,
+            maxY: Infinity
         }
     }
 
@@ -467,14 +528,15 @@ export class PcbScene3dPreparedPolygon {
      * Returns true when a point falls inside finite polygon bounds.
      * @param {{ x: number, y: number }} point
      * @param {PcbScene3dPreparedPolygonBounds} bounds
+     * @param {number} [epsilon]
      * @returns {boolean}
      */
-    static #pointOverlapsBounds(point, bounds) {
+    static #pointOverlapsBounds(point, bounds, epsilon = 0) {
         return (
-            point.x >= bounds.minX &&
-            point.x <= bounds.maxX &&
-            point.y >= bounds.minY &&
-            point.y <= bounds.maxY
+            point.x >= bounds.minX - epsilon &&
+            point.x <= bounds.maxX + epsilon &&
+            point.y >= bounds.minY - epsilon &&
+            point.y <= bounds.maxY + epsilon
         )
     }
 }
