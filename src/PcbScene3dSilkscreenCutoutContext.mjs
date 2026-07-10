@@ -138,17 +138,27 @@ export class PcbScene3dSilkscreenCutoutContext {
      * @returns {cutout is { x: number, y: number }[]}
      */
     static #isNormalizedCutout(cutout) {
-        return (
-            Array.isArray(cutout) &&
-            cutout.length >= 3 &&
-            cutout.every(
-                (point) =>
-                    typeof point?.x === 'number' &&
-                    Number.isFinite(point.x) &&
-                    typeof point?.y === 'number' &&
-                    Number.isFinite(point.y)
-            )
-        )
+        if (!Array.isArray(cutout) || cutout.length < 3) {
+            return false
+        }
+
+        for (let index = 0; index < cutout.length; index += 1) {
+            if (!Object.hasOwn(cutout, index)) {
+                return false
+            }
+
+            const point = cutout[index]
+            if (
+                typeof point?.x !== 'number' ||
+                !Number.isFinite(point.x) ||
+                typeof point?.y !== 'number' ||
+                !Number.isFinite(point.y)
+            ) {
+                return false
+            }
+        }
+
+        return true
     }
 
     /**

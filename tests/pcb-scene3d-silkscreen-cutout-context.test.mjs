@@ -81,6 +81,51 @@ test('rejects invalid and non-normalized sources without caching them', () => {
     assert.equal(context.preparedPolygonCache.has(mutatedSource), false)
 })
 
+test('rejects holey point arrays without throwing or caching them', () => {
+    const emptySlots = new Array(3)
+    const deletedSlot = [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 0, y: 1 }
+    ]
+    delete deletedSlot[1]
+    let context
+
+    assert.doesNotThrow(() => {
+        context = new PcbScene3dSilkscreenCutoutContext([
+            emptySlots,
+            deletedSlot
+        ])
+    })
+    for (const source of [emptySlots, deletedSlot]) {
+        assert.equal(context.resolve(source), null)
+        assert.equal(context.resolveCircle(source), null)
+        assert.equal(context.isHoleInsideContour(source, []), false)
+        assert.equal(context.preparedPolygonCache.has(source), false)
+    }
+    assert.deepEqual(
+        context.applyCircularEdgeCutouts([], [emptySlots, deletedSlot]),
+        { points: [], appliedCutouts: [] }
+    )
+    assert.equal(context.preparedPolygonCache.size, 0)
+})
+
+test('evicts a cached source after a point slot is deleted', () => {
+    const cutout = [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 0, y: 1 }
+    ]
+    const context = new PcbScene3dSilkscreenCutoutContext([cutout])
+
+    assert.ok(context.preparedPolygonCache.has(cutout))
+    delete cutout[1]
+
+    assert.equal(context.resolve(cutout), null)
+    assert.equal(context.resolveCircle(cutout), null)
+    assert.equal(context.preparedPolygonCache.has(cutout), false)
+})
+
 test('leaves numeric-string polygons for drill-compatible preparation', () => {
     const outer = stringSquare(0, 0, 10)
     const inner = stringSquare(2, 2, 2)
