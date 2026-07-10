@@ -8,6 +8,7 @@ import { PcbScene3dCompanionBasePlacementAdjuster } from './PcbScene3dCompanionB
 import { PcbScene3dCopperDetailGroupBuilder } from './PcbScene3dCopperDetailGroupBuilder.mjs'
 import { PcbScene3dCopperFactory } from './PcbScene3dCopperFactory.mjs'
 import { PcbScene3dDetailCoordinateNormalizer } from './PcbScene3dDetailCoordinateNormalizer.mjs'
+import { PcbScene3dDeferredModelFinalizer } from './PcbScene3dDeferredModelFinalizer.mjs'
 import { PcbScene3dDrillVoidFactory } from './PcbScene3dDrillVoidFactory.mjs'
 import { PcbScene3dExternalCompanionFallback } from './PcbScene3dExternalCompanionFallback.mjs'
 import { PcbScene3dExternalModels } from './PcbScene3dExternalModels.mjs'
@@ -289,7 +290,6 @@ export class PcbScene3dRuntime {
             this.#settleReady()
         }
     }
-
     /**
      * Creates the Three.js renderer, camera, and scene.
      * @returns {void}
@@ -317,7 +317,6 @@ export class PcbScene3dRuntime {
         this.#camera.up.set(0, 0, 1)
         this.#viewportNode?.replaceChildren(this.#renderer.domElement)
     }
-
     /**
      * Creates the initial board shell, fallback bodies, and placeholder detail
      * groups used by the deferred loading stages.
@@ -326,7 +325,6 @@ export class PcbScene3dRuntime {
     #createSceneGraph() {
         const THREE = this.#three
         const board = this.#sceneDescription.board
-
         this.#viewOrientationGroup = new THREE.Group()
         this.#scene.add(this.#viewOrientationGroup)
         this.#rootGroup = new THREE.Group()
@@ -470,7 +468,6 @@ export class PcbScene3dRuntime {
             boardSpan * 7
         )
     }
-
     /**
      * Applies the active preset's scene-scale transform.
      * @param {string} preset
@@ -502,15 +499,31 @@ export class PcbScene3dRuntime {
      * @returns {Promise<void>}
      */
     async #loadDeferredDetail() {
-        const externalModelsPromise = this.#loadExternalModels().then(
-            () => ({ status: 'fulfilled' }),
-            (error) => ({ status: 'rejected', error })
-        )
+        let externalModels = null
         try {
             await PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
             if (this.#isDisposed) {
                 return
             }
+            externalModels = new PcbScene3dDeferredModelFinalizer(
+                this.#loadExternalModels(),
+                {
+                    isDisposed: () => this.#isDisposed,
+                    onSuccess: () => {
+                        this.#applyViewScale(this.#presetState.get())
+                        this.#render()
+                    },
+                    onError: (error) => {
+                        this.#hooks.setDiagnostics?.([
+                            'Deferred 3D detail could not finish loading: ' +
+                                String(
+                                    error?.message || error || 'Unknown error.'
+                                )
+                        ])
+                        this.#render()
+                    }
+                }
+            )
             await this.#loadDeferredSurfaceArtwork()
             this.#render()
             await PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
@@ -525,14 +538,7 @@ export class PcbScene3dRuntime {
             if (this.#isDisposed) {
                 return
             }
-            const externalModelsResult = await externalModelsPromise
-            if (externalModelsResult.status === 'rejected') {
-                throw externalModelsResult.error
-            }
-            if (this.#isDisposed) {
-                return
-            }
-            this.#render()
+            await externalModels.release()
         } catch (error) {
             if (this.#isDisposed) {
                 return
@@ -542,9 +548,9 @@ export class PcbScene3dRuntime {
                     String(error?.message || error || 'Unknown error.')
             ])
             this.#render()
+            externalModels?.release()
         }
     }
-
     /**
      * Builds and attaches surface artwork detail once after the first frame.
      * @returns {Promise<void>}
@@ -557,7 +563,6 @@ export class PcbScene3dRuntime {
             ['silkscreen', silkscreen, Z_MIL.silk, true],
             ['paste', this.#sceneDescription.detail.paste, Z_MIL.paste, false]
         ]
-
         for (const [groupName, artwork, z, prepareFonts] of overlays) {
             if (artwork == null) {
                 continue
@@ -578,7 +583,6 @@ export class PcbScene3dRuntime {
                     ? await loaded
                     : loaded) || didLoad
         }
-
         if (didLoad) {
             this.#applyViewScale(this.#presetState.get())
         }
@@ -600,13 +604,11 @@ export class PcbScene3dRuntime {
             topZ,
             (x, y) => this.#normalizeDetailPoint(x, y)
         )
-
         if (detailGroup.children.length) {
             copperGroup.add(detailGroup)
             this.#applyViewScale(this.#presetState.get())
         }
     }
-
     /**
      * Attempts to load any resolved external 3D models.
      * @returns {Promise<void>}
@@ -658,12 +660,10 @@ export class PcbScene3dRuntime {
                 this.#applyToggleVisibility()
             }
         })
-
         if (diagnostics.length) {
             this.#hooks.setDiagnostics?.(diagnostics)
         }
     }
-
     /**
      * Creates and configures orbit/pan/zoom controls using Three's standard
      * OrbitControls implementation in the same z-up world as the PCB scene.
