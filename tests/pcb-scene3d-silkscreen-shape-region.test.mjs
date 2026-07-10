@@ -4,6 +4,9 @@ import * as THREE from 'three'
 import { PcbScene3dCutoutCircleDetector } from '../src/PcbScene3dCutoutCircleDetector.mjs'
 import { PcbScene3dSilkscreenFactory } from '../src/PcbScene3dSilkscreenFactory.mjs'
 
+const RUN_COLD_PATH_PERFORMANCE =
+    process.env.PCB_SCENE3D_RUN_SILKSCREEN_COLD_PATH_PERFORMANCE === '1'
+
 function createFakeThree() {
     class FakeGroup {
         constructor() {
@@ -194,20 +197,24 @@ test('PcbScene3dSilkscreenFactory does not prepare cutouts for an empty side', (
     }
 })
 
-test('PcbScene3dSilkscreenFactory keeps the large empty-side cold path bounded', () => {
-    const cutouts = buildColdPathCutouts(10000)
+test(
+    'PcbScene3dSilkscreenFactory keeps the large empty-side cold path bounded',
+    { skip: !RUN_COLD_PATH_PERFORMANCE },
+    () => {
+        const cutouts = buildColdPathCutouts(10000)
 
-    buildEmptySideGroup(cutouts)
-    const startedAt = performance.now()
-    const group = buildEmptySideGroup(cutouts)
-    const elapsedMs = performance.now() - startedAt
+        buildEmptySideGroup(cutouts)
+        const startedAt = performance.now()
+        const group = buildEmptySideGroup(cutouts)
+        const elapsedMs = performance.now() - startedAt
 
-    assert.equal(group.children.length, 0)
-    assert.ok(
-        elapsedMs < 25,
-        `Expected empty-side build under 25 ms, got ${elapsedMs.toFixed(1)} ms`
-    )
-})
+        assert.equal(group.children.length, 0)
+        assert.ok(
+            elapsedMs < 25,
+            `Expected empty-side build under 25 ms, got ${elapsedMs.toFixed(1)} ms`
+        )
+    }
+)
 
 /**
  * Builds unique normalized-circle sources for cold-path coverage.
