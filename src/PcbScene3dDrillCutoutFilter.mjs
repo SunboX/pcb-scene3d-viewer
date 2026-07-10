@@ -1,3 +1,6 @@
+import { PcbScene3dPreparedPolygon } from './PcbScene3dPreparedPolygon.mjs'
+import { PcbScene3dPreparedPolygonSet } from './PcbScene3dPreparedPolygonSet.mjs'
+
 /**
  * Filters drill cutout polygons before they are applied to filled artwork.
  */
@@ -7,18 +10,28 @@ export class PcbScene3dDrillCutoutFilter {
     /**
      * Removes cutout polygons that are fully covered by a larger sibling.
      * @param {{ x: number, y: number }[][]} cutouts Cutout polygons.
+     * @param {{ preparedPolygonCache?: Map }} [options] Request-scoped options.
      * @returns {{ x: number, y: number }[][]}
      */
-    static removeNestedCutouts(cutouts) {
-        const validCutoutInfos =
-            PcbScene3dDrillCutoutFilter.#buildPolygonInfos(cutouts)
+    static removeNestedCutouts(cutouts, options = {}) {
+        const preparedPolygonCache =
+            PcbScene3dDrillCutoutFilter.#resolvePreparedPolygonCache(options)
+        const validCutoutInfos = PcbScene3dDrillCutoutFilter.#buildPolygonInfos(
+            cutouts,
+            preparedPolygonCache
+        )
+        const candidateContext =
+            PcbScene3dDrillCutoutFilter.#buildCandidateContext(validCutoutInfos)
 
         return validCutoutInfos
             .filter(
                 (cutoutInfo) =>
                     !PcbScene3dDrillCutoutFilter.#isNestedCutoutInfo(
                         cutoutInfo,
-                        validCutoutInfos
+                        PcbScene3dDrillCutoutFilter.#queryCandidates(
+                            candidateContext,
+                            cutoutInfo.bounds
+                        )
                     )
             )
             .map((cutoutInfo) => cutoutInfo.source)
@@ -27,13 +40,18 @@ export class PcbScene3dDrillCutoutFilter {
     /**
      * Builds reusable polygon metadata for valid polygons.
      * @param {{ x: number, y: number }[][]} polygons Source polygons.
-     * @returns {{ source: { x: number, y: number }[], points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, centroid: { x: number, y: number }, area: number, index: number }[]}
+     * @param {Map | null} preparedPolygonCache Request-scoped prepared cache.
+     * @returns {{ source: { x: number, y: number }[], points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, centroid: { x: number, y: number }, area: number, index: number, prepared: PcbScene3dPreparedPolygon }[]}
      */
-    static #buildPolygonInfos(polygons) {
+    static #buildPolygonInfos(polygons, preparedPolygonCache) {
         return (Array.isArray(polygons) ? polygons : [])
             .filter((polygon) => Array.isArray(polygon) && polygon.length >= 3)
             .map((polygon, index) =>
-                PcbScene3dDrillCutoutFilter.#buildPolygonInfo(polygon, index)
+                PcbScene3dDrillCutoutFilter.#buildPolygonInfo(
+                    polygon,
+                    index,
+                    preparedPolygonCache
+                )
             )
     }
 
@@ -41,46 +59,92 @@ export class PcbScene3dDrillCutoutFilter {
      * Builds reusable numeric metadata for one polygon.
      * @param {{ x: number, y: number }[]} polygon Source polygon.
      * @param {number} index Polygon index among valid polygons.
-     * @returns {{ source: { x: number, y: number }[], points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, centroid: { x: number, y: number }, area: number, index: number }}
+     * @param {Map | null} preparedPolygonCache Request-scoped prepared cache.
+     * @returns {{ source: { x: number, y: number }[], points: { x: number, y: number }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, centroid: { x: number, y: number }, area: number, index: number, prepared: PcbScene3dPreparedPolygon }}
      */
-    static #buildPolygonInfo(polygon, index) {
-        const points = polygon.map((point) => ({
-            x: Number(point?.x || 0),
-            y: Number(point?.y || 0)
-        }))
-        const bounds = {
-            minX: Infinity,
-            maxX: -Infinity,
-            minY: Infinity,
-            maxY: -Infinity
+    static #buildPolygonInfo(polygon, index, preparedPolygonCache) {
+        let prepared = preparedPolygonCache?.has(polygon)
+            ? preparedPolygonCache.get(polygon)
+            : null
+
+        if (!prepared) {
+            const points = polygon.map((point) => ({
+                x: Number(point?.x || 0),
+                y: Number(point?.y || 0)
+            }))
+            prepared = new PcbScene3dPreparedPolygon(points, {
+                source: polygon,
+                sourceIndex: index,
+                epsilon: PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON,
+                detectCircle: false
+            })
+            preparedPolygonCache?.set(polygon, prepared)
         }
-        let area = 0
-        let totalX = 0
-        let totalY = 0
-
-        points.forEach((point, pointIndex) => {
-            const next = points[(pointIndex + 1) % points.length]
-
-            bounds.minX = Math.min(bounds.minX, point.x)
-            bounds.maxX = Math.max(bounds.maxX, point.x)
-            bounds.minY = Math.min(bounds.minY, point.y)
-            bounds.maxY = Math.max(bounds.maxY, point.y)
-            totalX += point.x
-            totalY += point.y
-            area += point.x * next.y - next.x * point.y
-        })
 
         return {
             source: polygon,
-            points,
-            bounds,
-            centroid: {
-                x: totalX / Math.max(points.length, 1),
-                y: totalY / Math.max(points.length, 1)
-            },
-            area: Math.abs(area) / 2,
-            index
+            points: prepared.points,
+            bounds: prepared.bounds,
+            centroid: prepared.centroid,
+            area: prepared.area,
+            index,
+            prepared
         }
+    }
+
+    /**
+     * Resolves a supported request-scoped prepared polygon cache.
+     * @param {{ preparedPolygonCache?: Map }} options Request options.
+     * @returns {Map | null}
+     */
+    static #resolvePreparedPolygonCache(options) {
+        return options?.preparedPolygonCache instanceof Map
+            ? options.preparedPolygonCache
+            : null
+    }
+
+    /**
+     * Builds one stable broad-phase set and duplicate-aware info groups.
+     * @param {{ prepared: PcbScene3dPreparedPolygon }[]} polygonInfos Polygon metadata.
+     * @returns {{ set: PcbScene3dPreparedPolygonSet, infoGroups: Map<PcbScene3dPreparedPolygon, object[]> }}
+     */
+    static #buildCandidateContext(polygonInfos) {
+        const infoGroups = new Map()
+
+        for (const polygonInfo of polygonInfos) {
+            const group = infoGroups.get(polygonInfo.prepared) || []
+            group.push(polygonInfo)
+            infoGroups.set(polygonInfo.prepared, group)
+        }
+
+        return {
+            set: new PcbScene3dPreparedPolygonSet(
+                polygonInfos.map((polygonInfo) => polygonInfo.prepared)
+            ),
+            infoGroups
+        }
+    }
+
+    /**
+     * Returns stable polygon-info candidates whose bounds overlap a query.
+     * @param {{ set: PcbScene3dPreparedPolygonSet, infoGroups: Map<PcbScene3dPreparedPolygon, object[]> }} context Candidate context.
+     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} bounds Query bounds.
+     * @returns {object[]}
+     */
+    static #queryCandidates(context, bounds) {
+        const groupOffsets = new Map()
+
+        return context.set
+            .query(bounds, {
+                epsilon: PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON,
+                stable: true
+            })
+            .map((prepared) => {
+                const offset = groupOffsets.get(prepared) || 0
+                const group = context.infoGroups.get(prepared)
+                groupOffsets.set(prepared, offset + 1)
+                return group[offset]
+            })
     }
 
     /**
@@ -98,12 +162,14 @@ export class PcbScene3dDrillCutoutFilter {
      * Removes drill cutouts that are already covered by authored fill holes.
      * @param {{ x: number, y: number }[][]} drillCutouts
      * @param {{ x: number, y: number }[][]} fillHoles
+     * @param {{ preparedPolygonCache?: Map }} [options] Request-scoped options.
      * @returns {{ x: number, y: number }[][]}
      */
-    static removeCoveredCutouts(drillCutouts, fillHoles) {
+    static removeCoveredCutouts(drillCutouts, fillHoles, options = {}) {
         return PcbScene3dDrillCutoutFilter.partitionFillHoles(
             drillCutouts,
-            fillHoles
+            fillHoles,
+            options
         ).uncoveredCutouts
     }
 
@@ -111,9 +177,10 @@ export class PcbScene3dDrillCutoutFilter {
      * Splits authored holes from physical drill holes already copied to a fill.
      * @param {{ x: number, y: number }[][]} drillCutouts
      * @param {{ x: number, y: number }[][]} fillHoles
+     * @param {{ preparedPolygonCache?: Map }} [options] Request-scoped options.
      * @returns {{ authoredHoles: { x: number, y: number }[][], drillHoles: { x: number, y: number }[][], uncoveredCutouts: { x: number, y: number }[][] }}
      */
-    static partitionFillHoles(drillCutouts, fillHoles) {
+    static partitionFillHoles(drillCutouts, fillHoles, options = {}) {
         const cutouts = Array.isArray(drillCutouts) ? drillCutouts : []
         const holes = Array.isArray(fillHoles) ? fillHoles : []
 
@@ -133,9 +200,23 @@ export class PcbScene3dDrillCutoutFilter {
             }
         }
 
-        const cutoutInfos =
-            PcbScene3dDrillCutoutFilter.#buildPolygonInfos(cutouts)
-        const holeInfos = PcbScene3dDrillCutoutFilter.#buildPolygonInfos(holes)
+        const preparedPolygonCache =
+            PcbScene3dDrillCutoutFilter.#resolvePreparedPolygonCache(options)
+        const cutoutInfos = PcbScene3dDrillCutoutFilter.#buildPolygonInfos(
+            cutouts,
+            preparedPolygonCache
+        )
+        const holeInfos = PcbScene3dDrillCutoutFilter.#buildPolygonInfos(
+            holes,
+            preparedPolygonCache
+        )
+        const candidateContext =
+            PcbScene3dDrillCutoutFilter.#buildCandidateContext([
+                ...cutoutInfos,
+                ...holeInfos
+            ])
+        const cutoutInfoSet = new Set(cutoutInfos)
+        const holeInfoSet = new Set(holeInfos)
         const cutoutInfoMap =
             PcbScene3dDrillCutoutFilter.#buildPolygonInfoMap(cutoutInfos)
         const holeInfoMap =
@@ -149,7 +230,10 @@ export class PcbScene3dDrillCutoutFilter {
                 holeInfo &&
                 PcbScene3dDrillCutoutFilter.#isDrillHoleInfo(
                     holeInfo,
-                    cutoutInfos
+                    PcbScene3dDrillCutoutFilter.#queryCandidates(
+                        candidateContext,
+                        holeInfo.bounds
+                    ).filter((candidate) => cutoutInfoSet.has(candidate))
                 )
             ) {
                 drillHoles.push(hole)
@@ -165,12 +249,17 @@ export class PcbScene3dDrillCutoutFilter {
                 const cutoutInfo = cutoutInfoMap.get(cutout)
                 return (
                     !cutoutInfo ||
-                    !holeInfos.some((holeInfo) =>
-                        PcbScene3dDrillCutoutFilter.#doesHoleInfoCoverCutout(
-                            holeInfo,
-                            cutoutInfo
-                        )
+                    !PcbScene3dDrillCutoutFilter.#queryCandidates(
+                        candidateContext,
+                        cutoutInfo.bounds
                     )
+                        .filter((candidate) => holeInfoSet.has(candidate))
+                        .some((holeInfo) =>
+                            PcbScene3dDrillCutoutFilter.#doesHoleInfoCoverCutout(
+                                holeInfo,
+                                cutoutInfo
+                            )
+                        )
                 )
             })
         }
@@ -237,12 +326,12 @@ export class PcbScene3dDrillCutoutFilter {
             ) &&
             PcbScene3dDrillCutoutFilter.#isPointInsideOrOnPolygon(
                 cutoutInfo.centroid,
-                holeInfo.points
+                holeInfo
             ) &&
             cutoutInfo.points.every((point) =>
                 PcbScene3dDrillCutoutFilter.#isPointInsideOrOnPolygon(
                     point,
-                    holeInfo.points
+                    holeInfo
                 )
             )
         )
@@ -272,96 +361,10 @@ export class PcbScene3dDrillCutoutFilter {
     /**
      * Returns true when a point is inside or on one polygon.
      * @param {{ x: number, y: number }} point
-     * @param {{ x: number, y: number }[]} polygon
+     * @param {{ prepared: PcbScene3dPreparedPolygon }} polygonInfo
      * @returns {boolean}
      */
-    static #isPointInsideOrOnPolygon(point, polygon) {
-        return (
-            PcbScene3dDrillCutoutFilter.#isPointOnPolygonBoundary(
-                point,
-                polygon
-            ) ||
-            PcbScene3dDrillCutoutFilter.#isPointStrictlyInsidePolygon(
-                point,
-                polygon
-            )
-        )
-    }
-
-    /**
-     * Returns true when a point lies inside a polygon and away from its border.
-     * @param {{ x: number, y: number }} point
-     * @param {{ x: number, y: number }[]} polygon
-     * @returns {boolean}
-     */
-    static #isPointStrictlyInsidePolygon(point, polygon) {
-        let inside = false
-        for (
-            let index = 0, previousIndex = polygon.length - 1;
-            index < polygon.length;
-            previousIndex = index, index += 1
-        ) {
-            const current = polygon[index]
-            const previous = polygon[previousIndex]
-            const intersects =
-                current.y > point.y !== previous.y > point.y &&
-                point.x <
-                    ((previous.x - current.x) * (point.y - current.y)) /
-                        (previous.y - current.y) +
-                        current.x
-
-            if (intersects) {
-                inside = !inside
-            }
-        }
-
-        return inside
-    }
-
-    /**
-     * Returns true when a point lies on any polygon edge.
-     * @param {{ x: number, y: number }} point
-     * @param {{ x: number, y: number }[]} polygon
-     * @returns {boolean}
-     */
-    static #isPointOnPolygonBoundary(point, polygon) {
-        return polygon.some((start, index) =>
-            PcbScene3dDrillCutoutFilter.#isPointOnSegment(
-                point,
-                start,
-                polygon[(index + 1) % polygon.length]
-            )
-        )
-    }
-
-    /**
-     * Returns true when a point lies on one finite segment.
-     * @param {{ x: number, y: number }} point
-     * @param {{ x: number, y: number }} start
-     * @param {{ x: number, y: number }} end
-     * @returns {boolean}
-     */
-    static #isPointOnSegment(point, start, end) {
-        const cross =
-            (point.y - start.y) * (end.x - start.x) -
-            (point.x - start.x) * (end.y - start.y)
-
-        if (Math.abs(cross) > PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON) {
-            return false
-        }
-
-        const dot =
-            (point.x - start.x) * (end.x - start.x) +
-            (point.y - start.y) * (end.y - start.y)
-
-        if (dot < -PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON) {
-            return false
-        }
-
-        const lengthSquared = (end.x - start.x) ** 2 + (end.y - start.y) ** 2
-
-        return (
-            dot <= lengthSquared + PcbScene3dDrillCutoutFilter.#GEOMETRY_EPSILON
-        )
+    static #isPointInsideOrOnPolygon(point, polygonInfo) {
+        return polygonInfo.prepared.containsPointOrBoundary(point)
     }
 }
