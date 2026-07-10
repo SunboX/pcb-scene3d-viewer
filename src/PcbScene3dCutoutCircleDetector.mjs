@@ -23,12 +23,21 @@ export class PcbScene3dCutoutCircleDetector {
         const center = PcbScene3dCutoutCircleDetector.#resolveCentroid(points)
         let radiusSum = 0
         for (let index = 0; index < points.length; index += 1) {
+            if (!(index in points)) {
+                continue
+            }
+
             const point = points[index]
             radiusSum += Math.hypot(point.x - center.x, point.y - center.y)
         }
         const radius = radiusSum / points.length
         let maxError = -Infinity
         for (let index = 0; index < points.length; index += 1) {
+            if (!(index in points)) {
+                maxError = Math.max(maxError, undefined)
+                continue
+            }
+
             const point = points[index]
             const value = Math.hypot(point.x - center.x, point.y - center.y)
             maxError = Math.max(maxError, Math.abs(value - radius))
@@ -75,6 +84,10 @@ export class PcbScene3dCutoutCircleDetector {
         let totalX = 0
         let totalY = 0
         for (let index = 0; index < points.length; index += 1) {
+            if (!(index in points)) {
+                continue
+            }
+
             const point = points[index]
             totalX += Number(point.x || 0)
             totalY += Number(point.y || 0)

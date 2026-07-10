@@ -79,6 +79,29 @@ test('matches the allocation-heavy reference for seeded sampled polygons', () =>
     }
 })
 
+test('matches sparse-array and inherited-index callback semantics', () => {
+    const fullySparse = new Array(8)
+    const partiallySparse = sampledEllipse(8, 2, -3, 5, 5)
+    delete partiallySparse[3]
+    const inheritedIndex = sampledEllipse(8, -4, 6, 9, 9)
+    const inheritedPoint = inheritedIndex[5]
+    const inheritedPrototype = Object.create(Array.prototype)
+    inheritedPrototype[5] = inheritedPoint
+    delete inheritedIndex[5]
+    Object.setPrototypeOf(inheritedIndex, inheritedPrototype)
+
+    for (const points of [fullySparse, partiallySparse, inheritedIndex]) {
+        let actual
+        assert.doesNotThrow(() => {
+            actual = PcbScene3dCutoutCircleDetector.resolve(points)
+        })
+        assert.deepEqual(actual, referenceResolve(points))
+    }
+    assert.equal(referenceResolve(fullySparse), null)
+    assert.equal(referenceResolve(partiallySparse)?.isCircular, true)
+    assert.equal(referenceResolve(inheritedIndex)?.isCircular, true)
+})
+
 /**
  * Reproduces the pre-optimization allocation-heavy detector exactly.
  * @param {{ x: number, y: number }[]} points Sampled polygon points.
