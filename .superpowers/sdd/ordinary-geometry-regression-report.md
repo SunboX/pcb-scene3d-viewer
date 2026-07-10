@@ -98,11 +98,11 @@ Every remediation run also retained all exact expected counts.
 
 - Owned files: benchmark script, prepared polygon implementation, and prepared
   polygon tests only.
-- Owned file lengths: 323, 691, and 804 lines.
+- Owned file lengths: 323, 695, and 920 lines.
 - The combined repository passes `npm run check:format`; owned diffs pass
   `git diff --check`.
 - The final combined `npm test` run, including the concurrent silkscreen review
-  changes, passed 544 tests with 0 failures and one intentional timing-gated
+  changes, passed 545 tests with 0 failures and one intentional timing-gated
   skip.
 - No CopperFactory, CopperFillMeshBuilder, SilkscreenFactory, app, dependency,
   release, or publication changes were made by this task.

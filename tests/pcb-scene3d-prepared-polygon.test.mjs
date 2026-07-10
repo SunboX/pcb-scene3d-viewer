@@ -777,7 +777,7 @@ test('scans small polygon candidates linearly on every query', () => {
 })
 
 test('terminates when the small vertex source is also the query target', () => {
-    const polygon = new PcbScene3dPreparedPolygon(sampledCircle(4), {
+    const polygon = new PcbScene3dPreparedPolygon(sampledCircle(4, 0, 0, 1), {
         epsilon: EPSILON,
         detectCircle: false
     })
@@ -799,7 +799,7 @@ test('terminates when the small vertex source is also the query target', () => {
 })
 
 test('terminates when the small segment source is also the query target', () => {
-    const polygon = new PcbScene3dPreparedPolygon(sampledCircle(4), {
+    const polygon = new PcbScene3dPreparedPolygon(sampledCircle(4, 0, 0, 1), {
         epsilon: EPSILON,
         detectCircle: false
     })
