@@ -4,6 +4,7 @@ import { PcbScene3dCutoutGridIndex } from './PcbScene3dCutoutGridIndex.mjs'
 import { PcbScene3dGeometryBoundsResolver } from './PcbScene3dGeometryBoundsResolver.mjs'
 import { PcbScene3dPreparedPolygon } from './PcbScene3dPreparedPolygon.mjs'
 import { PcbScene3dTerminalCutoutClassifier } from './PcbScene3dTerminalCutoutClassifier.mjs'
+import { PcbScene3dTriangleVertexQueryBounds } from './PcbScene3dTriangleVertexQueryBounds.mjs'
 
 /** Clips filled 2D geometry against drill-cutout polygons. */
 export class PcbScene3dCutoutGeometryFilter {
@@ -469,60 +470,16 @@ export class PcbScene3dCutoutGeometryFilter {
      * @returns {{ x: number, y: number }[]}
      */
     static #queryCutoutVertices(cutout, triangle, triangleBounds) {
-        const queryBounds =
-            PcbScene3dCutoutGeometryFilter.#resolveVertexQueryBounds(
-                triangle,
-                triangleBounds
-            )
+        const queryBounds = PcbScene3dTriangleVertexQueryBounds.resolve(
+            triangle,
+            triangleBounds,
+            cutout.bounds,
+            PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON
+        )
 
         return queryBounds
             ? cutout.queryVertices(queryBounds, [])
             : cutout.points
-    }
-
-    /**
-     * Expands triangle bounds to cover its signed-area tolerance envelope.
-     * @param {{ x: number, y: number }[]} triangle
-     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} bounds
-     * @returns {{ minX: number, maxX: number, minY: number, maxY: number } | null}
-     */
-    static #resolveVertexQueryBounds(triangle, bounds) {
-        const doubledArea = Math.abs(
-            PcbScene3dCutoutGeometryFilter.#cross(
-                triangle[0],
-                triangle[1],
-                triangle[2]
-            )
-        )
-        const width = bounds.maxX - bounds.minX
-        const height = bounds.maxY - bounds.minY
-
-        if (
-            !Number.isFinite(doubledArea) ||
-            doubledArea === 0 ||
-            !Number.isFinite(width) ||
-            !Number.isFinite(height)
-        ) {
-            return null
-        }
-
-        // Each accepted cross value is a barycentric weight times doubled
-        // area; two weights can extend by epsilon / area on one axis.
-        const expansionScale =
-            (2 * PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON) / doubledArea
-        const expansionX = width * expansionScale
-        const expansionY = height * expansionScale
-
-        if (!Number.isFinite(expansionX) || !Number.isFinite(expansionY)) {
-            return null
-        }
-
-        return {
-            minX: bounds.minX - expansionX,
-            maxX: bounds.maxX + expansionX,
-            minY: bounds.minY - expansionY,
-            maxY: bounds.maxY + expansionY
-        }
     }
 
     /**

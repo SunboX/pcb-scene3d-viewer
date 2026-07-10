@@ -102,6 +102,41 @@ function buildConcaveToleranceContour() {
     ]
 }
 
+/**
+ * Resolves the legacy point-first signed area without reordering arithmetic.
+ * @param {{ x: number, y: number }} point Query point.
+ * @param {{ x: number, y: number }} start Triangle edge start.
+ * @param {{ x: number, y: number }} end Triangle edge end.
+ * @returns {number}
+ */
+function legacyPointFirstCross(point, start, end) {
+    return (
+        (start.x - point.x) * (end.y - point.y) -
+        (start.y - point.y) * (end.x - point.x)
+    )
+}
+
+/**
+ * Returns the legacy tolerant point-in-triangle predicate result.
+ * @param {{ x: number, y: number }} point Query point.
+ * @param {{ x: number, y: number }[]} triangle Triangle vertices.
+ * @param {number} epsilon Signed-area tolerance.
+ * @returns {boolean}
+ */
+function legacyPointInsideOrOnTriangle(point, triangle, epsilon) {
+    const signs = triangle.map((start, index) =>
+        legacyPointFirstCross(
+            point,
+            start,
+            triangle[(index + 1) % triangle.length]
+        )
+    )
+    const hasNegative = signs.some((sign) => sign < -epsilon)
+    const hasPositive = signs.some((sign) => sign > epsilon)
+
+    return !(hasNegative && hasPositive)
+}
+
 test('preserves identity for invalid input, empty geometry, and total bounds misses', () => {
     const positions = [0, 0, 1, 2, 0, 2, 0, 2, 3]
     const geometry = buildGeometry(positions)
@@ -212,6 +247,70 @@ test('matches legacy vertex tolerance for tiny non-degenerate triangles', () => 
     )
 
     assert.deepEqual(positionArray(result), [])
+})
+
+test('matches legacy point-first cross cancellation for ill-conditioned triangles', () => {
+    const geometry = buildGeometry([
+        -5.901132573349973e-7, 4.299122177705359e-7, 1, -5.900902762540694e-7,
+        4.2988574342936233e-7, 2, -5.90156113713832e-7, 4.299245558334312e-7, 3
+    ])
+    const cutout = [
+        { x: -30_000_000, y: 300_000_000 },
+        { x: 30_000_000, y: 270_000_000 },
+        { x: 300_000_000, y: -30_000_000 }
+    ]
+
+    const result = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        geometry,
+        [cutout],
+        { maxDepth: 0, discardTerminalOverlaps: true }
+    )
+
+    assert.notStrictEqual(result, geometry)
+    assert.deepEqual(positionArray(result), [])
+})
+
+test('keeps rounded near-threshold vertex matches inside the query envelope', () => {
+    const epsilon = 0.001
+    const height = Math.fround(1e-16)
+    const triangle = [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 1, y: height }
+    ]
+    const oldExpansionX = (2 * epsilon) / height
+
+    for (const multiplier of [1, 4, 8]) {
+        const excess = multiplier * Number.EPSILON * 1_000_000
+        const tolerance = epsilon + excess
+        const point = {
+            x: (-2 * tolerance) / height,
+            y: -tolerance
+        }
+        const geometry = buildGeometry([0, 0, 1, 1, 0, 2, 1, height, 3])
+        const cutout = [
+            point,
+            { x: 30_000_000_000_000, y: 0.0005 },
+            { x: 30_000_000_000_000, y: 0.0008 }
+        ]
+
+        assert.equal(
+            legacyPointInsideOrOnTriangle(point, triangle, epsilon),
+            true
+        )
+        assert.ok(point.x < -oldExpansionX - epsilon)
+
+        const result = PcbScene3dCutoutGeometryFilter.filter(
+            THREE,
+            geometry,
+            [cutout],
+            { maxDepth: 0, discardTerminalOverlaps: true }
+        )
+
+        assert.notStrictEqual(result, geometry)
+        assert.deepEqual(positionArray(result), [])
+    }
 })
 
 test('preserves legacy identity across separated spatial-index cells', () => {
