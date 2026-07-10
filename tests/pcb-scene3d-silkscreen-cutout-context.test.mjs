@@ -7,7 +7,7 @@ import { PcbScene3dDrillCutoutFilter } from '../src/PcbScene3dDrillCutoutFilter.
 import { PcbScene3dSilkscreenCutoutContext } from '../src/PcbScene3dSilkscreenCutoutContext.mjs'
 import { PcbScene3dSilkscreenFillSeamBuilder } from '../src/PcbScene3dSilkscreenFillSeamBuilder.mjs'
 
-test('reuses one circular raw-numeric preparation within a context', () => {
+test('defers and reuses one circular raw-numeric preparation within a context', () => {
     const cutout = sampledCircle(32, 3, -4, 7)
     const originalResolve = PcbScene3dCutoutCircleDetector.resolve
     let detectorCalls = 0
@@ -22,8 +22,11 @@ test('reuses one circular raw-numeric preparation within a context', () => {
     }
     try {
         const context = new PcbScene3dSilkscreenCutoutContext([cutout])
-        const prepared = context.resolve(cutout)
 
+        assert.equal(context.preparedPolygonCache.size, 0)
+        assert.equal(detectorCalls, 0)
+        assert.equal(context.preparedPolygonCache.has(cutout), true)
+        const prepared = context.preparedPolygonCache.get(cutout)
         assert.strictEqual(context.resolve(cutout), prepared)
         assert.strictEqual(context.preparedPolygonCache.get(cutout), prepared)
         assert.strictEqual(context.resolveCircle(cutout), prepared.circle)
@@ -33,6 +36,28 @@ test('reuses one circular raw-numeric preparation within a context', () => {
     } finally {
         PcbScene3dCutoutCircleDetector.resolve = originalResolve
     }
+})
+
+test('reuses a compatible lazy cache entry without rescanning source points', () => {
+    let coordinateReads = 0
+    const cutout = sampledCircle(16, 0, 0, 5).map((point) => ({
+        get x() {
+            coordinateReads += 1
+            return point.x
+        },
+        get y() {
+            coordinateReads += 1
+            return point.y
+        }
+    }))
+    const context = new PcbScene3dSilkscreenCutoutContext()
+    const prepared = context.preparedPolygonCache.get(cutout)
+
+    coordinateReads = 0
+
+    assert.equal(context.preparedPolygonCache.has(cutout), true)
+    assert.strictEqual(context.preparedPolygonCache.get(cutout), prepared)
+    assert.equal(coordinateReads, 0)
 })
 
 test('rejects invalid and non-normalized sources without caching them', () => {

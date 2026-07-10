@@ -170,3 +170,83 @@ test('PcbScene3dSilkscreenFactory resolves each side cutout circle once across c
         PcbScene3dCutoutCircleDetector.resolve = originalResolve
     }
 })
+
+test('PcbScene3dSilkscreenFactory does not prepare cutouts for an empty side', () => {
+    const cutouts = buildColdPathCutouts(64)
+    const originalResolve = PcbScene3dCutoutCircleDetector.resolve
+    let detectorCalls = 0
+
+    PcbScene3dCutoutCircleDetector.resolve = (points, epsilon) => {
+        detectorCalls += 1
+        return originalResolve.call(
+            PcbScene3dCutoutCircleDetector,
+            points,
+            epsilon
+        )
+    }
+    try {
+        const group = buildEmptySideGroup(cutouts)
+
+        assert.equal(group.children.length, 0)
+        assert.equal(detectorCalls, 0)
+    } finally {
+        PcbScene3dCutoutCircleDetector.resolve = originalResolve
+    }
+})
+
+test('PcbScene3dSilkscreenFactory keeps the large empty-side cold path bounded', () => {
+    const cutouts = buildColdPathCutouts(10000)
+
+    buildEmptySideGroup(cutouts)
+    const startedAt = performance.now()
+    const group = buildEmptySideGroup(cutouts)
+    const elapsedMs = performance.now() - startedAt
+
+    assert.equal(group.children.length, 0)
+    assert.ok(
+        elapsedMs < 25,
+        `Expected empty-side build under 25 ms, got ${elapsedMs.toFixed(1)} ms`
+    )
+})
+
+/**
+ * Builds unique normalized-circle sources for cold-path coverage.
+ * @param {number} count Cutout count.
+ * @returns {{ x: number, y: number }[][]}
+ */
+function buildColdPathCutouts(count) {
+    return Array.from({ length: count }, (_unused, cutoutIndex) =>
+        Array.from({ length: 8 }, (_value, pointIndex) => {
+            const angle = (pointIndex / 8) * Math.PI * 2
+
+            return {
+                x: cutoutIndex + Math.cos(angle),
+                y: Math.sin(angle)
+            }
+        })
+    )
+}
+
+/**
+ * Builds one top side with cutouts but no renderable silkscreen geometry.
+ * @param {{ x: number, y: number }[][]} cutouts Side cutouts.
+ * @returns {THREE.Group}
+ */
+function buildEmptySideGroup(cutouts) {
+    return PcbScene3dSilkscreenFactory.buildGroup(
+        THREE,
+        {
+            top: {
+                drillCutouts: cutouts,
+                fills: [],
+                tracks: [],
+                arcs: [],
+                texts: []
+            },
+            bottom: { fills: [], tracks: [], arcs: [], texts: [] }
+        },
+        12,
+        -12,
+        (x, y) => ({ x, y })
+    )
+}

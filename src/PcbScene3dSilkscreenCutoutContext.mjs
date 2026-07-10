@@ -3,26 +3,71 @@ import { PcbScene3dDrillCutoutFilter } from './PcbScene3dDrillCutoutFilter.mjs'
 import { PcbScene3dPreparedPolygon } from './PcbScene3dPreparedPolygon.mjs'
 
 /**
+ * Map-compatible cache that prepares normalized cutouts on first consumption.
+ */
+class PcbScene3dLazyPreparedPolygonCache extends Map {
+    /** @type {(cutout: unknown) => void} */
+    #prepare
+
+    /**
+     * Creates a cache backed by one request-scoped preparation callback.
+     * @param {(cutout: unknown) => void} prepare Preparation callback.
+     */
+    constructor(prepare) {
+        super()
+        this.#prepare = prepare
+    }
+
+    /**
+     * Returns whether a source has a compatible preparation.
+     * @param {unknown} cutout Candidate source.
+     * @returns {boolean}
+     */
+    has(cutout) {
+        this.#prepareIfNeeded(cutout)
+        return super.has(cutout)
+    }
+
+    /**
+     * Returns one compatible preparation when available.
+     * @param {unknown} cutout Candidate source.
+     * @returns {PcbScene3dPreparedPolygon | undefined}
+     */
+    get(cutout) {
+        this.#prepareIfNeeded(cutout)
+        return super.get(cutout)
+    }
+
+    /**
+     * Prepares a source only when the cache lacks silkscreen capabilities.
+     * @param {unknown} cutout Candidate source.
+     * @returns {void}
+     */
+    #prepareIfNeeded(cutout) {
+        const prepared = super.get(cutout)
+
+        if (
+            prepared?.circleDetectionEnabled !== true ||
+            prepared?.pointRepresentation !== 'raw-numeric'
+        ) {
+            this.#prepare(cutout)
+        }
+    }
+}
+
+/**
  * Owns exact prepared cutout metadata for one silkscreen side build.
  */
 export class PcbScene3dSilkscreenCutoutContext {
     static #GEOMETRY_EPSILON = 0.001
 
     /** @type {Map<any, PcbScene3dPreparedPolygon>} */
-    #preparedPolygonCache = new Map()
+    #preparedPolygonCache = new PcbScene3dLazyPreparedPolygonCache((cutout) =>
+        this.#prepareNormalizedCutout(cutout)
+    )
 
     /**
-     * Creates a request-scoped context and eagerly prepares side cutouts.
-     * @param {{ x: number, y: number }[][]} [cutouts] Normalized side cutouts.
-     */
-    constructor(cutouts = []) {
-        for (const cutout of Array.isArray(cutouts) ? cutouts : []) {
-            this.resolve(cutout)
-        }
-    }
-
-    /**
-     * Returns the direct cache shared by exact geometry consumers.
+     * Returns the lazy cache shared by exact geometry consumers.
      * @returns {Map<any, PcbScene3dPreparedPolygon>}
      */
     get preparedPolygonCache() {
@@ -40,7 +85,19 @@ export class PcbScene3dSilkscreenCutoutContext {
             return null
         }
 
-        let prepared = this.#preparedPolygonCache.get(cutout)
+        return this.#resolveNormalizedCutout(cutout)
+    }
+
+    /**
+     * Resolves one source already proven to be finite and normalized.
+     * @param {{ x: number, y: number }[]} cutout Normalized cutout points.
+     * @returns {PcbScene3dPreparedPolygon}
+     */
+    #resolveNormalizedCutout(cutout) {
+        let prepared = Map.prototype.get.call(
+            this.#preparedPolygonCache,
+            cutout
+        )
 
         if (
             prepared?.circleDetectionEnabled === true &&
@@ -55,8 +112,19 @@ export class PcbScene3dSilkscreenCutoutContext {
             detectCircle: true,
             pointRepresentation: 'raw-numeric'
         })
-        this.#preparedPolygonCache.set(cutout, prepared)
+        Map.prototype.set.call(this.#preparedPolygonCache, cutout, prepared)
         return prepared
+    }
+
+    /**
+     * Prepares one finite normalized cutout requested by a real cache consumer.
+     * @param {unknown} cutout Candidate normalized cutout points.
+     * @returns {void}
+     */
+    #prepareNormalizedCutout(cutout) {
+        if (PcbScene3dSilkscreenCutoutContext.#isNormalizedCutout(cutout)) {
+            this.#resolveNormalizedCutout(cutout)
+        }
     }
 
     /**

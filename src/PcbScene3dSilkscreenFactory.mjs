@@ -100,9 +100,7 @@ export class PcbScene3dSilkscreenFactory {
             mirrorY
         )
         const surfaceCutouts = drillCutouts.concat(copperCutouts)
-        const cutoutContext = new PcbScene3dSilkscreenCutoutContext(
-            surfaceCutouts
-        )
+        const cutoutContext = new PcbScene3dSilkscreenCutoutContext()
         const strokeMaterial = PcbScene3dSilkscreenFactory.#buildMaterial(
             THREE,
             strokeColor
