@@ -146,6 +146,21 @@ test('PcbScene3dCopperFillCoverageContext converts each pair once and keeps quer
     assert.equal(reads.count, 16)
 })
 
+test('PcbScene3dCopperFillCoverageContext exposes an immutable prepared area count', () => {
+    const emptyContext = PcbScene3dCopperFillCoverageContext.fromLoopSets([])
+    const filledContext = PcbScene3dCopperFillCoverageContext.fromLoopSets([
+        rectangleLoopSet(0, 0, 1, 1),
+        rectangleLoopSet(2, 2, 3, 3)
+    ])
+
+    assert.equal(emptyContext.areaCount, 0)
+    assert.equal(filledContext.areaCount, 2)
+    assert.throws(() => {
+        emptyContext.areaCount = 1
+    }, TypeError)
+    assert.equal(emptyContext.areaCount, 0)
+})
+
 test('PcbScene3dCopperFillCoverageContext includes epsilon extreme and non-finite fallback candidates', () => {
     const touching = rectangleLoopSet(0, 0, 1, 1)
     const huge = rectangleLoopSet(9e307, 9e307, 1e308, 1e308)

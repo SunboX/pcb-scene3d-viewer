@@ -53,13 +53,16 @@ export class PcbScene3dCopperFillAreaClipper {
      * @returns {any | null}
      */
     static filterPrepared(THREE, mesh, coverageContext, options = {}) {
+        if (!mesh || coverageContext?.areaCount === 0) {
+            return mesh
+        }
+
         const sourceGeometry = mesh?.geometry?.index
             ? mesh.geometry.toNonIndexed?.() || mesh.geometry
             : mesh?.geometry
         const position = sourceGeometry?.getAttribute?.('position')
 
         if (
-            !mesh ||
             !position?.count ||
             typeof coverageContext?.queryAreas !== 'function'
         ) {

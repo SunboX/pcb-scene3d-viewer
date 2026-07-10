@@ -475,6 +475,162 @@ test('PcbScene3dCopperFillAreaClipper preserves indexed identity until coverage 
     )
 })
 
+test('PcbScene3dCopperFillAreaClipper skips every triangle query for an empty prepared context', () => {
+    const positions = []
+    for (let index = 0; index < 256; index += 1) {
+        positions.push(index, 0, 1, index + 0.5, 0, 2, index, 0.5, 3)
+    }
+    const mesh = createTriangleMesh(positions)
+    const geometry = mesh.geometry
+    const context = PcbScene3dCopperFillCoverageContext.fromLoopSets([])
+    const queryAreas = context.queryAreas.bind(context)
+    let queryCount = 0
+    context.queryAreas = (...args) => {
+        queryCount += 1
+        return queryAreas(...args)
+    }
+
+    const result = PcbScene3dCopperFillAreaClipper.filterPrepared(
+        THREE,
+        mesh,
+        context
+    )
+
+    assert.strictEqual(result, mesh)
+    assert.strictEqual(result.geometry, geometry)
+    assert.equal(queryCount, 0)
+})
+
+test('PcbScene3dCopperFillAreaClipper preserves generic context traversal without an area count', () => {
+    const mesh = createTriangleMesh([0, 0, 1, 1, 0, 2, 0, 1, 3])
+    const geometry = mesh.geometry
+    let queryCount = 0
+    const context = {
+        queryAreas(_bounds, target) {
+            queryCount += 1
+            return target
+        }
+    }
+
+    const result = PcbScene3dCopperFillAreaClipper.filterPrepared(
+        THREE,
+        mesh,
+        context
+    )
+
+    assert.strictEqual(result, mesh)
+    assert.strictEqual(result.geometry, geometry)
+    assert.equal(queryCount, 1)
+})
+
+test('PcbScene3dCopperFillAreaClipper skips empty and invalid raw fill contexts', () => {
+    const originalQueryAreas =
+        PcbScene3dCopperFillCoverageContext.prototype.queryAreas
+    let queryCount = 0
+    PcbScene3dCopperFillCoverageContext.prototype.queryAreas = function (
+        ...args
+    ) {
+        queryCount += 1
+        return originalQueryAreas.apply(this, args)
+    }
+
+    const emptyMesh = createTriangleMesh([0, 0, 1, 1, 0, 2, 0, 1, 3])
+    const emptyGeometry = emptyMesh.geometry
+    const invalidMesh = createTriangleMesh([0, 0, 1, 1, 0, 2, 0, 1, 3])
+    const invalidGeometry = invalidMesh.geometry
+    let emptyResult
+    let invalidResult
+
+    try {
+        emptyResult = PcbScene3dCopperFillAreaClipper.filter(
+            THREE,
+            emptyMesh,
+            [],
+            (x, y) => ({ x, y }),
+            false
+        )
+        invalidResult = PcbScene3dCopperFillAreaClipper.filter(
+            THREE,
+            invalidMesh,
+            [
+                {
+                    points: [
+                        [0, 0],
+                        [1, 0],
+                        [2, 0]
+                    ]
+                }
+            ],
+            (x, y) => ({ x, y }),
+            false
+        )
+    } finally {
+        PcbScene3dCopperFillCoverageContext.prototype.queryAreas =
+            originalQueryAreas
+    }
+
+    assert.strictEqual(emptyResult, emptyMesh)
+    assert.strictEqual(emptyResult.geometry, emptyGeometry)
+    assert.strictEqual(invalidResult, invalidMesh)
+    assert.strictEqual(invalidResult.geometry, invalidGeometry)
+    assert.equal(queryCount, 0)
+})
+
+test('PcbScene3dCopperFactory skips empty prepared coverage when union is enabled', () => {
+    const originalQueryAreas =
+        PcbScene3dCopperFillCoverageContext.prototype.queryAreas
+    let queryCount = 0
+    PcbScene3dCopperFillCoverageContext.prototype.queryAreas = function (
+        ...args
+    ) {
+        queryCount += 1
+        return originalQueryAreas.apply(this, args)
+    }
+
+    try {
+        for (const fills of [
+            [],
+            [
+                {
+                    layerId: 1,
+                    points: [
+                        [0, 0],
+                        [1, 0],
+                        [2, 0]
+                    ]
+                }
+            ]
+        ]) {
+            PcbScene3dCopperFactory.buildMaskCoveredGroup(
+                THREE,
+                {
+                    tracks: [
+                        {
+                            x1: 0,
+                            y1: 0,
+                            x2: 100,
+                            y2: 0,
+                            width: 4,
+                            layerId: 1
+                        }
+                    ],
+                    arcs: [],
+                    fills
+                },
+                5,
+                -5,
+                (x, y) => ({ x, y }),
+                { unionCoveredLayerPrimitives: true }
+            )
+        }
+    } finally {
+        PcbScene3dCopperFillCoverageContext.prototype.queryAreas =
+            originalQueryAreas
+    }
+
+    assert.equal(queryCount, 0)
+})
+
 test('PcbScene3dCopperFactory clips partially overlapping Gerber covered fill surfaces', () => {
     const group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
         THREE,

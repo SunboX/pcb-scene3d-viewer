@@ -43,6 +43,14 @@ export class PcbScene3dCopperFillCoverageContext {
     }
 
     /**
+     * Returns the immutable number of prepared fill areas.
+     * @returns {number}
+     */
+    get areaCount() {
+        return this.#areas.length
+    }
+
+    /**
      * Appends stable broad-phase area candidates into a caller-owned target.
      * @param {{ minX: number, maxX: number, minY: number, maxY: number }} triangleBounds Triangle bounds.
      * @param {object[]} [target] Candidate accumulator.
