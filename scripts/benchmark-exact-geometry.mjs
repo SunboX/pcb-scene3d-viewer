@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { PcbScene3dCopperFillAreaClipper } from '../src/PcbScene3dCopperFillAreaClipper.mjs'
 import { PcbScene3dCutoutGeometryFilter } from '../src/PcbScene3dCutoutGeometryFilter.mjs'
 import { PcbScene3dDrillCutoutFilter } from '../src/PcbScene3dDrillCutoutFilter.mjs'
+import { PcbScene3dPreparedPolygon } from '../src/PcbScene3dPreparedPolygon.mjs'
 
 /**
  * Builds one sampled circular loop.
@@ -53,6 +54,49 @@ function buildDenseBoundary(pointCount, radius) {
             y: Math.sin(angle) * distance
         }
     })
+}
+
+/**
+ * Builds a deterministic non-circular boundary for repeated segment queries.
+ * @param {number} pointCount Number of boundary points.
+ * @param {number} radius Base boundary radius.
+ * @returns {{ x: number, y: number }[]}
+ */
+function buildRepeatedQueryBoundary(pointCount, radius) {
+    return Array.from({ length: pointCount }, (_, index) => {
+        const angle = (index / pointCount) * Math.PI * 2
+        const distance = radius + Math.sin(angle * 3) * 1.25
+
+        return {
+            x: Math.cos(angle) * distance,
+            y: Math.sin(angle) * distance
+        }
+    })
+}
+
+/**
+ * Builds a deterministic grid of localized AABB queries.
+ * @param {number} minimum Minimum query-center coordinate.
+ * @param {number} maximum Maximum query-center coordinate.
+ * @param {number} step Distance between query centers.
+ * @param {number} halfExtent Query half width and height.
+ * @returns {{ minX: number, maxX: number, minY: number, maxY: number }[]}
+ */
+function buildQueryGrid(minimum, maximum, step, halfExtent) {
+    const queries = []
+
+    for (let y = minimum; y <= maximum; y += step) {
+        for (let x = minimum; x <= maximum; x += step) {
+            queries.push({
+                minX: x - halfExtent,
+                maxX: x + halfExtent,
+                minY: y - halfExtent,
+                maxY: y + halfExtent
+            })
+        }
+    }
+
+    return queries
 }
 
 /**
@@ -263,6 +307,8 @@ const smallCutoutOptions = {
     maxEdgeLength: 2,
     discardTerminalOverlaps: true
 }
+const repeatedQueryBoundary = buildRepeatedQueryBoundary(32, 10)
+const repeatedSegmentQueries = buildQueryGrid(-12, 12, 2, 0.4)
 
 const copperFill = measure(() =>
     PcbScene3dCopperFillAreaClipper.filter(
@@ -304,6 +350,20 @@ const smallGeometry = measure(() =>
         smallCutoutOptions
     )
 )
+const repeatedSegmentQuery = measure(() => {
+    const polygon = new PcbScene3dPreparedPolygon(repeatedQueryBoundary, {
+        detectCircle: false
+    })
+    let candidateCount = 0
+
+    for (let repeat = 0; repeat < 200; repeat += 1) {
+        for (const query of repeatedSegmentQueries) {
+            candidateCount += polygon.querySegments(query, []).length
+        }
+    }
+
+    return candidateCount
+})
 
 const results = {
     copperFillMs: copperFill.milliseconds,
@@ -312,12 +372,14 @@ const results = {
     cutoutGeometryMs: cutoutGeometry.milliseconds,
     ordinaryCutoutGeometryMs: ordinaryCutoutGeometry.milliseconds,
     smallGeometryMs: smallGeometry.milliseconds,
+    repeatedSegmentQueryMs: repeatedSegmentQuery.milliseconds,
     copperPositionCount: positionCount(copperFill.result),
     drillCutoutCount: drillCutout.result.length,
     ordinaryDrillCutoutCount: ordinaryDrillCutout.result.length,
     cutoutPositionCount: positionCount(cutoutGeometry.result),
     ordinaryCutoutPositionCount: positionCount(ordinaryCutoutGeometry.result),
-    smallPositionCount: positionCount(smallGeometry.result)
+    smallPositionCount: positionCount(smallGeometry.result),
+    repeatedSegmentCandidateCount: repeatedSegmentQuery.result
 }
 
 console.log(JSON.stringify(results))

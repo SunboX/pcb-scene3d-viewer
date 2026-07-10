@@ -25,6 +25,7 @@ import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector
 export class PcbScene3dPreparedPolygon {
     static #DEFAULT_EPSILON = 0.001
     static #LINEAR_QUERY_LIMIT = 64
+    static #SEGMENT_INDEX_CONSTRUCTION_BUDGET = 1024
 
     /** @type {*} */
     #source
@@ -62,6 +63,9 @@ export class PcbScene3dPreparedPolygon {
     /** @type {PcbScene3dAabbIndex | null} */
     #segmentIndex
 
+    /** @type {number} */
+    #segmentQueryWork
+
     /** @type {PcbScene3dAabbIndex | null} */
     #vertexIndex
 
@@ -95,6 +99,7 @@ export class PcbScene3dPreparedPolygon {
             : null
         this.#segments = PcbScene3dPreparedPolygon.#buildSegments(this.#points)
         this.#segmentIndex = null
+        this.#segmentQueryWork = 0
         this.#vertexIndex = null
         this.#circleDetectionEnabled = options.detectCircle === true
         this.#circle = this.#circleDetectionEnabled
@@ -302,14 +307,23 @@ export class PcbScene3dPreparedPolygon {
      * @returns {PcbScene3dPreparedPolygonSegment[]}
      */
     querySegments(bounds, target = []) {
-        if (
-            this.#segments.length <=
-            PcbScene3dPreparedPolygon.#LINEAR_QUERY_LIMIT
-        ) {
-            return this.#querySegmentsLinear(bounds, target)
+        const segmentCount = this.#segments.length
+        if (segmentCount > PcbScene3dPreparedPolygon.#LINEAR_QUERY_LIMIT) {
+            return this.#resolveSegmentIndex().queryInto(bounds, target)
         }
 
-        return this.#resolveSegmentIndex().queryInto(bounds, target)
+        if (
+            this.#segmentIndex ||
+            this.#segmentQueryWork + segmentCount >=
+                PcbScene3dPreparedPolygon.#SEGMENT_INDEX_CONSTRUCTION_BUDGET
+        ) {
+            return this.#resolveSegmentIndex().queryInto(bounds, target, {
+                stable: true
+            })
+        }
+
+        this.#segmentQueryWork += segmentCount
+        return this.#querySegmentsLinear(bounds, target)
     }
 
     /**

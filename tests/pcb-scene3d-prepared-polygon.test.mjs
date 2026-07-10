@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { PcbScene3dAabbIndex } from '../src/PcbScene3dAabbIndex.mjs'
 import { PcbScene3dCutoutCircleDetector } from '../src/PcbScene3dCutoutCircleDetector.mjs'
 import { PcbScene3dPreparedPolygon } from '../src/PcbScene3dPreparedPolygon.mjs'
 
@@ -246,6 +247,36 @@ function boundsOverlap(first, second, epsilon) {
     )
 }
 
+/**
+ * Resolves conservative segment candidates with the existing linear semantics.
+ * @param {import('../src/PcbScene3dPreparedPolygon.mjs').PcbScene3dPreparedPolygonSegment[]} segments
+ * @param {{ minX: number, maxX: number, minY: number, maxY: number } | null | undefined} queryBounds
+ * @param {number} epsilon
+ * @returns {import('../src/PcbScene3dPreparedPolygon.mjs').PcbScene3dPreparedPolygonSegment[]}
+ */
+function referenceSegmentCandidates(segments, queryBounds, epsilon) {
+    const finiteQuery =
+        queryBounds && Object.values(queryBounds).every(Number.isFinite)
+    return segments.filter((segment) => {
+        if (!finiteQuery) {
+            return true
+        }
+        const margin = Math.max(
+            epsilon,
+            (Math.SQRT2 * epsilon) / Math.sqrt(segment.lengthSquared)
+        )
+        const envelope = {
+            minX: segment.bounds.minX - margin,
+            maxX: segment.bounds.maxX + margin,
+            minY: segment.bounds.minY - margin,
+            maxY: segment.bounds.maxY + margin
+        }
+        return (
+            !Object.values(envelope).every(Number.isFinite) ||
+            boundsOverlap(envelope, queryBounds, 0)
+        )
+    })
+}
 test('preserves source identity and prepares source-order polygon metadata', () => {
     const points = [
         { x: -2, y: -1 },
@@ -736,7 +767,7 @@ test('builds large segment and vertex indexes lazily once', () => {
     assert.equal(segmentBoundsReads, boundsReadsAfterFirstQuery)
 })
 
-test('scans small polygon candidates linearly on every query', () => {
+test('scans initial small polygon candidates linearly', () => {
     const pointReads = { count: 0 }
     const points = countedSampledCircle(32, pointReads)
     const polygon = new PcbScene3dPreparedPolygon(points, {
@@ -774,6 +805,74 @@ test('scans small polygon candidates linearly on every query', () => {
         polygon.segments.length
     )
     assert.ok(segmentBoundsReads > boundsReadsAfterFirstQuery)
+})
+
+test('promotes repeated small segment queries', () => {
+    const originalQueryInto = PcbScene3dAabbIndex.prototype.queryInto
+    let indexedQueries = 0
+    PcbScene3dAabbIndex.prototype.queryInto = function (...args) {
+        indexedQueries += 1
+        return originalQueryInto.apply(this, args)
+    }
+    try {
+        const polygon = new PcbScene3dPreparedPolygon(
+            sampledCircle(32, 0, 0, 10),
+            { epsilon: EPSILON, detectCircle: false }
+        )
+        const queryBounds = { minX: 9, maxX: 10.1, minY: -1, maxY: 1 }
+        polygon.querySegments(queryBounds, [])
+        assert.equal(indexedQueries, 0)
+        for (let queryIndex = 0; queryIndex < 256; queryIndex += 1) {
+            polygon.querySegments(queryBounds, [])
+        }
+        assert.ok(indexedQueries > 0)
+        const points = sampledCircle(32, 0, 0, 10)
+        points[5] = { ...points[4] }
+        points[12] = { x: Number.NaN, y: points[12].y }
+        points[20] = { x: Number.POSITIVE_INFINITY, y: points[20].y }
+        const exactPolygon = new PcbScene3dPreparedPolygon(points, {
+            epsilon: EPSILON,
+            detectCircle: false
+        })
+        const finiteQueries = []
+        for (let y = -12; y <= 12; y += 6) {
+            for (let x = -12; x <= 12; x += 6) {
+                finiteQueries.push({
+                    minX: x - 0.5,
+                    maxX: x + 0.5,
+                    minY: y - 0.5,
+                    maxY: y + 0.5
+                })
+            }
+        }
+        const queries = [
+            ...finiteQueries,
+            undefined,
+            { minX: Number.NaN, maxX: 0, minY: 0, maxY: 0 },
+            {
+                minX: Number.NEGATIVE_INFINITY,
+                maxX: Number.POSITIVE_INFINITY,
+                minY: Number.NEGATIVE_INFINITY,
+                maxY: Number.POSITIVE_INFINITY
+            }
+        ]
+        const indexedQueriesBeforePromotion = indexedQueries
+        for (let queryIndex = 0; queryIndex < 256; queryIndex += 1) {
+            exactPolygon.querySegments(finiteQueries[0], [])
+        }
+        assert.ok(indexedQueries > indexedQueriesBeforePromotion)
+        for (const query of queries) {
+            const expected = referenceSegmentCandidates(
+                exactPolygon.segments,
+                query,
+                EPSILON
+            )
+            const actual = exactPolygon.querySegments(query, [])
+            assert.deepEqual(actual, expected)
+        }
+    } finally {
+        PcbScene3dAabbIndex.prototype.queryInto = originalQueryInto
+    }
 })
 
 test('terminates when the small vertex source is also the query target', () => {
@@ -860,32 +959,11 @@ test('matches AABB fallback semantics for unusual small-query bounds', () => {
                   )
               )
             : points
-        const expectedSegments = finiteQuery
-            ? polygon.segments.filter((segment) => {
-                  if (
-                      segment.lengthSquared === 0 ||
-                      !Number.isFinite(segment.lengthSquared) ||
-                      !Object.values(segment.bounds).every(Number.isFinite)
-                  ) {
-                      return true
-                  }
-
-                  const margin = Math.max(
-                      EPSILON,
-                      (Math.SQRT2 * EPSILON) / Math.sqrt(segment.lengthSquared)
-                  )
-                  return boundsOverlap(
-                      {
-                          minX: segment.bounds.minX - margin,
-                          maxX: segment.bounds.maxX + margin,
-                          minY: segment.bounds.minY - margin,
-                          maxY: segment.bounds.maxY + margin
-                      },
-                      query,
-                      0
-                  )
-              })
-            : polygon.segments
+        const expectedSegments = referenceSegmentCandidates(
+            polygon.segments,
+            query,
+            EPSILON
+        )
 
         assert.deepEqual(polygon.queryVertices(query, []), expectedVertices)
         assert.deepEqual(polygon.querySegments(query, []), expectedSegments)
