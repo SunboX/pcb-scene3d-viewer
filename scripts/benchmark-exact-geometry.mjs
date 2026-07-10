@@ -22,6 +22,40 @@ function buildLoop(pointCount, radius, offsetX = 0, offsetY = 0) {
 }
 
 /**
+ * Resolves a square-biased, non-circular boundary radius at one angle.
+ * @param {number} angle Polar angle in radians.
+ * @param {number} radius Base boundary radius.
+ * @returns {number}
+ */
+function irregularBoundaryRadius(angle, radius) {
+    const cosine = Math.cos(angle)
+    const sine = Math.sin(angle)
+    const squareRadius =
+        radius / Math.max(Math.abs(cosine), Math.abs(sine), 0.001)
+    const ripple = 1 + Math.sin(angle * 5) * 0.08 + Math.sin(angle * 11) * 0.04
+
+    return squareRadius * ripple
+}
+
+/**
+ * Builds one dense square-biased irregular polygon.
+ * @param {number} pointCount Number of boundary points.
+ * @param {number} radius Base boundary radius.
+ * @returns {{ x: number, y: number }[]}
+ */
+function buildDenseBoundary(pointCount, radius) {
+    return Array.from({ length: pointCount }, (_, index) => {
+        const angle = (index / pointCount) * Math.PI * 2
+        const distance = irregularBoundaryRadius(angle, radius)
+
+        return {
+            x: Math.cos(angle) * distance,
+            y: Math.sin(angle) * distance
+        }
+    })
+}
+
+/**
  * Resolves the middle value from an odd-sized sample.
  * @param {number[]} values Measurement samples.
  * @returns {number}
@@ -96,6 +130,71 @@ function buildTriangleGrid(columns, rows, cellSize, offsetX, offsetY) {
 }
 
 /**
+ * Builds one point from radial distance and tangent offset.
+ * @param {number} angle Polar angle in radians.
+ * @param {number} distance Radial distance from the origin.
+ * @param {number} tangentOffset Signed tangent offset.
+ * @returns {{ x: number, y: number }}
+ */
+function buildRadialPoint(angle, distance, tangentOffset) {
+    const radialX = Math.cos(angle)
+    const radialY = Math.sin(angle)
+
+    return {
+        x: radialX * distance - radialY * tangentOffset,
+        y: radialY * distance + radialX * tangentOffset
+    }
+}
+
+/**
+ * Appends one triangle to a packed XYZ position buffer.
+ * @param {number[]} positions Target position buffer.
+ * @param {{ x: number, y: number }[]} triangle Triangle points.
+ * @returns {void}
+ */
+function appendTriangle(positions, triangle) {
+    for (const point of triangle) {
+        positions.push(point.x, point.y, 0)
+    }
+}
+
+/**
+ * Builds equal sets of interior, crossing, and exterior boundary triangles.
+ * @param {number} triangleCount Total triangle count.
+ * @param {number} radius Base boundary radius.
+ * @returns {number[]}
+ */
+function buildBoundaryTriangles(triangleCount, radius) {
+    const positions = []
+    const groupCount = triangleCount / 3
+
+    for (let index = 0; index < groupCount; index += 1) {
+        const angle = ((index + 0.5) / groupCount) * Math.PI * 2
+        const boundaryRadius = irregularBoundaryRadius(angle, radius)
+
+        // Interior, crossing, and exterior cases drive the exact point,
+        // boundary-vertex, and segment paths while retaining exterior output.
+        appendTriangle(positions, [
+            buildRadialPoint(angle, boundaryRadius - 12, -2),
+            buildRadialPoint(angle, boundaryRadius - 9, 2),
+            buildRadialPoint(angle, boundaryRadius - 15, 2)
+        ])
+        appendTriangle(positions, [
+            buildRadialPoint(angle, boundaryRadius - 5, -3),
+            buildRadialPoint(angle, boundaryRadius + 5, 0),
+            buildRadialPoint(angle, boundaryRadius - 5, 3)
+        ])
+        appendTriangle(positions, [
+            buildRadialPoint(angle, boundaryRadius + 9, -2),
+            buildRadialPoint(angle, boundaryRadius + 15, 0),
+            buildRadialPoint(angle, boundaryRadius + 9, 2)
+        ])
+    }
+
+    return positions
+}
+
+/**
  * Builds one mutable Three.js geometry from reusable source positions.
  * @param {number[]} positions Packed XYZ positions.
  * @returns {THREE.BufferGeometry}
@@ -130,10 +229,20 @@ function positionCount(result) {
 
 const copperPositions = buildTriangleGrid(20, 20, 12, -120, -120)
 const copperFills = [{ layerId: 1, points: buildLoop(10000, 100) }]
-const drillCutouts = Array.from({ length: 200 }, (_, index) =>
-    buildLoop(32, 1.5, -57 + (index % 20) * 6, -27 + Math.floor(index / 20) * 6)
-)
-const cutoutPositions = buildTriangleGrid(20, 6, 6, -60, -30)
+const denseBoundary = buildDenseBoundary(10000, 100)
+const drillCutouts = [
+    denseBoundary,
+    ...Array.from({ length: 199 }, (_, index) =>
+        buildLoop(
+            4,
+            1.5,
+            -42 + (index % 20) * 4.5,
+            -20 + Math.floor(index / 20) * 4.5
+        )
+    )
+]
+const cutoutPositions = buildBoundaryTriangles(240, 100)
+const smallPositions = buildTriangleGrid(20, 6, 6, -60, -30)
 const smallCutouts = [
     buildLoop(4, 1.5, -33, -15),
     buildLoop(4, 1.5, 33, -15),
@@ -141,6 +250,11 @@ const smallCutouts = [
     buildLoop(4, 1.5, 33, -3)
 ]
 const cutoutOptions = {
+    maxDepth: 0,
+    maxEdgeLength: 2,
+    discardTerminalOverlaps: true
+}
+const smallCutoutOptions = {
     maxDepth: 12,
     maxEdgeLength: 2,
     discardTerminalOverlaps: true
@@ -163,16 +277,16 @@ const cutoutGeometry = measure(() =>
     PcbScene3dCutoutGeometryFilter.filter(
         THREE,
         buildGeometry(cutoutPositions),
-        drillCutouts,
+        [denseBoundary],
         cutoutOptions
     )
 )
 const smallGeometry = measure(() =>
     PcbScene3dCutoutGeometryFilter.filter(
         THREE,
-        buildGeometry(cutoutPositions),
+        buildGeometry(smallPositions),
         smallCutouts,
-        cutoutOptions
+        smallCutoutOptions
     )
 )
 
