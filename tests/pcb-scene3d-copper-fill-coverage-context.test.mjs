@@ -161,6 +161,50 @@ test('PcbScene3dCopperFillCoverageContext exposes an immutable prepared area cou
     assert.equal(emptyContext.areaCount, 0)
 })
 
+test('PcbScene3dCopperFillCoverageContext matches only its originating loop-set identities and order', () => {
+    const first = rectangleLoopSet(0, 0, 1, 1)
+    const second = rectangleLoopSet(2, 2, 3, 3)
+    const loopSets = [first, second]
+    const context = PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
+
+    assert.equal(context.matchesLoopSets(loopSets), true)
+    assert.equal(context.matchesLoopSets([first, second]), false)
+    assert.equal(context.matchesLoopSets([second, first]), false)
+    assert.equal(
+        context.matchesLoopSets([
+            rectangleLoopSet(0, 0, 1, 1),
+            rectangleLoopSet(2, 2, 3, 3)
+        ]),
+        false
+    )
+    assert.equal(context.matchesLoopSets([first]), false)
+    assert.equal(context.matchesLoopSets([...loopSets, first]), false)
+})
+
+test('PcbScene3dCopperFillCoverageContext detects source-order mutation within its request lifetime', () => {
+    const first = rectangleLoopSet(0, 0, 1, 1)
+    const second = rectangleLoopSet(2, 2, 3, 3)
+    const loopSets = [first, second]
+    const context = PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
+
+    loopSets.reverse()
+
+    assert.equal(context.matchesLoopSets(loopSets), false)
+    loopSets.reverse()
+    assert.equal(context.matchesLoopSets(loopSets), true)
+    assert.equal(context.matchesLoopSets([first, second]), false)
+
+    const nextRequestLoopSets = [
+        rectangleLoopSet(0, 0, 1, 1),
+        rectangleLoopSet(2, 2, 3, 3)
+    ]
+    const nextRequestContext =
+        PcbScene3dCopperFillCoverageContext.fromLoopSets(nextRequestLoopSets)
+
+    assert.equal(context.matchesLoopSets(nextRequestLoopSets), false)
+    assert.equal(nextRequestContext.matchesLoopSets(nextRequestLoopSets), true)
+})
+
 test('PcbScene3dCopperFillCoverageContext includes epsilon extreme and non-finite fallback candidates', () => {
     const touching = rectangleLoopSet(0, 0, 1, 1)
     const huge = rectangleLoopSet(9e307, 9e307, 1e308, 1e308)

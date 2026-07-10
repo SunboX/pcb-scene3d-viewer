@@ -13,6 +13,12 @@ export class PcbScene3dCopperFillCoverageContext {
     /** @type {PcbScene3dAabbIndex} */
     #index
 
+    /** @type {object[]} */
+    #loopSets
+
+    /** @type {object[] | null} */
+    #sourceLoopSets
+
     /**
      * Creates one context from already-normalized ordered loop sets.
      * @param {{ outer?: number[][], holes?: number[][][] }[]} loopSets Ordered fill islands.
@@ -27,8 +33,10 @@ export class PcbScene3dCopperFillCoverageContext {
      * @param {{ outer?: number[][], holes?: number[][][] }[]} loopSets Ordered fill islands.
      */
     constructor(loopSets) {
+        this.#sourceLoopSets = Array.isArray(loopSets) ? loopSets : null
+        this.#loopSets = Object.freeze(Array.from(loopSets || []))
         this.#areas = Object.freeze(
-            Array.from(loopSets || [], (loopSet, sourceIndex) =>
+            Array.from(this.#loopSets, (loopSet, sourceIndex) =>
                 PcbScene3dCopperFillCoverageContext.#prepareArea(
                     loopSet,
                     sourceIndex
@@ -48,6 +56,29 @@ export class PcbScene3dCopperFillCoverageContext {
      */
     get areaCount() {
         return this.#areas.length
+    }
+
+    /**
+     * Returns whether the request array and loop-set order match preparation.
+     * @param {object[]} loopSets Active normalized fill islands.
+     * @returns {boolean}
+     */
+    matchesLoopSets(loopSets) {
+        if (
+            !Array.isArray(loopSets) ||
+            loopSets !== this.#sourceLoopSets ||
+            loopSets.length !== this.#loopSets.length
+        ) {
+            return false
+        }
+
+        for (let index = 0; index < loopSets.length; index += 1) {
+            if (loopSets[index] !== this.#loopSets[index]) {
+                return false
+            }
+        }
+
+        return true
     }
 
     /**

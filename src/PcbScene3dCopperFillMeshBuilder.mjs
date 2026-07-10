@@ -130,8 +130,9 @@ export class PcbScene3dCopperFillMeshBuilder {
         const emittedPolygons = []
         const emittedLoopSets = []
         const coverageContext =
-            options?.coverageContext ||
-            PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
+            options?.coverageContext?.matchesLoopSets?.(loopSets) === true
+                ? options.coverageContext
+                : PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
 
         for (
             let loopSetIndex = 0;

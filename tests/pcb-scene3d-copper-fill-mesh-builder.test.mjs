@@ -57,15 +57,21 @@ function positionArray(mesh) {
  * Builds one surface-only mesh while forcing the triangle fallback.
  * @param {object[]} fills Fill primitives.
  * @param {boolean} [mirrorY] Whether to mirror Y coordinates.
+ * @param {PcbScene3dCopperFillCoverageContext} [suppliedCoverageContext] Optional context override.
  * @returns {number[]}
  */
-function buildFallbackPositions(fills, mirrorY = false) {
+function buildFallbackPositions(
+    fills,
+    mirrorY = false,
+    suppliedCoverageContext
+) {
     const loopSets = PcbScene3dCopperFillLoopSetResolver.resolve(
         fills,
         (x, y) => ({ x, y }),
         mirrorY
     )
     const coverageContext =
+        suppliedCoverageContext ||
         PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
     const originalResolveRemainingLoopSets =
         PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets
@@ -427,6 +433,26 @@ test('PcbScene3dCopperFillMeshBuilder preserves mirrored fallback positions', ()
             [2, -1]
         ])
     )
+})
+
+test('PcbScene3dCopperFillMeshBuilder rejects a stale fallback coverage context exactly', () => {
+    const fills = [createFill(0, 0, 4, 4), createFill(2, 0, 6, 4)]
+    const staleLoopSets = PcbScene3dCopperFillLoopSetResolver.resolve(
+        [createFill(100, 100, 104, 104), createFill(102, 100, 106, 104)],
+        (x, y) => ({ x, y }),
+        false
+    )
+    const staleContext =
+        PcbScene3dCopperFillCoverageContext.fromLoopSets(staleLoopSets)
+    const expectedPositions = buildFallbackPositions(fills)
+    const staleContextPositions = buildFallbackPositions(
+        fills,
+        false,
+        staleContext
+    )
+
+    assert.equal(expectedPositions.length, 162)
+    assert.deepEqual(staleContextPositions, expectedPositions)
 })
 
 test('PcbScene3dCopperFillMeshBuilder treats an empty polygon result as success', () => {
