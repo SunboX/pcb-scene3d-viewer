@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { PcbScene3dCopperFillAreaClipper } from '../src/PcbScene3dCopperFillAreaClipper.mjs'
 import { PcbScene3dCopperFillCoverageContext } from '../src/PcbScene3dCopperFillCoverageContext.mjs'
 import { PcbScene3dCopperFillLoopSetResolver } from '../src/PcbScene3dCopperFillLoopSetResolver.mjs'
+import { PcbScene3dCopperFillPolygonBoolean } from '../src/PcbScene3dCopperFillPolygonBoolean.mjs'
 import { PcbScene3dCopperFactory } from '../src/PcbScene3dCopperFactory.mjs'
 
 /**
@@ -677,6 +678,47 @@ test('PcbScene3dCopperFactory clips Gerber fill overlap edge slivers', () => {
     assert.ok(fillMesh)
     assert.equal(
         countTrianglesCoveringPoint(fillMesh.geometry, { x: 75, y: 0.05 }),
+        1
+    )
+})
+
+test('PcbScene3dCopperFactory preserves first-emitted ownership in triangle fallback', () => {
+    const originalResolveRemainingLoopSets =
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets
+    let group
+
+    try {
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets = () => null
+        group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
+            THREE,
+            {
+                tracks: [],
+                arcs: [],
+                fills: [createFill(0, 0, 4, 4), createFill(2, 0, 6, 4)]
+            },
+            5,
+            -5,
+            (x, y) => ({ x, y }),
+            { unionCoveredLayerPrimitives: true }
+        )
+    } finally {
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets =
+            originalResolveRemainingLoopSets
+    }
+
+    const fillMesh = findObjectByName(group, 'mask-covered-copper-fills')
+
+    assert.ok(fillMesh)
+    assert.equal(
+        countTrianglesCoveringPoint(fillMesh.geometry, { x: 1.137, y: 2.271 }),
+        1
+    )
+    assert.equal(
+        countTrianglesCoveringPoint(fillMesh.geometry, { x: 3.137, y: 2.271 }),
+        1
+    )
+    assert.equal(
+        countTrianglesCoveringPoint(fillMesh.geometry, { x: 5.137, y: 2.271 }),
         1
     )
 })

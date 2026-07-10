@@ -1,5 +1,6 @@
 import earcut from 'earcut'
 import { PcbScene3dCopperFillAreaClipper } from './PcbScene3dCopperFillAreaClipper.mjs'
+import { PcbScene3dCopperFillCoverageContext } from './PcbScene3dCopperFillCoverageContext.mjs'
 import { PcbScene3dCopperFillLoopSetResolver } from './PcbScene3dCopperFillLoopSetResolver.mjs'
 import { PcbScene3dCopperFillPolygonBoolean } from './PcbScene3dCopperFillPolygonBoolean.mjs'
 import { PcbScene3dCopperOcclusionClipper } from './PcbScene3dCopperOcclusionClipper.mjs'
@@ -128,8 +129,16 @@ export class PcbScene3dCopperFillMeshBuilder {
     ) {
         const emittedPolygons = []
         const emittedLoopSets = []
+        const coverageContext =
+            options?.coverageContext ||
+            PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
 
-        for (const loopSet of loopSets) {
+        for (
+            let loopSetIndex = 0;
+            loopSetIndex < loopSets.length;
+            loopSetIndex += 1
+        ) {
+            const loopSet = loopSets[loopSetIndex]
             const remainingLoopSets =
                 PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets(
                     loopSet,
@@ -152,6 +161,8 @@ export class PcbScene3dCopperFillMeshBuilder {
                     positions,
                     loopSet,
                     emittedLoopSets,
+                    loopSetIndex,
+                    coverageContext,
                     bottomZ,
                     topZ,
                     options
@@ -173,6 +184,8 @@ export class PcbScene3dCopperFillMeshBuilder {
      * @param {number[]} positions Position buffer.
      * @param {{ outer: number[][], holes: number[][][], bounds: object }} loopSet Candidate loop set.
      * @param {{ outer: number[][], holes: number[][][], bounds: object }[]} emittedLoopSets Already emitted loop sets.
+     * @param {number} loopSetIndex Flattened candidate source index.
+     * @param {object} coverageContext Prepared ordered fill coverage.
      * @param {number} bottomZ Lower Z.
      * @param {number} topZ Upper Z.
      * @param {{ surfaceOnly?: boolean, clipContainedFillOverlaps?: boolean }} options Mesh options.
@@ -183,6 +196,8 @@ export class PcbScene3dCopperFillMeshBuilder {
         positions,
         loopSet,
         emittedLoopSets,
+        loopSetIndex,
+        coverageContext,
         bottomZ,
         topZ,
         options
@@ -208,10 +223,12 @@ export class PcbScene3dCopperFillMeshBuilder {
         )
         PcbScene3dCopperFillMeshBuilder.#appendPositions(
             positions,
-            PcbScene3dCopperFillMeshBuilder.#clipPositionsAgainstLoopSets(
+            PcbScene3dCopperFillMeshBuilder.#clipPositionsAgainstCoverage(
                 THREE,
                 loopPositions,
-                PcbScene3dCopperFillMeshBuilder.#resolveClipLoopSets(
+                coverageContext,
+                loopSetIndex,
+                PcbScene3dCopperFillMeshBuilder.#resolveClipSourceIndexes(
                     loopSet,
                     emittedLoopSets
                 )
@@ -220,14 +237,21 @@ export class PcbScene3dCopperFillMeshBuilder {
     }
 
     /**
-     * Resolves earlier loop sets that can actually overlap a candidate.
+     * Resolves indexes of earlier loop sets that can overlap a candidate.
      * @param {{ outer: number[][], holes: number[][][], bounds: object }} candidate Candidate loop set.
      * @param {{ outer: number[][], holes: number[][][], bounds: object }[]} loopSets Emitted loop sets.
-     * @returns {{ outer: number[][], holes: number[][][], bounds: object }[]}
+     * @returns {Set<number>}
      */
-    static #resolveClipLoopSets(candidate, loopSets) {
-        return loopSets.filter(
-            (loopSet) =>
+    static #resolveClipSourceIndexes(candidate, loopSets) {
+        const sourceIndexes = new Set()
+
+        for (
+            let sourceIndex = 0;
+            sourceIndex < loopSets.length;
+            sourceIndex += 1
+        ) {
+            const loopSet = loopSets[sourceIndex]
+            if (
                 PcbScene3dCopperFillMeshBuilder.#boundsOverlap(
                     candidate.bounds,
                     loopSet.bounds
@@ -236,7 +260,12 @@ export class PcbScene3dCopperFillMeshBuilder {
                     candidate,
                     loopSet
                 )
-        )
+            ) {
+                sourceIndexes.add(sourceIndex)
+            }
+        }
+
+        return sourceIndexes
     }
 
     /**
@@ -252,14 +281,22 @@ export class PcbScene3dCopperFillMeshBuilder {
     }
 
     /**
-     * Clips position triangles against already-emitted fill loop sets.
+     * Clips position triangles against eligible prepared fill areas.
      * @param {any} THREE Three.js namespace.
      * @param {number[]} positions Candidate triangle positions.
-     * @param {{ outer: number[][], holes: number[][][] }[]} loopSets Filled areas already represented.
+     * @param {object} coverageContext Prepared ordered fill coverage.
+     * @param {number} beforeSourceIndex Exclusive source-order prefix.
+     * @param {Set<number>} allowedSourceIndexes Eligible earlier sources.
      * @returns {number[]}
      */
-    static #clipPositionsAgainstLoopSets(THREE, positions, loopSets) {
-        if (!positions.length || !loopSets.length) {
+    static #clipPositionsAgainstCoverage(
+        THREE,
+        positions,
+        coverageContext,
+        beforeSourceIndex,
+        allowedSourceIndexes
+    ) {
+        if (!positions.length || !allowedSourceIndexes.size) {
             return positions
         }
 
@@ -269,12 +306,11 @@ export class PcbScene3dCopperFillMeshBuilder {
             new THREE.Float32BufferAttribute(positions, 3)
         )
         const mesh = new THREE.Mesh(geometry)
-        const clippedMesh = PcbScene3dCopperFillAreaClipper.filter(
+        const clippedMesh = PcbScene3dCopperFillAreaClipper.filterPrepared(
             THREE,
             mesh,
-            PcbScene3dCopperFillMeshBuilder.#loopSetsToFills(loopSets),
-            (x, y) => ({ x, y }),
-            false
+            coverageContext,
+            { beforeSourceIndex, allowedSourceIndexes }
         )
         if (!clippedMesh) {
             return []
@@ -282,27 +318,6 @@ export class PcbScene3dCopperFillMeshBuilder {
 
         return Array.from(clippedMesh.geometry.attributes.position.array)
     }
-
-    /**
-     * Converts normalized loop sets back to fill primitives for shared clipping.
-     * @param {{ outer: number[][], holes: number[][][] }[]} loopSets Loop sets.
-     * @returns {object[]}
-     */
-    static #loopSetsToFills(loopSets) {
-        return loopSets.map((loopSet) => ({
-            points: loopSet.outer.map((point) => ({
-                x: point[0],
-                y: point[1]
-            })),
-            holes: (loopSet.holes || []).map((hole) =>
-                hole.map((point) => ({
-                    x: point[0],
-                    y: point[1]
-                }))
-            )
-        }))
-    }
-
     /**
      * Appends one already-normalized fill island loop set.
      * @param {number[]} positions Position buffer.
