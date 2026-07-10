@@ -369,7 +369,9 @@ export class PcbScene3dPreparedPolygon {
      * @returns {PcbScene3dPreparedPolygonSegment[]}
      */
     #querySegmentsLinear(bounds, target) {
-        for (const segment of this.#segments) {
+        const segmentCount = this.#segments.length
+        for (let index = 0; index < segmentCount; index += 1) {
+            const segment = this.#segments[index]
             if (
                 PcbScene3dPreparedPolygon.#segmentOverlapsQuery(
                     segment,
@@ -391,7 +393,9 @@ export class PcbScene3dPreparedPolygon {
      * @returns {{ x: number, y: number }[]}
      */
     #queryVerticesLinear(bounds, target) {
-        for (const point of this.#points) {
+        const pointCount = this.#points.length
+        for (let index = 0; index < pointCount; index += 1) {
+            const point = this.#points[index]
             if (
                 PcbScene3dPreparedPolygon.#pointOverlapsQuery(
                     point,

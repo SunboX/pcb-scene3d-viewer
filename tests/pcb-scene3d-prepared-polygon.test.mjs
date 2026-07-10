@@ -776,6 +776,122 @@ test('scans small polygon candidates linearly on every query', () => {
     assert.ok(segmentBoundsReads > boundsReadsAfterFirstQuery)
 })
 
+test('terminates when the small vertex source is also the query target', () => {
+    const polygon = new PcbScene3dPreparedPolygon(sampledCircle(4), {
+        epsilon: EPSILON,
+        detectCircle: false
+    })
+    const target = polygon.points
+    const original = target.slice()
+    let appended = 0
+    Object.defineProperty(target, 'push', {
+        configurable: true,
+        value(...items) {
+            appended += items.length
+            assert.ok(appended <= original.length, 'vertex scan did not stop')
+            return Array.prototype.push.apply(this, items)
+        }
+    })
+
+    assert.strictEqual(polygon.queryVertices(undefined, target), target)
+    assert.equal(appended, original.length)
+    assert.deepEqual(target.slice(original.length), original)
+})
+
+test('terminates when the small segment source is also the query target', () => {
+    const polygon = new PcbScene3dPreparedPolygon(sampledCircle(4), {
+        epsilon: EPSILON,
+        detectCircle: false
+    })
+    const target = polygon.segments
+    const original = target.slice()
+    let appended = 0
+    Object.defineProperty(target, 'push', {
+        configurable: true,
+        value(...items) {
+            appended += items.length
+            assert.ok(appended <= original.length, 'segment scan did not stop')
+            return Array.prototype.push.apply(this, items)
+        }
+    })
+
+    assert.strictEqual(polygon.querySegments(undefined, target), target)
+    assert.equal(appended, original.length)
+    assert.deepEqual(target.slice(original.length), original)
+})
+
+test('matches AABB fallback semantics for unusual small-query bounds', () => {
+    const points = [
+        { x: -2, y: -2 },
+        { x: 2, y: -2 },
+        { x: 2, y: -2 },
+        { x: 2, y: 2 },
+        { x: -2, y: 2 }
+    ]
+    const polygon = new PcbScene3dPreparedPolygon(points, {
+        epsilon: EPSILON,
+        detectCircle: false
+    })
+    const queries = [
+        { minX: Number.NaN, maxX: 0, minY: 0, maxY: 0 },
+        {
+            minX: Number.NEGATIVE_INFINITY,
+            maxX: Number.POSITIVE_INFINITY,
+            minY: Number.NEGATIVE_INFINITY,
+            maxY: Number.POSITIVE_INFINITY
+        },
+        { minX: 1, maxX: -1, minY: 1, maxY: -1 },
+        { minX: 2 + EPSILON, maxX: 3, minY: -2, maxY: -2 }
+    ]
+
+    for (const query of queries) {
+        const finiteQuery = Object.values(query).every(Number.isFinite)
+        const expectedVertices = finiteQuery
+            ? points.filter((point) =>
+                  boundsOverlap(
+                      {
+                          minX: point.x,
+                          maxX: point.x,
+                          minY: point.y,
+                          maxY: point.y
+                      },
+                      query,
+                      EPSILON
+                  )
+              )
+            : points
+        const expectedSegments = finiteQuery
+            ? polygon.segments.filter((segment) => {
+                  if (
+                      segment.lengthSquared === 0 ||
+                      !Number.isFinite(segment.lengthSquared) ||
+                      !Object.values(segment.bounds).every(Number.isFinite)
+                  ) {
+                      return true
+                  }
+
+                  const margin = Math.max(
+                      EPSILON,
+                      (Math.SQRT2 * EPSILON) / Math.sqrt(segment.lengthSquared)
+                  )
+                  return boundsOverlap(
+                      {
+                          minX: segment.bounds.minX - margin,
+                          maxX: segment.bounds.maxX + margin,
+                          minY: segment.bounds.minY - margin,
+                          maxY: segment.bounds.maxY + margin
+                      },
+                      query,
+                      0
+                  )
+              })
+            : polygon.segments
+
+        assert.deepEqual(polygon.queryVertices(query, []), expectedVertices)
+        assert.deepEqual(polygon.querySegments(query, []), expectedSegments)
+    }
+})
+
 test('keeps missing small-query bounds conservative like the AABB fallback', () => {
     const points = [
         { x: 0, y: 0 },

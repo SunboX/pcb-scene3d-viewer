@@ -27,9 +27,14 @@ workloads therefore paid for mostly or wholly unused indexes.
   also caused zero new reads instead of linear candidate scans.
 - A missing-bounds regression failed RED with a `TypeError`; the previous AABB
   path treated a non-finite or absent query as all-space.
+- Independent review found that aliasing the exposed points or segments array
+  as the query target made `for...of` consume its own appended candidates. Both
+  guarded four-point tests failed RED on a fifth append.
 - After the fix, large indexes build on the first relevant query and are reused,
   small queries scan on every call, and missing/non-finite queries conservatively
   return every candidate into the caller-owned target.
+- Fixed-length indexed scans make both alias-target regressions terminate after
+  exactly the original candidate count.
 
 ## Exactness evidence
 
@@ -40,6 +45,8 @@ workloads therefore paid for mostly or wholly unused indexes.
 - Existing non-finite/all-space, epsilon-boundary, zero-length, sparse raw,
   cache-order, 10,000-point, recursive-order, and target-reuse cases remain
   green.
+- A focused small-query parity matrix covers `NaN`, infinite, reversed,
+  epsilon-boundary, and zero-length AABB behavior.
 - Ordinary benchmark counts remain exactly 200 drill survivors and 15,840
   cutout positions. Complex counts remain 1,242 copper positions, one drill
   survivor, 240 cutout positions, and 1,224 small positions.
@@ -76,6 +83,17 @@ produced these medians-of-runs:
 
 Every run retained the exact expected position/survivor counts.
 
+Three post-review-remediation runs produced these medians-of-runs:
+
+- Ordinary drill: 0.587 ms.
+- Ordinary circular cutout: 4.786 ms.
+- Complex copper: 52.023 ms.
+- Complex drill: 3.313 ms.
+- Complex cutout: 6.306 ms.
+- Small geometry: 1.000 ms.
+
+Every remediation run also retained all exact expected counts.
+
 ## Quality and scope
 
 - Owned files: benchmark script, prepared polygon implementation, and prepared
@@ -83,8 +101,9 @@ Every run retained the exact expected position/survivor counts.
 - Owned file lengths: 323, 691, and 804 lines.
 - The combined repository passes `npm run check:format`; owned diffs pass
   `git diff --check`.
-- The final combined `npm test` run passed 539 tests with 0 failures and one
-  intentional timing-gated skip.
+- The final combined `npm test` run, including the concurrent silkscreen review
+  changes, passed 544 tests with 0 failures and one intentional timing-gated
+  skip.
 - No CopperFactory, CopperFillMeshBuilder, SilkscreenFactory, app, dependency,
   release, or publication changes were made by this task.
 - The independent copper cold-path change is already committed separately as
