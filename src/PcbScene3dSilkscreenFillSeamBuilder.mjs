@@ -22,6 +22,7 @@ export class PcbScene3dSilkscreenFillSeamBuilder {
      * @param {boolean} mirrorY Whether the side is mirrored.
      * @param {any} material Shared fill material.
      * @param {{ x: number, y: number }[][]} [cutouts] Cutouts that should remain uncovered.
+     * @param {{ preparedPolygonCache?: Map }} [options] Request-scoped options.
      * @returns {any[]}
      */
     static buildMeshes(
@@ -31,7 +32,8 @@ export class PcbScene3dSilkscreenFillSeamBuilder {
         normalizeBoardPoint,
         mirrorY,
         material,
-        cutouts = []
+        cutouts = [],
+        options = {}
     ) {
         const meshes = []
         let positions = []
@@ -55,7 +57,8 @@ export class PcbScene3dSilkscreenFillSeamBuilder {
                     THREE,
                     positions,
                     material,
-                    cutouts
+                    cutouts,
+                    options
                 )
                 positions = []
             }
@@ -66,7 +69,8 @@ export class PcbScene3dSilkscreenFillSeamBuilder {
             THREE,
             positions,
             material,
-            cutouts
+            cutouts,
+            options
         )
 
         return meshes
@@ -113,9 +117,10 @@ export class PcbScene3dSilkscreenFillSeamBuilder {
      * @param {number[]} positions Position buffer.
      * @param {any} material Shared material.
      * @param {{ x: number, y: number }[][]} cutouts Cutout polygons.
+     * @param {{ preparedPolygonCache?: Map }} options Request-scoped options.
      * @returns {void}
      */
-    static #appendMesh(meshes, THREE, positions, material, cutouts) {
+    static #appendMesh(meshes, THREE, positions, material, cutouts, options) {
         if (
             !positions.length ||
             !THREE?.BufferGeometry ||
@@ -133,7 +138,8 @@ export class PcbScene3dSilkscreenFillSeamBuilder {
         const mesh = new THREE.Mesh(
             PcbScene3dCutoutGeometryFilter.filter(THREE, geometry, cutouts, {
                 maxDepth: 12,
-                maxEdgeLength: 2
+                maxEdgeLength: 2,
+                preparedPolygonCache: options?.preparedPolygonCache
             }),
             material
         )

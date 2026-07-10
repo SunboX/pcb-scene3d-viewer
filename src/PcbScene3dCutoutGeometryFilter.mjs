@@ -131,7 +131,9 @@ export class PcbScene3dCutoutGeometryFilter {
 
                 if (
                     prepared?.circleDetectionEnabled !== true ||
-                    prepared?.pointRepresentation !== 'raw'
+                    !['raw', 'raw-numeric'].includes(
+                        prepared?.pointRepresentation
+                    )
                 ) {
                     const metadataPoints = cutout.map((point) => ({
                         x: Number(point?.x || 0),

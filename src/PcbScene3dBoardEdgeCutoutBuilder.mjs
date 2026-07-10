@@ -98,9 +98,10 @@ export class PcbScene3dBoardEdgeCutoutBuilder {
      * Returns true when a cutout can safely be added as a shape hole.
      * @param {{ x: number, y: number }[]} hole
      * @param {{ x: number, y: number }[]} contour
+     * @param {{ isCircular: true, centerX: number, centerY: number, radius: number } | null} [resolvedCircle]
      * @returns {boolean}
      */
-    static isHoleInsideContour(hole, contour) {
+    static isHoleInsideContour(hole, contour, resolvedCircle) {
         if (
             !Array.isArray(hole) ||
             !Array.isArray(contour) ||
@@ -110,10 +111,13 @@ export class PcbScene3dBoardEdgeCutoutBuilder {
             return false
         }
 
-        const circularHole = PcbScene3dCutoutCircleDetector.resolve(
-            hole,
-            PcbScene3dBoardEdgeCutoutBuilder.#GEOMETRY_EPSILON
-        )
+        const circularHole =
+            resolvedCircle !== undefined
+                ? resolvedCircle
+                : PcbScene3dCutoutCircleDetector.resolve(
+                      hole,
+                      PcbScene3dBoardEdgeCutoutBuilder.#GEOMETRY_EPSILON
+                  )
         if (circularHole) {
             return PcbScene3dBoardEdgeCutoutBuilder.#isCircularHoleInsideContour(
                 circularHole,

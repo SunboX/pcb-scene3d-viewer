@@ -1,6 +1,4 @@
-import { PcbScene3dBoardEdgeCutoutBuilder } from './PcbScene3dBoardEdgeCutoutBuilder.mjs'
 import { PcbScene3dCopperTextFactory } from './PcbScene3dCopperTextFactory.mjs'
-import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector.mjs'
 import { PcbScene3dCutoutGeometryFilter } from './PcbScene3dCutoutGeometryFilter.mjs'
 import { PcbScene3dDrillCutoutFilter } from './PcbScene3dDrillCutoutFilter.mjs'
 import { PcbScene3dMaterialFinish } from './PcbScene3dMaterialFinish.mjs'
@@ -8,6 +6,7 @@ import { PcbScene3dPolygonOverlap } from './PcbScene3dPolygonOverlap.mjs'
 import { PcbScene3dShapeHoleMerger } from './PcbScene3dShapeHoleMerger.mjs'
 import { PcbScene3dShapePathFactory } from './PcbScene3dShapePathFactory.mjs'
 import { PcbScene3dShapeHoleGeometryCleaner } from './PcbScene3dShapeHoleGeometryCleaner.mjs'
+import { PcbScene3dSilkscreenCutoutContext } from './PcbScene3dSilkscreenCutoutContext.mjs'
 import { PcbScene3dSilkscreenFillSeamBuilder } from './PcbScene3dSilkscreenFillSeamBuilder.mjs'
 import { PcbScene3dSilkscreenStrokeWidthResolver } from './PcbScene3dSilkscreenStrokeWidthResolver.mjs'
 import { PcbScene3dStrokeGeometryBuilder } from './PcbScene3dStrokeGeometryBuilder.mjs'
@@ -19,7 +18,6 @@ import { PcbScene3dTrueTypeTextFactory } from './PcbScene3dTrueTypeTextFactory.m
 export class PcbScene3dSilkscreenFactory {
     static #DEFAULT_SILKSCREEN_COLOR = 0xf8f6ef
     static #FILL_THICKNESS_MIL = 0.8
-    static #GEOMETRY_EPSILON = 0.001
     static #FULL_CIRCLE_EPSILON = 0.001
     static #MIN_STROKE_WIDTH_MIL = 0.04
     static #STROKE_MESH_POSITION_CHUNK_SIZE = 24000
@@ -102,6 +100,9 @@ export class PcbScene3dSilkscreenFactory {
             mirrorY
         )
         const surfaceCutouts = drillCutouts.concat(copperCutouts)
+        const cutoutContext = new PcbScene3dSilkscreenCutoutContext(
+            surfaceCutouts
+        )
         const strokeMaterial = PcbScene3dSilkscreenFactory.#buildMaterial(
             THREE,
             strokeColor
@@ -117,7 +118,8 @@ export class PcbScene3dSilkscreenFactory {
             normalizeBoardPoint,
             mirrorY,
             strokeMaterial,
-            surfaceCutouts
+            surfaceCutouts,
+            cutoutContext
         )
         const arcMesh = PcbScene3dSilkscreenFactory.#buildArcMesh(
             THREE,
@@ -126,7 +128,8 @@ export class PcbScene3dSilkscreenFactory {
             normalizeBoardPoint,
             mirrorY,
             strokeMaterial,
-            surfaceCutouts
+            surfaceCutouts,
+            cutoutContext
         )
         const fillMeshes = PcbScene3dSilkscreenFactory.#buildFillMeshes(
             THREE,
@@ -135,7 +138,8 @@ export class PcbScene3dSilkscreenFactory {
             normalizeBoardPoint,
             mirrorY,
             fillMaterial,
-            surfaceCutouts
+            surfaceCutouts,
+            cutoutContext
         )
         const fillSeamMeshes = PcbScene3dSilkscreenFillSeamBuilder.buildMeshes(
             THREE,
@@ -144,7 +148,10 @@ export class PcbScene3dSilkscreenFactory {
             normalizeBoardPoint,
             mirrorY,
             fillMaterial,
-            surfaceCutouts
+            surfaceCutouts,
+            {
+                preparedPolygonCache: cutoutContext.preparedPolygonCache
+            }
         )
         const texts = Array.isArray(silkscreen?.texts) ? silkscreen.texts : []
         const renderableTexts = texts.filter(
@@ -174,6 +181,7 @@ export class PcbScene3dSilkscreenFactory {
                     fog: false
                 },
                 mirrorY,
+                preparedPolygonCache: cutoutContext.preparedPolygonCache,
                 side: mirrorY ? 'bottom' : 'top'
             }
         )
@@ -237,6 +245,7 @@ export class PcbScene3dSilkscreenFactory {
      * @param {boolean} mirrorY
      * @param {any} material
      * @param {{ x: number, y: number }[][]} drillCutouts
+     * @param {PcbScene3dSilkscreenCutoutContext} cutoutContext
      * @returns {any[]}
      */
     static #buildTrackMeshes(
@@ -246,7 +255,8 @@ export class PcbScene3dSilkscreenFactory {
         normalizeBoardPoint,
         mirrorY,
         material,
-        drillCutouts
+        drillCutouts,
+        cutoutContext
     ) {
         const meshes = []
         let positions = []
@@ -289,7 +299,8 @@ export class PcbScene3dSilkscreenFactory {
                     THREE,
                     positions,
                     material,
-                    drillCutouts
+                    drillCutouts,
+                    cutoutContext
                 )
                 positions = []
             }
@@ -300,7 +311,8 @@ export class PcbScene3dSilkscreenFactory {
             THREE,
             positions,
             material,
-            drillCutouts
+            drillCutouts,
+            cutoutContext
         )
 
         return meshes
@@ -315,6 +327,7 @@ export class PcbScene3dSilkscreenFactory {
      * @param {boolean} mirrorY
      * @param {any} material
      * @param {{ x: number, y: number }[][]} drillCutouts
+     * @param {PcbScene3dSilkscreenCutoutContext} cutoutContext
      * @returns {any | null}
      */
     static #buildArcMesh(
@@ -324,7 +337,8 @@ export class PcbScene3dSilkscreenFactory {
         normalizeBoardPoint,
         mirrorY,
         material,
-        drillCutouts
+        drillCutouts,
+        cutoutContext
     ) {
         const positions = []
 
@@ -353,7 +367,8 @@ export class PcbScene3dSilkscreenFactory {
             THREE,
             positions,
             material,
-            drillCutouts
+            drillCutouts,
+            cutoutContext
         )
     }
 
@@ -366,6 +381,7 @@ export class PcbScene3dSilkscreenFactory {
      * @param {boolean} mirrorY
      * @param {any} material
      * @param {{ x: number, y: number }[][]} drillCutouts
+     * @param {PcbScene3dSilkscreenCutoutContext} cutoutContext
      * @returns {any[]}
      */
     static #buildFillMeshes(
@@ -375,7 +391,8 @@ export class PcbScene3dSilkscreenFactory {
         normalizeBoardPoint,
         mirrorY,
         material,
-        drillCutouts
+        drillCutouts,
+        cutoutContext
     ) {
         return fills.map((fill) => {
             const points = PcbScene3dSilkscreenFactory.#normalizeFillPoints(
@@ -402,7 +419,8 @@ export class PcbScene3dSilkscreenFactory {
                     fillHoles,
                     drillCutouts,
                     z,
-                    material
+                    material,
+                    cutoutContext
                 )
             }
 
@@ -425,6 +443,7 @@ export class PcbScene3dSilkscreenFactory {
      * @param {{ x: number, y: number }[][]} drillCutouts Normalized drill cutouts.
      * @param {number} z
      * @param {any} material
+     * @param {PcbScene3dSilkscreenCutoutContext} cutoutContext
      * @returns {any}
      */
     static #buildShapeFillMesh(
@@ -433,15 +452,17 @@ export class PcbScene3dSilkscreenFactory {
         fillHoles,
         drillCutouts,
         z,
-        material
+        material,
+        cutoutContext
     ) {
         const { authoredHoles, drillHoles, uncoveredCutouts } =
             PcbScene3dDrillCutoutFilter.partitionFillHoles(
                 drillCutouts,
-                fillHoles
+                fillHoles,
+                { preparedPolygonCache: cutoutContext.preparedPolygonCache }
             )
         const { points: contourPoints, appliedCutouts: edgeCutouts } =
-            PcbScene3dSilkscreenFactory.#applyCircularEdgeCutouts(
+            cutoutContext.applyCircularEdgeCutouts(
                 points,
                 drillHoles.concat(uncoveredCutouts)
             )
@@ -461,33 +482,41 @@ export class PcbScene3dSilkscreenFactory {
             clippingHoles: copiedClippingHoles
         } = PcbScene3dSilkscreenFactory.#partitionDrillCutouts(
             remainingDrillHoles,
-            contourPoints
+            contourPoints,
+            cutoutContext
         )
         const { shapeHoles, clippingHoles } =
             PcbScene3dSilkscreenFactory.#partitionDrillCutouts(
                 remainingUncoveredCutouts,
-                contourPoints
+                contourPoints,
+                cutoutContext
             )
         const physicalShapeCutoutHoles =
             PcbScene3dShapeHoleMerger.mergeOverlapping(
                 PcbScene3dDrillCutoutFilter.removeNestedCutouts(
-                    copiedShapeHoles.concat(shapeHoles)
+                    copiedShapeHoles.concat(shapeHoles),
+                    {
+                        preparedPolygonCache: cutoutContext.preparedPolygonCache
+                    }
                 )
             )
         const shapeCutoutHoles = PcbScene3dShapeHoleMerger.mergeOverlapping(
             PcbScene3dDrillCutoutFilter.removeNestedCutouts(
-                authoredHoles.concat(copiedShapeHoles, shapeHoles)
+                authoredHoles.concat(copiedShapeHoles, shapeHoles),
+                { preparedPolygonCache: cutoutContext.preparedPolygonCache }
             )
         )
         const fallbackClippingHoles =
             PcbScene3dDrillCutoutFilter.removeNestedCutouts(
-                copiedClippingHoles.concat(clippingHoles)
+                copiedClippingHoles.concat(clippingHoles),
+                { preparedPolygonCache: cutoutContext.preparedPolygonCache }
             )
         PcbScene3dSilkscreenFactory.#appendShapeHoles(
             THREE,
             shape,
             shapeCutoutHoles,
-            contourPoints
+            contourPoints,
+            cutoutContext
         )
 
         const shapeFilterHoles =
@@ -496,7 +525,8 @@ export class PcbScene3dSilkscreenFactory {
             PcbScene3dShapeHoleGeometryCleaner.removeCoveredHoleCenters(
                 THREE,
                 new THREE.ShapeGeometry(shape),
-                physicalShapeCutoutHoles
+                physicalShapeCutoutHoles,
+                { preparedPolygonCache: cutoutContext.preparedPolygonCache }
             )
         const geometry = PcbScene3dCutoutGeometryFilter.filter(
             THREE,
@@ -505,7 +535,8 @@ export class PcbScene3dSilkscreenFactory {
             {
                 maxDepth: 12,
                 maxEdgeLength:
-                    PcbScene3dSilkscreenFactory.#CUTOUT_MAX_EDGE_LENGTH
+                    PcbScene3dSilkscreenFactory.#CUTOUT_MAX_EDGE_LENGTH,
+                preparedPolygonCache: cutoutContext.preparedPolygonCache
             }
         )
         const mesh = new THREE.Mesh(geometry, material)
@@ -514,93 +545,18 @@ export class PcbScene3dSilkscreenFactory {
     }
 
     /**
-     * Converts circular edge cutouts into the fill contour before triangulation.
-     * @param {{ x: number, y: number }[]} contourPoints Fill contour points.
-     * @param {{ x: number, y: number }[][]} drillCutouts Candidate cutouts.
-     * @returns {{ points: { x: number, y: number }[], appliedCutouts: { x: number, y: number }[][] }}
-     */
-    static #applyCircularEdgeCutouts(contourPoints, drillCutouts) {
-        let points = contourPoints
-        const appliedCutouts = []
-        const candidates = PcbScene3dDrillCutoutFilter.removeNestedCutouts(
-            (Array.isArray(drillCutouts) ? drillCutouts : []).filter(
-                (cutout) =>
-                    PcbScene3dCutoutCircleDetector.resolve(cutout) &&
-                    !PcbScene3dSilkscreenFactory.#isHoleInsideContour(
-                        cutout,
-                        contourPoints
-                    )
-            )
-        )
-
-        for (const cutout of candidates) {
-            const circularCutout =
-                PcbScene3dCutoutCircleDetector.resolve(cutout)
-            if (
-                !circularCutout ||
-                PcbScene3dSilkscreenFactory.#isHoleInsideContour(cutout, points)
-            ) {
-                continue
-            }
-
-            const nextPoints =
-                PcbScene3dBoardEdgeCutoutBuilder.applyCircularEdgeCutouts(
-                    points,
-                    [circularCutout]
-                )
-            if (
-                PcbScene3dSilkscreenFactory.#samePointList(points, nextPoints)
-            ) {
-                continue
-            }
-
-            points = nextPoints
-            appliedCutouts.push(cutout)
-        }
-
-        return { points, appliedCutouts }
-    }
-
-    /**
-     * Returns true when two point lists share identical coordinates.
-     * @param {{ x: number, y: number }[]} first First point list.
-     * @param {{ x: number, y: number }[]} second Second point list.
-     * @returns {boolean}
-     */
-    static #samePointList(first, second) {
-        return (
-            Array.isArray(first) &&
-            Array.isArray(second) &&
-            first.length === second.length &&
-            first.every((point, index) => {
-                const otherPoint = second[index]
-
-                return (
-                    Math.abs(point.x - otherPoint.x) <=
-                        PcbScene3dSilkscreenFactory.#GEOMETRY_EPSILON &&
-                    Math.abs(point.y - otherPoint.y) <=
-                        PcbScene3dSilkscreenFactory.#GEOMETRY_EPSILON
-                )
-            })
-        )
-    }
-    /**
      * Splits drill cutouts into safe shape holes and fallback clip polygons.
      * @param {{ x: number, y: number }[][]} drillCutouts
      * @param {{ x: number, y: number }[]} contourPoints
+     * @param {PcbScene3dSilkscreenCutoutContext} cutoutContext
      * @returns {{ shapeHoles: { x: number, y: number }[][], clippingHoles: { x: number, y: number }[][] }}
      */
-    static #partitionDrillCutouts(drillCutouts, contourPoints) {
+    static #partitionDrillCutouts(drillCutouts, contourPoints, cutoutContext) {
         const shapeHoles = []
         const clippingHoles = []
 
         for (const cutout of Array.isArray(drillCutouts) ? drillCutouts : []) {
-            if (
-                PcbScene3dSilkscreenFactory.#isHoleInsideContour(
-                    cutout,
-                    contourPoints
-                )
-            ) {
+            if (cutoutContext.isHoleInsideContour(cutout, contourPoints)) {
                 shapeHoles.push(cutout)
                 continue
             }
@@ -617,20 +573,22 @@ export class PcbScene3dSilkscreenFactory {
      * @param {{ holes: any[] }} shape
      * @param {{ x: number, y: number }[][]} holes
      * @param {{ x: number, y: number }[]} contourPoints
+     * @param {PcbScene3dSilkscreenCutoutContext} cutoutContext
      * @returns {void}
      */
-    static #appendShapeHoles(THREE, shape, holes, contourPoints) {
+    static #appendShapeHoles(
+        THREE,
+        shape,
+        holes,
+        contourPoints,
+        cutoutContext
+    ) {
         if (!Array.isArray(holes) || !Array.isArray(shape.holes)) {
             return
         }
 
         for (const points of holes) {
-            if (
-                !PcbScene3dSilkscreenFactory.#isHoleInsideContour(
-                    points,
-                    contourPoints
-                )
-            ) {
+            if (!cutoutContext.isHoleInsideContour(points, contourPoints)) {
                 continue
             }
 
@@ -638,19 +596,6 @@ export class PcbScene3dSilkscreenFactory {
                 PcbScene3dShapePathFactory.buildPath(THREE, points)
             )
         }
-    }
-
-    /**
-     * Returns true when a cutout can safely be added as a shape hole.
-     * @param {{ x: number, y: number }[]} hole
-     * @param {{ x: number, y: number }[]} contour
-     * @returns {boolean}
-     */
-    static #isHoleInsideContour(hole, contour) {
-        return PcbScene3dBoardEdgeCutoutBuilder.isHoleInsideContour(
-            hole,
-            contour
-        )
     }
 
     /**
@@ -851,9 +796,16 @@ export class PcbScene3dSilkscreenFactory {
      * @param {number[]} positions
      * @param {any} material
      * @param {{ x: number, y: number }[][]} [drillCutouts]
+     * @param {PcbScene3dSilkscreenCutoutContext | null} [cutoutContext]
      * @returns {any | null}
      */
-    static #buildStrokeMesh(THREE, positions, material, drillCutouts = []) {
+    static #buildStrokeMesh(
+        THREE,
+        positions,
+        material,
+        drillCutouts = [],
+        cutoutContext = null
+    ) {
         if (!positions.length) {
             return null
         }
@@ -872,7 +824,8 @@ export class PcbScene3dSilkscreenFactory {
                 {
                     maxDepth: 12,
                     maxEdgeLength:
-                        PcbScene3dSilkscreenFactory.#CUTOUT_MAX_EDGE_LENGTH
+                        PcbScene3dSilkscreenFactory.#CUTOUT_MAX_EDGE_LENGTH,
+                    preparedPolygonCache: cutoutContext?.preparedPolygonCache
                 }
             ),
             material
@@ -886,14 +839,23 @@ export class PcbScene3dSilkscreenFactory {
      * @param {number[]} positions
      * @param {any} material
      * @param {{ x: number, y: number }[][]} drillCutouts
+     * @param {PcbScene3dSilkscreenCutoutContext} cutoutContext
      * @returns {void}
      */
-    static #appendStrokeMesh(meshes, THREE, positions, material, drillCutouts) {
+    static #appendStrokeMesh(
+        meshes,
+        THREE,
+        positions,
+        material,
+        drillCutouts,
+        cutoutContext
+    ) {
         const mesh = PcbScene3dSilkscreenFactory.#buildStrokeMesh(
             THREE,
             positions,
             material,
-            drillCutouts
+            drillCutouts,
+            cutoutContext
         )
 
         if (mesh) {

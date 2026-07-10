@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as THREE from 'three'
+import { PcbScene3dCutoutCircleDetector } from '../src/PcbScene3dCutoutCircleDetector.mjs'
 import { PcbScene3dSilkscreenFactory } from '../src/PcbScene3dSilkscreenFactory.mjs'
 
 function createFakeThree() {
@@ -108,4 +110,63 @@ test('PcbScene3dSilkscreenFactory preserves shape-based region arcs', () => {
                 Math.abs(command.y - 17.07) < 0.1
         )
     )
+})
+
+test('PcbScene3dSilkscreenFactory resolves each side cutout circle once across consumers', () => {
+    const cutout = Array.from({ length: 32 }, (_value, index) => {
+        const angle = (index / 32) * Math.PI * 2
+
+        return { x: Math.cos(angle) * 5, y: Math.sin(angle) * 5 }
+    })
+    const originalResolve = PcbScene3dCutoutCircleDetector.resolve
+    let detectorCalls = 0
+
+    PcbScene3dCutoutCircleDetector.resolve = (points, epsilon) => {
+        detectorCalls += 1
+        return originalResolve.call(
+            PcbScene3dCutoutCircleDetector,
+            points,
+            epsilon
+        )
+    }
+    try {
+        PcbScene3dSilkscreenFactory.buildGroup(
+            THREE,
+            {
+                top: {
+                    fills: [],
+                    tracks: [{ x1: -12, y1: 0, x2: 12, y2: 0, width: 2 }],
+                    arcs: [
+                        {
+                            x: 0,
+                            y: 0,
+                            radius: 9,
+                            startAngle: 0,
+                            endAngle: 180,
+                            width: 2
+                        }
+                    ],
+                    texts: [
+                        {
+                            value: 'A',
+                            x: 0,
+                            y: 0,
+                            sizeX: 8,
+                            sizeY: 8,
+                            thickness: 1
+                        }
+                    ],
+                    drillCutouts: [cutout]
+                },
+                bottom: { fills: [], tracks: [], arcs: [], texts: [] }
+            },
+            12,
+            -12,
+            (x, y) => ({ x, y })
+        )
+
+        assert.equal(detectorCalls, 1)
+    } finally {
+        PcbScene3dCutoutCircleDetector.resolve = originalResolve
+    }
 })

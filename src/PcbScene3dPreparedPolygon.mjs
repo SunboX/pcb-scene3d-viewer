@@ -55,7 +55,7 @@ export class PcbScene3dPreparedPolygon {
     /** @type {boolean} */
     #circleDetectionEnabled
 
-    /** @type {'raw' | 'numeric' | null} */
+    /** @type {'raw' | 'numeric' | 'raw-numeric' | null} */
     #pointRepresentation
 
     /** @type {PcbScene3dAabbIndex} */
@@ -67,7 +67,7 @@ export class PcbScene3dPreparedPolygon {
     /**
      * Prepares reusable polygon metadata without mutating source points.
      * @param {{ x: number, y: number }[]} points
-     * @param {{ source?: *, sourceIndex?: number, epsilon?: number, detectCircle?: boolean, metadataPoints?: { x: number, y: number }[], pointRepresentation?: 'raw' | 'numeric' }} [options]
+     * @param {{ source?: *, sourceIndex?: number, epsilon?: number, detectCircle?: boolean, metadataPoints?: { x: number, y: number }[], pointRepresentation?: 'raw' | 'numeric' | 'raw-numeric' }} [options]
      */
     constructor(points, options = {}) {
         this.#points = Array.isArray(points) ? points : []
@@ -87,7 +87,7 @@ export class PcbScene3dPreparedPolygon {
         this.#bounds = metadata.bounds
         this.#centroid = metadata.centroid
         this.#signedArea = metadata.signedArea
-        this.#pointRepresentation = ['raw', 'numeric'].includes(
+        this.#pointRepresentation = ['raw', 'numeric', 'raw-numeric'].includes(
             options.pointRepresentation
         )
             ? options.pointRepresentation
@@ -138,7 +138,7 @@ export class PcbScene3dPreparedPolygon {
 
     /**
      * Returns the producer-declared exact-point representation for cache reuse.
-     * @returns {'raw' | 'numeric' | null}
+     * @returns {'raw' | 'numeric' | 'raw-numeric' | null}
      */
     get pointRepresentation() {
         return this.#pointRepresentation

@@ -549,10 +549,14 @@ test('reports the prepared point representation for cache compatibility', () => 
     const numeric = new PcbScene3dPreparedPolygon(numericPoints, {
         pointRepresentation: 'numeric'
     })
+    const rawNumeric = new PcbScene3dPreparedPolygon(numericPoints, {
+        pointRepresentation: 'raw-numeric'
+    })
     const unspecified = new PcbScene3dPreparedPolygon(numericPoints)
 
     assert.equal(raw.pointRepresentation, 'raw')
     assert.equal(numeric.pointRepresentation, 'numeric')
+    assert.equal(rawNumeric.pointRepresentation, 'raw-numeric')
     assert.equal(unspecified.pointRepresentation, null)
 })
 

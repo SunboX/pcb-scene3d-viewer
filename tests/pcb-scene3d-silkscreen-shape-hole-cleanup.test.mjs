@@ -84,6 +84,25 @@ test('PcbScene3dShapeHoleGeometryCleaner preserves fill beside compact hole clea
     )
 })
 
+test('PcbScene3dShapeHoleGeometryCleaner forwards a request-scoped prepared cache', () => {
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute([-20, -20, 0, 20, -20, 0, 0, 20, 0], 3)
+    )
+    const hole = circleCutout(0, 0, 5)
+    const preparedPolygonCache = new Map()
+
+    PcbScene3dShapeHoleGeometryCleaner.removeCoveredHoleCenters(
+        THREE,
+        geometry,
+        [hole],
+        { preparedPolygonCache }
+    )
+
+    assert.ok(preparedPolygonCache.has(hole))
+})
+
 test('PcbScene3dSilkscreenFactory keeps fallback circular cutouts round', () => {
     const group = PcbScene3dSilkscreenFactory.buildGroup(
         THREE,

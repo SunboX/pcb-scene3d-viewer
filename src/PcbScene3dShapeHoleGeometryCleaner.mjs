@@ -12,9 +12,10 @@ export class PcbScene3dShapeHoleGeometryCleaner {
      * @param {any} THREE Three.js namespace.
      * @param {any} geometry Shape geometry.
      * @param {{ x: number, y: number }[][]} holes Shape hole polygons.
+     * @param {{ preparedPolygonCache?: Map }} [options] Request-scoped options.
      * @returns {any}
      */
-    static removeCoveredHoleCenters(THREE, geometry, holes) {
+    static removeCoveredHoleCenters(THREE, geometry, holes, options = {}) {
         const coveredHoles =
             PcbScene3dShapeHoleGeometryCleaner.resolveCoveredHoleCenters(
                 geometry,
@@ -32,7 +33,8 @@ export class PcbScene3dShapeHoleGeometryCleaner {
             {
                 maxDepth: 12,
                 maxEdgeLength:
-                    PcbScene3dShapeHoleGeometryCleaner.#CUTOUT_MAX_EDGE_LENGTH
+                    PcbScene3dShapeHoleGeometryCleaner.#CUTOUT_MAX_EDGE_LENGTH,
+                preparedPolygonCache: options?.preparedPolygonCache
             }
         )
     }

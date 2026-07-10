@@ -67,7 +67,9 @@ export class PcbScene3dDrillCutoutFilter {
             ? preparedPolygonCache.get(polygon)
             : null
 
-        if (prepared?.pointRepresentation !== 'numeric') {
+        if (
+            !['numeric', 'raw-numeric'].includes(prepared?.pointRepresentation)
+        ) {
             const points = polygon.map((point) => ({
                 x: Number(point?.x || 0),
                 y: Number(point?.y || 0)

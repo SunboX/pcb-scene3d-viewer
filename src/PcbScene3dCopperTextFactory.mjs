@@ -17,7 +17,7 @@ export class PcbScene3dCopperTextFactory {
      * @param {any[]} texts
      * @param {number} z
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
-     * @param {{ side?: 'top' | 'bottom', mirrorY?: boolean, materialColor?: number, materialProperties?: { materialKind?: 'basic' | 'standard', roughness?: number, metalness?: number, transparent?: boolean, opacity?: number, toneMapped?: boolean, fog?: boolean }, filterSide?: boolean, glyphYUp?: boolean, drillCutouts?: { x: number, y: number }[][] }} [options]
+     * @param {{ side?: 'top' | 'bottom', mirrorY?: boolean, materialColor?: number, materialProperties?: { materialKind?: 'basic' | 'standard', roughness?: number, metalness?: number, transparent?: boolean, opacity?: number, toneMapped?: boolean, fog?: boolean }, filterSide?: boolean, glyphYUp?: boolean, drillCutouts?: { x: number, y: number }[][], preparedPolygonCache?: Map }} [options]
      * @returns {any}
      */
     static buildGroup(THREE, texts, z, normalizeBoardPoint, options = {}) {
@@ -59,7 +59,8 @@ export class PcbScene3dCopperTextFactory {
             PcbScene3dCopperTextFactory.#filterDrillCutouts(
                 THREE,
                 geometry,
-                options?.drillCutouts
+                options?.drillCutouts,
+                options?.preparedPolygonCache
             )
 
         if (
@@ -88,14 +89,21 @@ export class PcbScene3dCopperTextFactory {
      * @param {any} THREE
      * @param {any} geometry
      * @param {{ x: number, y: number }[][] | undefined} drillCutouts
+     * @param {Map | undefined} preparedPolygonCache Request-scoped prepared cache.
      * @returns {any}
      */
-    static #filterDrillCutouts(THREE, geometry, drillCutouts) {
+    static #filterDrillCutouts(
+        THREE,
+        geometry,
+        drillCutouts,
+        preparedPolygonCache
+    ) {
         return Array.isArray(drillCutouts) && drillCutouts.length
             ? PcbScene3dCutoutGeometryFilter.filter(
                   THREE,
                   geometry,
-                  drillCutouts
+                  drillCutouts,
+                  { preparedPolygonCache }
               )
             : geometry
     }

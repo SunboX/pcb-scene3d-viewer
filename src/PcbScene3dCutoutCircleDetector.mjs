@@ -21,14 +21,18 @@ export class PcbScene3dCutoutCircleDetector {
         }
 
         const center = PcbScene3dCutoutCircleDetector.#resolveCentroid(points)
-        const radii = points.map((point) =>
-            Math.hypot(point.x - center.x, point.y - center.y)
-        )
-        const radius =
-            radii.reduce((sum, value) => sum + value, 0) / radii.length
-        const maxError = Math.max(
-            ...radii.map((value) => Math.abs(value - radius))
-        )
+        let radiusSum = 0
+        for (let index = 0; index < points.length; index += 1) {
+            const point = points[index]
+            radiusSum += Math.hypot(point.x - center.x, point.y - center.y)
+        }
+        const radius = radiusSum / points.length
+        let maxError = -Infinity
+        for (let index = 0; index < points.length; index += 1) {
+            const point = points[index]
+            const value = Math.hypot(point.x - center.x, point.y - center.y)
+            maxError = Math.max(maxError, Math.abs(value - radius))
+        }
         const tolerance = Math.max(
             Number(epsilon || 0),
             radius * PcbScene3dCutoutCircleDetector.#MAX_RELATIVE_ERROR
@@ -68,17 +72,17 @@ export class PcbScene3dCutoutCircleDetector {
      * @returns {{ x: number, y: number }}
      */
     static #resolveCentroid(points) {
-        const sum = points.reduce(
-            (accumulator, point) => ({
-                x: accumulator.x + Number(point.x || 0),
-                y: accumulator.y + Number(point.y || 0)
-            }),
-            { x: 0, y: 0 }
-        )
+        let totalX = 0
+        let totalY = 0
+        for (let index = 0; index < points.length; index += 1) {
+            const point = points[index]
+            totalX += Number(point.x || 0)
+            totalY += Number(point.y || 0)
+        }
 
         return {
-            x: sum.x / points.length,
-            y: sum.y / points.length
+            x: totalX / points.length,
+            y: totalY / points.length
         }
     }
 }

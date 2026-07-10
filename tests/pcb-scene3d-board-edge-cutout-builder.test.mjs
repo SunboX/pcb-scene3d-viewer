@@ -2,6 +2,32 @@ import assert from 'node:assert/strict'
 import { performance } from 'node:perf_hooks'
 import test from 'node:test'
 import { PcbScene3dBoardEdgeCutoutBuilder } from '../src/PcbScene3dBoardEdgeCutoutBuilder.mjs'
+import { PcbScene3dCutoutCircleDetector } from '../src/PcbScene3dCutoutCircleDetector.mjs'
+
+test('PcbScene3dBoardEdgeCutoutBuilder treats a supplied null circle as resolved', () => {
+    const contour = buildSampledRectangleContour(100, 100, 4)
+    const hole = buildCircularHole(0, 0, 5)
+    const originalResolve = PcbScene3dCutoutCircleDetector.resolve
+    let detectorCalls = 0
+
+    PcbScene3dCutoutCircleDetector.resolve = () => {
+        detectorCalls += 1
+        return originalResolve.call(PcbScene3dCutoutCircleDetector, hole)
+    }
+    try {
+        assert.equal(
+            PcbScene3dBoardEdgeCutoutBuilder.isHoleInsideContour(
+                hole,
+                contour,
+                null
+            ),
+            true
+        )
+        assert.equal(detectorCalls, 0)
+    } finally {
+        PcbScene3dCutoutCircleDetector.resolve = originalResolve
+    }
+})
 
 test('PcbScene3dBoardEdgeCutoutBuilder recognizes sampled circular holes without repeated contour scans', () => {
     const contour = buildSampledRectangleContour(1200, 900, 80)
