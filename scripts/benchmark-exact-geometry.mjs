@@ -241,7 +241,11 @@ const drillCutouts = [
         )
     )
 ]
+const ordinaryDrillCutouts = Array.from({ length: 200 }, (_, index) =>
+    buildLoop(32, 1.5, -57 + (index % 20) * 6, -27 + Math.floor(index / 20) * 6)
+)
 const cutoutPositions = buildBoundaryTriangles(240, 100)
+const ordinaryCutoutPositions = buildTriangleGrid(20, 6, 6, -60, -30)
 const smallPositions = buildTriangleGrid(20, 6, 6, -60, -30)
 const smallCutouts = [
     buildLoop(4, 1.5, -33, -15),
@@ -273,12 +277,23 @@ const copperFill = measure(() =>
 const drillCutout = measure(() =>
     PcbScene3dDrillCutoutFilter.removeNestedCutouts(drillCutouts)
 )
+const ordinaryDrillCutout = measure(() =>
+    PcbScene3dDrillCutoutFilter.removeNestedCutouts(ordinaryDrillCutouts)
+)
 const cutoutGeometry = measure(() =>
     PcbScene3dCutoutGeometryFilter.filter(
         THREE,
         buildGeometry(cutoutPositions),
         [denseBoundary],
         cutoutOptions
+    )
+)
+const ordinaryCutoutGeometry = measure(() =>
+    PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        buildGeometry(ordinaryCutoutPositions),
+        ordinaryDrillCutouts,
+        smallCutoutOptions
     )
 )
 const smallGeometry = measure(() =>
@@ -293,11 +308,15 @@ const smallGeometry = measure(() =>
 const results = {
     copperFillMs: copperFill.milliseconds,
     drillCutoutMs: drillCutout.milliseconds,
+    ordinaryDrillCutoutMs: ordinaryDrillCutout.milliseconds,
     cutoutGeometryMs: cutoutGeometry.milliseconds,
+    ordinaryCutoutGeometryMs: ordinaryCutoutGeometry.milliseconds,
     smallGeometryMs: smallGeometry.milliseconds,
     copperPositionCount: positionCount(copperFill.result),
     drillCutoutCount: drillCutout.result.length,
+    ordinaryDrillCutoutCount: ordinaryDrillCutout.result.length,
     cutoutPositionCount: positionCount(cutoutGeometry.result),
+    ordinaryCutoutPositionCount: positionCount(ordinaryCutoutGeometry.result),
     smallPositionCount: positionCount(smallGeometry.result)
 }
 

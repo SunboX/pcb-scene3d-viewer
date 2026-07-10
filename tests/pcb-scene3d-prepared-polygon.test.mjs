@@ -148,6 +148,39 @@ function sampledCircle(count, centerX, centerY, radius) {
 }
 
 /**
+ * Builds sampled circle points whose coordinate reads are observable.
+ * @param {number} count Point count.
+ * @param {{ count: number }} reads Shared coordinate-read counter.
+ * @returns {{ x: number, y: number }[]}
+ */
+function countedSampledCircle(count, reads) {
+    return Array.from({ length: count }, (_unused, index) => {
+        const angle = (index / count) * Math.PI * 2
+        const x = Math.cos(angle) * 10
+        const y = Math.sin(angle) * 10
+        const point = {}
+
+        Object.defineProperties(point, {
+            x: {
+                enumerable: true,
+                get() {
+                    reads.count += 1
+                    return x
+                }
+            },
+            y: {
+                enumerable: true,
+                get() {
+                    reads.count += 1
+                    return y
+                }
+            }
+        })
+        return point
+    })
+}
+
+/**
  * Mirrors a polygon across the Y axis without changing source order.
  * @param {{ x: number, y: number }[]} points
  * @returns {{ x: number, y: number }[]}
@@ -658,4 +691,114 @@ test('returns complete segment and vertex broad-phase candidates into targets', 
     for (const point of expectedVertices) {
         assert.ok(vertexTarget.includes(point))
     }
+})
+
+test('builds large segment and vertex indexes lazily once', () => {
+    const pointReads = { count: 0 }
+    const points = countedSampledCircle(128, pointReads)
+    const polygon = new PcbScene3dPreparedPolygon(points, {
+        epsilon: EPSILON,
+        detectCircle: false
+    })
+    const firstSegment = polygon.segments[0]
+    const firstSegmentBounds = firstSegment.bounds
+    let segmentBoundsReads = 0
+    Object.defineProperty(firstSegment, 'bounds', {
+        configurable: true,
+        enumerable: true,
+        get() {
+            segmentBoundsReads += 1
+            return firstSegmentBounds
+        }
+    })
+    const queryBounds = { minX: -11, maxX: 11, minY: -11, maxY: 11 }
+    pointReads.count = 0
+
+    assert.equal(pointReads.count, 0)
+    assert.equal(segmentBoundsReads, 0)
+
+    assert.equal(polygon.queryVertices(queryBounds, []).length, points.length)
+    const pointReadsAfterFirstQuery = pointReads.count
+    assert.ok(pointReadsAfterFirstQuery > 0)
+    assert.equal(polygon.queryVertices(queryBounds, []).length, points.length)
+    assert.equal(pointReads.count, pointReadsAfterFirstQuery)
+
+    assert.equal(
+        polygon.querySegments(queryBounds, []).length,
+        polygon.segments.length
+    )
+    const boundsReadsAfterFirstQuery = segmentBoundsReads
+    assert.ok(boundsReadsAfterFirstQuery > 0)
+    assert.equal(
+        polygon.querySegments(queryBounds, []).length,
+        polygon.segments.length
+    )
+    assert.equal(segmentBoundsReads, boundsReadsAfterFirstQuery)
+})
+
+test('scans small polygon candidates linearly on every query', () => {
+    const pointReads = { count: 0 }
+    const points = countedSampledCircle(32, pointReads)
+    const polygon = new PcbScene3dPreparedPolygon(points, {
+        epsilon: EPSILON,
+        detectCircle: false
+    })
+    const firstSegment = polygon.segments[0]
+    const firstSegmentBounds = firstSegment.bounds
+    let segmentBoundsReads = 0
+    Object.defineProperty(firstSegment, 'bounds', {
+        configurable: true,
+        enumerable: true,
+        get() {
+            segmentBoundsReads += 1
+            return firstSegmentBounds
+        }
+    })
+    const queryBounds = { minX: -11, maxX: 11, minY: -11, maxY: 11 }
+    pointReads.count = 0
+
+    assert.equal(polygon.queryVertices(queryBounds, []).length, points.length)
+    const pointReadsAfterFirstQuery = pointReads.count
+    assert.ok(pointReadsAfterFirstQuery > 0)
+    assert.equal(polygon.queryVertices(queryBounds, []).length, points.length)
+    assert.ok(pointReads.count > pointReadsAfterFirstQuery)
+
+    assert.equal(
+        polygon.querySegments(queryBounds, []).length,
+        polygon.segments.length
+    )
+    const boundsReadsAfterFirstQuery = segmentBoundsReads
+    assert.ok(boundsReadsAfterFirstQuery > 0)
+    assert.equal(
+        polygon.querySegments(queryBounds, []).length,
+        polygon.segments.length
+    )
+    assert.ok(segmentBoundsReads > boundsReadsAfterFirstQuery)
+})
+
+test('keeps missing small-query bounds conservative like the AABB fallback', () => {
+    const points = [
+        { x: 0, y: 0 },
+        { x: 2, y: 0 },
+        { x: 2, y: 2 },
+        { x: 0, y: 2 }
+    ]
+    const polygon = new PcbScene3dPreparedPolygon(points, {
+        epsilon: EPSILON,
+        detectCircle: false
+    })
+    const segmentSentinel = { sentinel: 'segment' }
+    const vertexSentinel = { sentinel: 'vertex' }
+    const segmentTarget = [segmentSentinel]
+    const vertexTarget = [vertexSentinel]
+
+    assert.strictEqual(
+        polygon.querySegments(undefined, segmentTarget),
+        segmentTarget
+    )
+    assert.strictEqual(polygon.queryVertices(null, vertexTarget), vertexTarget)
+    assert.strictEqual(segmentTarget[0], segmentSentinel)
+    assert.strictEqual(vertexTarget[0], vertexSentinel)
+    assert.deepEqual(segmentTarget.slice(1), polygon.segments)
+    assert.deepEqual(vertexTarget.slice(1), points)
 })

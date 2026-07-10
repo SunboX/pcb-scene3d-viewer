@@ -24,6 +24,7 @@ import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector
  */
 export class PcbScene3dPreparedPolygon {
     static #DEFAULT_EPSILON = 0.001
+    static #LINEAR_QUERY_LIMIT = 64
 
     /** @type {*} */
     #source
@@ -58,10 +59,10 @@ export class PcbScene3dPreparedPolygon {
     /** @type {'raw' | 'numeric' | 'raw-numeric' | null} */
     #pointRepresentation
 
-    /** @type {PcbScene3dAabbIndex} */
+    /** @type {PcbScene3dAabbIndex | null} */
     #segmentIndex
 
-    /** @type {PcbScene3dAabbIndex} */
+    /** @type {PcbScene3dAabbIndex | null} */
     #vertexIndex
 
     /**
@@ -93,16 +94,8 @@ export class PcbScene3dPreparedPolygon {
             ? options.pointRepresentation
             : null
         this.#segments = PcbScene3dPreparedPolygon.#buildSegments(this.#points)
-        this.#segmentIndex = new PcbScene3dAabbIndex(this.#segments, {
-            resolveBounds: (segment) =>
-                PcbScene3dPreparedPolygon.#resolveSegmentIndexBounds(
-                    segment,
-                    this.#epsilon
-                )
-        })
-        this.#vertexIndex = new PcbScene3dAabbIndex(this.#points, {
-            resolveBounds: PcbScene3dPreparedPolygon.#resolvePointBounds
-        })
+        this.#segmentIndex = null
+        this.#vertexIndex = null
         this.#circleDetectionEnabled = options.detectCircle === true
         this.#circle = this.#circleDetectionEnabled
             ? PcbScene3dCutoutCircleDetector.resolve(
@@ -309,7 +302,14 @@ export class PcbScene3dPreparedPolygon {
      * @returns {PcbScene3dPreparedPolygonSegment[]}
      */
     querySegments(bounds, target = []) {
-        return this.#segmentIndex.queryInto(bounds, target)
+        if (
+            this.#segments.length <=
+            PcbScene3dPreparedPolygon.#LINEAR_QUERY_LIMIT
+        ) {
+            return this.#querySegmentsLinear(bounds, target)
+        }
+
+        return this.#resolveSegmentIndex().queryInto(bounds, target)
     }
 
     /**
@@ -319,9 +319,91 @@ export class PcbScene3dPreparedPolygon {
      * @returns {{ x: number, y: number }[]}
      */
     queryVertices(bounds, target = []) {
-        return this.#vertexIndex.queryInto(bounds, target, {
+        if (
+            this.#points.length <= PcbScene3dPreparedPolygon.#LINEAR_QUERY_LIMIT
+        ) {
+            return this.#queryVerticesLinear(bounds, target)
+        }
+
+        return this.#resolveVertexIndex().queryInto(bounds, target, {
             epsilon: this.#epsilon
         })
+    }
+
+    /**
+     * Resolves and caches the segment AABB index on its first large query.
+     * @returns {PcbScene3dAabbIndex}
+     */
+    #resolveSegmentIndex() {
+        if (!this.#segmentIndex) {
+            this.#segmentIndex = new PcbScene3dAabbIndex(this.#segments, {
+                resolveBounds: (segment) =>
+                    PcbScene3dPreparedPolygon.#resolveSegmentIndexBounds(
+                        segment,
+                        this.#epsilon
+                    )
+            })
+        }
+
+        return this.#segmentIndex
+    }
+
+    /**
+     * Resolves and caches the vertex AABB index on its first large query.
+     * @returns {PcbScene3dAabbIndex}
+     */
+    #resolveVertexIndex() {
+        if (!this.#vertexIndex) {
+            this.#vertexIndex = new PcbScene3dAabbIndex(this.#points, {
+                resolveBounds: PcbScene3dPreparedPolygon.#resolvePointBounds
+            })
+        }
+
+        return this.#vertexIndex
+    }
+
+    /**
+     * Appends exact segment candidates without constructing a small index.
+     * @param {PcbScene3dPreparedPolygonBounds} bounds Query bounds.
+     * @param {PcbScene3dPreparedPolygonSegment[]} target Candidate target.
+     * @returns {PcbScene3dPreparedPolygonSegment[]}
+     */
+    #querySegmentsLinear(bounds, target) {
+        for (const segment of this.#segments) {
+            if (
+                PcbScene3dPreparedPolygon.#segmentOverlapsQuery(
+                    segment,
+                    bounds,
+                    this.#epsilon
+                )
+            ) {
+                target.push(segment)
+            }
+        }
+
+        return target
+    }
+
+    /**
+     * Appends exact vertex candidates without constructing a small index.
+     * @param {PcbScene3dPreparedPolygonBounds} bounds Query bounds.
+     * @param {{ x: number, y: number }[]} target Candidate target.
+     * @returns {{ x: number, y: number }[]}
+     */
+    #queryVerticesLinear(bounds, target) {
+        for (const point of this.#points) {
+            if (
+                PcbScene3dPreparedPolygon.#pointOverlapsQuery(
+                    point,
+                    bounds,
+                    this.#epsilon
+                )
+            ) {
+                target.push(point)
+            }
+        }
+
+        return target
     }
 
     /**
@@ -498,12 +580,79 @@ export class PcbScene3dPreparedPolygon {
     }
 
     /**
+     * Returns whether a segment's conservative index envelope overlaps a query.
+     * @param {PcbScene3dPreparedPolygonSegment} segment Segment metadata.
+     * @param {PcbScene3dPreparedPolygonBounds} queryBounds Query bounds.
+     * @param {number} epsilon Exact predicate tolerance.
+     * @returns {boolean}
+     */
+    static #segmentOverlapsQuery(segment, queryBounds, epsilon) {
+        if (
+            !PcbScene3dPreparedPolygon.#hasFiniteBounds(queryBounds) ||
+            segment.lengthSquared === 0 ||
+            !Number.isFinite(segment.lengthSquared) ||
+            !PcbScene3dPreparedPolygon.#hasFiniteBounds(segment.bounds)
+        ) {
+            return true
+        }
+
+        const margin = Math.max(
+            epsilon,
+            (Math.SQRT2 * epsilon) / Math.sqrt(segment.lengthSquared)
+        )
+        const minX = segment.bounds.minX - margin
+        const maxX = segment.bounds.maxX + margin
+        const minY = segment.bounds.minY - margin
+        const maxY = segment.bounds.maxY + margin
+
+        return (
+            !Number.isFinite(minX) ||
+            !Number.isFinite(maxX) ||
+            !Number.isFinite(minY) ||
+            !Number.isFinite(maxY) ||
+            !(
+                maxX < queryBounds.minX ||
+                minX > queryBounds.maxX ||
+                maxY < queryBounds.minY ||
+                minY > queryBounds.maxY
+            )
+        )
+    }
+
+    /**
+     * Returns whether a vertex's conservative index envelope overlaps a query.
+     * @param {{ x: number, y: number }} point Vertex.
+     * @param {PcbScene3dPreparedPolygonBounds} queryBounds Query bounds.
+     * @param {number} epsilon Exact predicate tolerance.
+     * @returns {boolean}
+     */
+    static #pointOverlapsQuery(point, queryBounds, epsilon) {
+        if (!PcbScene3dPreparedPolygon.#hasFiniteBounds(queryBounds)) {
+            return true
+        }
+
+        const x = Number(point?.x)
+        const y = Number(point?.y)
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            return true
+        }
+
+        return !(
+            x < queryBounds.minX - epsilon ||
+            x > queryBounds.maxX + epsilon ||
+            y < queryBounds.minY - epsilon ||
+            y > queryBounds.maxY + epsilon
+        )
+    }
+
+    /**
      * Returns true when every bounds coordinate is finite.
      * @param {PcbScene3dPreparedPolygonBounds} bounds
      * @returns {boolean}
      */
     static #hasFiniteBounds(bounds) {
-        return (
+        return Boolean(
+            bounds &&
             Number.isFinite(bounds.minX) &&
             Number.isFinite(bounds.maxX) &&
             Number.isFinite(bounds.minY) &&
