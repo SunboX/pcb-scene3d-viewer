@@ -214,6 +214,29 @@ test('matches legacy vertex tolerance for tiny non-degenerate triangles', () => 
     assert.deepEqual(positionArray(result), [])
 })
 
+test('preserves legacy identity across separated spatial-index cells', () => {
+    const geometry = buildGeometry([
+        -0.0005, 0, 1, -0.0002, 0, 2, -0.0005, 0.0003, 3
+    ])
+    const expectedPositions = positionArray(geometry)
+    const cutout = [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 1, y: 1 },
+        { x: 0, y: 1 }
+    ]
+
+    const result = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        geometry,
+        [cutout],
+        { maxDepth: 0, discardTerminalOverlaps: true }
+    )
+
+    assert.strictEqual(result, geometry)
+    assert.deepEqual(positionArray(result), expectedPositions)
+})
+
 test('returns the original indexed geometry when overlapping bounds contain no cutout contact', () => {
     const geometry = buildGeometry(
         [0, 0, 0, 1, 0, 1, 0, 1, 2, 4, 0, 3, 5, 0, 4, 5, 1, 5],

@@ -1,8 +1,8 @@
 import { PcbScene3dCircularCutoutOverlap } from './PcbScene3dCircularCutoutOverlap.mjs'
 import { PcbScene3dCutoutCircleDetector } from './PcbScene3dCutoutCircleDetector.mjs'
+import { PcbScene3dCutoutGridIndex } from './PcbScene3dCutoutGridIndex.mjs'
 import { PcbScene3dGeometryBoundsResolver } from './PcbScene3dGeometryBoundsResolver.mjs'
 import { PcbScene3dPreparedPolygon } from './PcbScene3dPreparedPolygon.mjs'
-import { PcbScene3dPreparedPolygonSet } from './PcbScene3dPreparedPolygonSet.mjs'
 import { PcbScene3dTerminalCutoutClassifier } from './PcbScene3dTerminalCutoutClassifier.mjs'
 
 /** Clips filled 2D geometry against drill-cutout polygons. */
@@ -47,7 +47,7 @@ export class PcbScene3dCutoutGeometryFilter {
             )
         )
             return geometry
-        const cutoutSet = new PcbScene3dPreparedPolygonSet(preparedCutouts)
+        const cutoutIndex = new PcbScene3dCutoutGridIndex(preparedCutouts)
         const settings =
             PcbScene3dCutoutGeometryFilter.#resolveSettings(options)
         const positions = []
@@ -65,7 +65,7 @@ export class PcbScene3dCutoutGeometryFilter {
                 settings,
                 0,
                 state,
-                cutoutSet
+                cutoutIndex
             )
         }
         if (!state.changed) {
@@ -159,7 +159,7 @@ export class PcbScene3dCutoutGeometryFilter {
      * @param {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number, discardTerminalOverlaps: boolean }} settings
      * @param {number} depth
      * @param {{ changed: boolean }} state
-     * @param {PcbScene3dPreparedPolygonSet | null} [cutoutSet]
+     * @param {PcbScene3dCutoutGridIndex | null} [cutoutIndex]
      * @returns {void}
      */
     static #appendFilteredTriangle(
@@ -169,15 +169,12 @@ export class PcbScene3dCutoutGeometryFilter {
         settings,
         depth,
         state,
-        cutoutSet = null
+        cutoutIndex = null
     ) {
         const triangleBounds =
             PcbScene3dCutoutGeometryFilter.#resolveBounds(triangle)
-        const candidateCutouts = cutoutSet
-            ? cutoutSet.query(triangleBounds, {
-                  epsilon: PcbScene3dCutoutGeometryFilter.#GEOMETRY_EPSILON,
-                  stable: true
-              })
+        const candidateCutouts = cutoutIndex
+            ? cutoutIndex.query(triangleBounds)
             : cutouts
         const overlappingCutouts = []
         for (const cutout of candidateCutouts) {
