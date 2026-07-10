@@ -35,6 +35,119 @@ test('reuses one circular raw-numeric preparation within a context', () => {
     }
 })
 
+test('rejects invalid and non-normalized sources without caching them', () => {
+    const context = new PcbScene3dSilkscreenCutoutContext()
+    const invalidSources = [
+        null,
+        [],
+        [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 }
+        ],
+        [
+            { x: '0', y: 0 },
+            { x: 1, y: 0 },
+            { x: 0, y: 1 }
+        ],
+        [{ x: 0, y: 0 }, { y: 0 }, { x: 0, y: 1 }],
+        [
+            { x: 0, y: 0 },
+            { x: Number.NaN, y: 0 },
+            { x: 0, y: 1 }
+        ],
+        [
+            { x: 0, y: 0 },
+            { x: Infinity, y: 0 },
+            { x: 0, y: 1 }
+        ]
+    ]
+
+    for (const source of invalidSources) {
+        assert.equal(context.resolve(source), null)
+        assert.equal(context.resolveCircle(source), null)
+        assert.equal(context.preparedPolygonCache.has(source), false)
+    }
+    assert.equal(context.preparedPolygonCache.size, 0)
+
+    const mutatedSource = [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 0, y: 1 }
+    ]
+    assert.ok(context.resolve(mutatedSource))
+    mutatedSource[1].x = Number.NaN
+
+    assert.equal(context.resolve(mutatedSource), null)
+    assert.equal(context.preparedPolygonCache.has(mutatedSource), false)
+})
+
+test('leaves numeric-string polygons for drill-compatible preparation', () => {
+    const outer = stringSquare(0, 0, 10)
+    const inner = stringSquare(2, 2, 2)
+    const context = new PcbScene3dSilkscreenCutoutContext([outer, inner])
+    const freshResult = PcbScene3dDrillCutoutFilter.removeNestedCutouts([
+        outer,
+        inner
+    ])
+
+    assert.equal(context.preparedPolygonCache.size, 0)
+    assert.deepEqual(freshResult, [outer])
+    assert.deepEqual(
+        PcbScene3dDrillCutoutFilter.removeNestedCutouts([outer, inner], {
+            preparedPolygonCache: context.preparedPolygonCache
+        }),
+        freshResult
+    )
+})
+
+test('leaves sparse polygons for geometry-compatible preparation', () => {
+    const cutout = [{ x: 1 }, {}, { y: 1 }, {}]
+    const context = new PcbScene3dSilkscreenCutoutContext([cutout])
+    const options = { maxDepth: 0, discardTerminalOverlaps: false }
+    const freshGeometry = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        triangleGeometry(),
+        [cutout],
+        options
+    )
+
+    assert.equal(context.resolve(cutout), null)
+    assert.equal(context.preparedPolygonCache.size, 0)
+    const sharedGeometry = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        triangleGeometry(),
+        [cutout],
+        {
+            ...options,
+            preparedPolygonCache: context.preparedPolygonCache
+        }
+    )
+
+    assert.deepEqual(
+        positionArray(sharedGeometry),
+        positionArray(freshGeometry)
+    )
+    assert.deepEqual(positionArray(freshGeometry), [])
+})
+
+test('handles invalid public containment and edge-cutout inputs safely', () => {
+    const context = new PcbScene3dSilkscreenCutoutContext()
+    const contour = [
+        { x: -10, y: -10 },
+        { x: 10, y: -10 },
+        { x: 10, y: 10 },
+        { x: -10, y: 10 }
+    ]
+    const invalid = stringSquare(-2, -2, 4)
+
+    assert.equal(context.isHoleInsideContour(invalid, contour), false)
+    assert.deepEqual(
+        context.applyCircularEdgeCutouts(contour, [invalid, null, []]),
+        { points: contour, appliedCutouts: [] }
+    )
+    assert.equal(context.preparedPolygonCache.size, 0)
+})
+
 test('a fresh context observes coordinates mutated after an earlier preparation', () => {
     const cutout = sampledCircle(16, 0, 0, 5)
     const firstContext = new PcbScene3dSilkscreenCutoutContext([cutout])
@@ -157,4 +270,45 @@ function sampledCircle(pointCount, centerX, centerY, radius) {
             y: centerY + Math.sin(angle) * radius
         }
     })
+}
+
+/**
+ * Builds one square with numeric-string coordinates.
+ * @param {number} x Minimum X.
+ * @param {number} y Minimum Y.
+ * @param {number} size Side length.
+ * @returns {{ x: string, y: string }[]}
+ */
+function stringSquare(x, y, size) {
+    return [
+        { x: String(x), y: String(y) },
+        { x: String(x + size), y: String(y) },
+        { x: String(x + size), y: String(y + size) },
+        { x: String(x), y: String(y + size) }
+    ]
+}
+
+/**
+ * Builds the exact sparse-cutout review triangle.
+ * @returns {THREE.BufferGeometry}
+ */
+function triangleGeometry() {
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(
+            [0.1, 0.1, 1, 0.4, 0.1, 2, 0.1, 0.4, 3],
+            3
+        )
+    )
+    return geometry
+}
+
+/**
+ * Returns flattened positions from one geometry.
+ * @param {THREE.BufferGeometry} geometry Geometry to inspect.
+ * @returns {number[]}
+ */
+function positionArray(geometry) {
+    return Array.from(geometry.getAttribute('position').array)
 }

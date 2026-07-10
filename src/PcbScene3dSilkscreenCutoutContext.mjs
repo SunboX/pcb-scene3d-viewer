@@ -31,10 +31,15 @@ export class PcbScene3dSilkscreenCutoutContext {
 
     /**
      * Resolves one circular-enabled finite source preparation.
-     * @param {{ x: number, y: number }[]} cutout Normalized cutout points.
-     * @returns {PcbScene3dPreparedPolygon}
+     * @param {unknown} cutout Candidate normalized cutout points.
+     * @returns {PcbScene3dPreparedPolygon | null}
      */
     resolve(cutout) {
+        if (!PcbScene3dSilkscreenCutoutContext.#isNormalizedCutout(cutout)) {
+            this.#preparedPolygonCache.delete(cutout)
+            return null
+        }
+
         let prepared = this.#preparedPolygonCache.get(cutout)
 
         if (
@@ -56,11 +61,11 @@ export class PcbScene3dSilkscreenCutoutContext {
 
     /**
      * Resolves cached sampled-circle metadata for one normalized cutout.
-     * @param {{ x: number, y: number }[]} cutout Normalized cutout points.
+     * @param {unknown} cutout Candidate normalized cutout points.
      * @returns {{ isCircular: true, centerX: number, centerY: number, radius: number } | null}
      */
     resolveCircle(cutout) {
-        return this.resolve(cutout).circle
+        return this.resolve(cutout)?.circle ?? null
     }
 
     /**
@@ -70,10 +75,15 @@ export class PcbScene3dSilkscreenCutoutContext {
      * @returns {boolean}
      */
     isHoleInsideContour(hole, contour) {
+        const prepared = this.resolve(hole)
+        if (!prepared) {
+            return false
+        }
+
         return PcbScene3dBoardEdgeCutoutBuilder.isHoleInsideContour(
             hole,
             contour,
-            this.resolveCircle(hole)
+            prepared.circle
         )
     }
 
@@ -120,6 +130,25 @@ export class PcbScene3dSilkscreenCutoutContext {
         }
 
         return { points, appliedCutouts }
+    }
+
+    /**
+     * Returns true when a source is already a finite normalized polygon.
+     * @param {unknown} cutout Candidate point collection.
+     * @returns {cutout is { x: number, y: number }[]}
+     */
+    static #isNormalizedCutout(cutout) {
+        return (
+            Array.isArray(cutout) &&
+            cutout.length >= 3 &&
+            cutout.every(
+                (point) =>
+                    typeof point?.x === 'number' &&
+                    Number.isFinite(point.x) &&
+                    typeof point?.y === 'number' &&
+                    Number.isFinite(point.y)
+            )
+        )
     }
 
     /**
