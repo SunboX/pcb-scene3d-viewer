@@ -496,27 +496,27 @@ export class PcbScene3dRuntime {
             )
         )
     }
-
     /**
      * Loads silkscreen, copper, and external model detail after the initial
      * shell render and keeps readiness pending until settlement completes.
      * @returns {Promise<void>}
      */
     async #loadDeferredDetail() {
+        const externalModelsPromise = this.#loadExternalModels().then(
+            () => ({ status: 'fulfilled' }),
+            (error) => ({ status: 'rejected', error })
+        )
         try {
             await PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
             if (this.#isDisposed) {
                 return
             }
-
             await this.#loadDeferredSurfaceArtwork()
             this.#render()
-
             await PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
             if (this.#isDisposed) {
                 return
             }
-
             this.#loadDeferredCopper()
             this.#applyToggleVisibility()
             this.#render()
@@ -525,18 +525,18 @@ export class PcbScene3dRuntime {
             if (this.#isDisposed) {
                 return
             }
-
-            await this.#loadExternalModels()
+            const externalModelsResult = await externalModelsPromise
+            if (externalModelsResult.status === 'rejected') {
+                throw externalModelsResult.error
+            }
             if (this.#isDisposed) {
                 return
             }
-
             this.#render()
         } catch (error) {
             if (this.#isDisposed) {
                 return
             }
-
             this.#hooks.setDiagnostics?.([
                 'Deferred 3D detail could not finish loading: ' +
                     String(error?.message || error || 'Unknown error.')
