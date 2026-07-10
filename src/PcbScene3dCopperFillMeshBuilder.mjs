@@ -129,10 +129,7 @@ export class PcbScene3dCopperFillMeshBuilder {
     ) {
         const emittedPolygons = []
         const emittedLoopSets = []
-        const coverageContext =
-            options?.coverageContext?.matchesLoopSets?.(loopSets) === true
-                ? options.coverageContext
-                : PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
+        let coverageContext = null
 
         for (
             let loopSetIndex = 0;
@@ -157,6 +154,16 @@ export class PcbScene3dCopperFillMeshBuilder {
                     )
                 }
             } else {
+                if (!coverageContext) {
+                    coverageContext =
+                        options?.coverageContext?.matchesLoopSets?.(
+                            loopSets
+                        ) === true
+                            ? options.coverageContext
+                            : PcbScene3dCopperFillCoverageContext.fromLoopSets(
+                                  loopSets
+                              )
+                }
                 PcbScene3dCopperFillMeshBuilder.#appendTriangleClippedLoopSet(
                     THREE,
                     positions,

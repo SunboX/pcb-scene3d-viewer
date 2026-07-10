@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { PcbScene3dCopperFillAreaClipper } from '../src/PcbScene3dCopperFillAreaClipper.mjs'
 import { PcbScene3dCopperFillCoverageContext } from '../src/PcbScene3dCopperFillCoverageContext.mjs'
 import { PcbScene3dCopperFillLoopSetResolver } from '../src/PcbScene3dCopperFillLoopSetResolver.mjs'
+import { PcbScene3dCopperFillMeshBuilder } from '../src/PcbScene3dCopperFillMeshBuilder.mjs'
 import { PcbScene3dCopperFillPolygonBoolean } from '../src/PcbScene3dCopperFillPolygonBoolean.mjs'
 import { PcbScene3dCopperFactory } from '../src/PcbScene3dCopperFactory.mjs'
 
@@ -575,6 +576,150 @@ test('PcbScene3dCopperFillAreaClipper skips empty and invalid raw fill contexts'
     assert.strictEqual(invalidResult, invalidMesh)
     assert.strictEqual(invalidResult.geometry, invalidGeometry)
     assert.equal(queryCount, 0)
+})
+
+test('PcbScene3dCopperFactory skips prepared coverage when layer union is disabled', () => {
+    const originalFromLoopSets =
+        PcbScene3dCopperFillCoverageContext.fromLoopSets
+    let contextCreations = 0
+    let group
+
+    try {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = (...args) => {
+            contextCreations += 1
+            return originalFromLoopSets.apply(
+                PcbScene3dCopperFillCoverageContext,
+                args
+            )
+        }
+
+        group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
+            THREE,
+            {
+                tracks: [],
+                arcs: [],
+                fills: [createFill(0, 0, 10, 10)]
+            },
+            5,
+            -5,
+            (x, y) => ({ x, y }),
+            { unionCoveredLayerPrimitives: false }
+        )
+    } finally {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = originalFromLoopSets
+    }
+
+    assert.ok(findObjectByName(group, 'mask-covered-copper-fills'))
+    assert.equal(contextCreations, 0)
+})
+
+test('PcbScene3dCopperFactory skips prepared coverage for fills-only polygon success', () => {
+    const originalFromLoopSets =
+        PcbScene3dCopperFillCoverageContext.fromLoopSets
+    const originalResolveRemainingLoopSets =
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets
+    let contextCreations = 0
+    let group
+
+    try {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = (...args) => {
+            contextCreations += 1
+            return originalFromLoopSets.apply(
+                PcbScene3dCopperFillCoverageContext,
+                args
+            )
+        }
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets = (
+            loopSet
+        ) => [loopSet]
+
+        group = PcbScene3dCopperFactory.buildMaskCoveredGroup(
+            THREE,
+            {
+                tracks: [],
+                arcs: [],
+                fills: [createFill(0, 0, 10, 10)]
+            },
+            5,
+            -5,
+            (x, y) => ({ x, y }),
+            { unionCoveredLayerPrimitives: true }
+        )
+    } finally {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = originalFromLoopSets
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets =
+            originalResolveRemainingLoopSets
+    }
+
+    assert.ok(findObjectByName(group, 'mask-covered-copper-fills'))
+    assert.equal(contextCreations, 0)
+})
+
+test('PcbScene3dCopperFactory prepares one context for non-empty union strokes', () => {
+    const originalFromLoopSets =
+        PcbScene3dCopperFillCoverageContext.fromLoopSets
+    const originalFilterPrepared =
+        PcbScene3dCopperFillAreaClipper.filterPrepared
+    const originalBuild = PcbScene3dCopperFillMeshBuilder.build
+    const contexts = []
+    const filterCalls = []
+    const fillContexts = []
+
+    try {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = (...args) => {
+            const context = originalFromLoopSets.apply(
+                PcbScene3dCopperFillCoverageContext,
+                args
+            )
+            contexts.push(context)
+            return context
+        }
+        PcbScene3dCopperFillAreaClipper.filterPrepared = (
+            _THREE,
+            mesh,
+            context
+        ) => {
+            filterCalls.push({ mesh, context })
+            return mesh
+        }
+        PcbScene3dCopperFillMeshBuilder.build = (...args) => {
+            fillContexts.push(args[8]?.coverageContext ?? null)
+            return originalBuild.apply(PcbScene3dCopperFillMeshBuilder, args)
+        }
+
+        PcbScene3dCopperFactory.buildMaskCoveredGroup(
+            THREE,
+            {
+                tracks: [{ x1: -4, y1: 0, x2: 4, y2: 0, width: 1, layerId: 1 }],
+                arcs: [
+                    {
+                        x: 0,
+                        y: 0,
+                        radius: 3,
+                        width: 1,
+                        startAngle: 0,
+                        endAngle: 90,
+                        layerId: 1
+                    }
+                ],
+                fills: [createFill(-5, -5, 5, 5)]
+            },
+            5,
+            -5,
+            (x, y) => ({ x, y }),
+            { unionCoveredLayerPrimitives: true }
+        )
+    } finally {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = originalFromLoopSets
+        PcbScene3dCopperFillAreaClipper.filterPrepared = originalFilterPrepared
+        PcbScene3dCopperFillMeshBuilder.build = originalBuild
+    }
+
+    assert.equal(contexts.length, 1)
+    assert.equal(filterCalls.length, 2)
+    assert.ok(filterCalls.every(({ mesh }) => mesh))
+    assert.ok(filterCalls.every(({ context }) => context === contexts[0]))
+    assert.deepEqual(fillContexts, [contexts[0], null])
 })
 
 test('PcbScene3dCopperFactory skips empty prepared coverage when union is enabled', () => {

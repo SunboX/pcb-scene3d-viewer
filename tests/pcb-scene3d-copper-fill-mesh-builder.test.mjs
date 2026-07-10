@@ -193,6 +193,143 @@ test('PcbScene3dCopperFillMeshBuilder routes ordered fallback prefixes through o
     )
 })
 
+test('PcbScene3dCopperFillMeshBuilder skips coverage preparation when polygon boolean succeeds', () => {
+    const fills = [createFill(0, 0, 2, 2), createFill(1, 0, 3, 2)]
+    const loopSets = PcbScene3dCopperFillLoopSetResolver.resolve(
+        fills,
+        (x, y) => ({ x, y }),
+        false
+    )
+    const originalFromLoopSets =
+        PcbScene3dCopperFillCoverageContext.fromLoopSets
+    const originalResolveRemainingLoopSets =
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets
+    let contextCreations = 0
+    let mesh
+
+    try {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = (...args) => {
+            contextCreations += 1
+            return originalFromLoopSets.apply(
+                PcbScene3dCopperFillCoverageContext,
+                args
+            )
+        }
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets = (
+            loopSet
+        ) => [loopSet]
+
+        mesh = PcbScene3dCopperFillMeshBuilder.build(
+            THREE,
+            fills,
+            0,
+            0.2,
+            (x, y) => ({ x, y }),
+            false,
+            new THREE.MeshBasicMaterial(),
+            [],
+            {
+                surfaceOnly: true,
+                clipContainedFillOverlaps: true,
+                loopSets
+            }
+        )
+    } finally {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = originalFromLoopSets
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets =
+            originalResolveRemainingLoopSets
+    }
+
+    assert.ok(mesh)
+    assert.equal(contextCreations, 0)
+})
+
+test('PcbScene3dCopperFillMeshBuilder prepares once at the first of multiple fallbacks', () => {
+    const fills = [
+        createFill(0, 0, 2, 2),
+        createFill(1, 0, 3, 2),
+        createFill(2, 0, 4, 2)
+    ]
+    const loopSets = PcbScene3dCopperFillLoopSetResolver.resolve(
+        fills,
+        (x, y) => ({ x, y }),
+        false
+    )
+    const events = []
+    const createdContexts = []
+    const filteredContexts = []
+    const originalFromLoopSets =
+        PcbScene3dCopperFillCoverageContext.fromLoopSets
+    const originalFilterPrepared =
+        PcbScene3dCopperFillAreaClipper.filterPrepared
+    const originalResolveRemainingLoopSets =
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets
+    let sourceIndex = 0
+
+    try {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = (...args) => {
+            events.push('context')
+            const context = originalFromLoopSets.apply(
+                PcbScene3dCopperFillCoverageContext,
+                args
+            )
+            createdContexts.push(context)
+            return context
+        }
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets = (
+            loopSet
+        ) => {
+            const currentIndex = sourceIndex
+            sourceIndex += 1
+            events.push(`polygon:${currentIndex}`)
+            return currentIndex === 0 ? [loopSet] : null
+        }
+        PcbScene3dCopperFillAreaClipper.filterPrepared = (
+            three,
+            mesh,
+            context,
+            options
+        ) => {
+            filteredContexts.push(context)
+            return originalFilterPrepared.call(
+                PcbScene3dCopperFillAreaClipper,
+                three,
+                mesh,
+                context,
+                options
+            )
+        }
+
+        PcbScene3dCopperFillMeshBuilder.build(
+            THREE,
+            fills,
+            0,
+            0.2,
+            (x, y) => ({ x, y }),
+            false,
+            new THREE.MeshBasicMaterial(),
+            [],
+            {
+                surfaceOnly: true,
+                clipContainedFillOverlaps: true,
+                loopSets
+            }
+        )
+    } finally {
+        PcbScene3dCopperFillCoverageContext.fromLoopSets = originalFromLoopSets
+        PcbScene3dCopperFillAreaClipper.filterPrepared = originalFilterPrepared
+        PcbScene3dCopperFillPolygonBoolean.resolveRemainingLoopSets =
+            originalResolveRemainingLoopSets
+    }
+
+    assert.deepEqual(events, ['polygon:0', 'polygon:1', 'context', 'polygon:2'])
+    assert.equal(createdContexts.length, 1)
+    assert.equal(filteredContexts.length, 2)
+    assert.ok(
+        filteredContexts.every((context) => context === createdContexts[0])
+    )
+})
+
 test('PcbScene3dCopperFillMeshBuilder retains flattened indexes after an empty emitted prefix', () => {
     const fills = [
         createFill(0, 0, 2, 2),

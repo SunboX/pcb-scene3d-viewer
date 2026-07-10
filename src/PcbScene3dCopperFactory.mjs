@@ -292,8 +292,9 @@ export class PcbScene3dCopperFactory {
             normalizeBoardPoint,
             mirrorY
         )
-        const coverageContext =
-            PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
+        const shouldUnionCoveredLayerPrimitives =
+            PcbScene3dCopperFactory.#shouldUnionCoveredLayerPrimitives(options)
+        let coverageContext = null
         let trackMesh = PcbScene3dCopperFactory.#buildTrackMesh(
             THREE,
             detail?.tracks || [],
@@ -313,20 +314,28 @@ export class PcbScene3dCopperFactory {
             occlusionCutouts
         )
         if (
-            PcbScene3dCopperFactory.#shouldUnionCoveredLayerPrimitives(options)
+            shouldUnionCoveredLayerPrimitives &&
+            loopSets.length &&
+            (trackMesh || arcMesh)
         ) {
-            trackMesh = PcbScene3dCopperFillAreaClipper.filterPrepared(
-                THREE,
-                trackMesh,
-                coverageContext,
-                { subdividePartialTriangles: false }
-            )
-            arcMesh = PcbScene3dCopperFillAreaClipper.filterPrepared(
-                THREE,
-                arcMesh,
-                coverageContext,
-                { subdividePartialTriangles: false }
-            )
+            coverageContext =
+                PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
+            if (trackMesh) {
+                trackMesh = PcbScene3dCopperFillAreaClipper.filterPrepared(
+                    THREE,
+                    trackMesh,
+                    coverageContext,
+                    { subdividePartialTriangles: false }
+                )
+            }
+            if (arcMesh) {
+                arcMesh = PcbScene3dCopperFillAreaClipper.filterPrepared(
+                    THREE,
+                    arcMesh,
+                    coverageContext,
+                    { subdividePartialTriangles: false }
+                )
+            }
         }
         const fillMesh = PcbScene3dCopperFillMeshBuilder.build(
             THREE,
@@ -339,10 +348,7 @@ export class PcbScene3dCopperFactory {
             occlusionCutouts,
             {
                 surfaceOnly: true,
-                clipContainedFillOverlaps:
-                    PcbScene3dCopperFactory.#shouldUnionCoveredLayerPrimitives(
-                        options
-                    ),
+                clipContainedFillOverlaps: shouldUnionCoveredLayerPrimitives,
                 loopSets,
                 coverageContext
             }
