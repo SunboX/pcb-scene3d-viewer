@@ -128,7 +128,7 @@ export class PcbScene3dCutoutGeometryFilter {
                     ? preparedPolygonCache.get(cutout)
                     : null
 
-                if (!prepared) {
+                if (prepared?.circleDetectionEnabled !== true) {
                     const points = cutout.map((point) => ({
                         x: Number(point?.x || 0),
                         y: Number(point?.y || 0)

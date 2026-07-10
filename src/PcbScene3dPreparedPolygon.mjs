@@ -52,6 +52,9 @@ export class PcbScene3dPreparedPolygon {
     /** @type {{ isCircular: true, centerX: number, centerY: number, radius: number } | null} */
     #circle
 
+    /** @type {boolean} */
+    #circleDetectionEnabled
+
     /** @type {PcbScene3dAabbIndex} */
     #segmentIndex
 
@@ -90,13 +93,13 @@ export class PcbScene3dPreparedPolygon {
         this.#vertexIndex = new PcbScene3dAabbIndex(this.#points, {
             resolveBounds: PcbScene3dPreparedPolygon.#resolvePointBounds
         })
-        this.#circle =
-            options.detectCircle === true
-                ? PcbScene3dCutoutCircleDetector.resolve(
-                      this.#points,
-                      this.#epsilon
-                  )
-                : null
+        this.#circleDetectionEnabled = options.detectCircle === true
+        this.#circle = this.#circleDetectionEnabled
+            ? PcbScene3dCutoutCircleDetector.resolve(
+                  this.#points,
+                  this.#epsilon
+              )
+            : null
     }
 
     /**
@@ -161,6 +164,14 @@ export class PcbScene3dPreparedPolygon {
      */
     get area() {
         return Math.abs(this.#signedArea)
+    }
+
+    /**
+     * Returns whether sampled-circle detection was performed during preparation.
+     * @returns {boolean}
+     */
+    get circleDetectionEnabled() {
+        return this.#circleDetectionEnabled
     }
 
     /**

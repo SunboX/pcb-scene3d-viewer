@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as THREE from 'three'
 import { PcbScene3dCutoutGeometryFilter } from '../src/PcbScene3dCutoutGeometryFilter.mjs'
+import { PcbScene3dDrillCutoutFilter } from '../src/PcbScene3dDrillCutoutFilter.mjs'
 
 /**
  * Builds one geometry from packed XYZ positions and optional triangle indexes.
@@ -172,6 +173,37 @@ test('matches the captured circular terminal-overlap buffer exactly', () => {
         positionArray(result),
         [1.5, 0, 1, 3, 0, 2, 3, 1, 3, 4, 4, 7, 5, 4, 8, 4, 5, 9]
     )
+})
+
+test('preserves circular output after drill filtering primes a shared prepared cache', () => {
+    const cutout = buildCircle(16, 2)
+    const positions = [
+        1.5, 0, 1, 3, 0, 2, 3, 1, 3, -3, 0, 4, 3, 0, 5, 3, 0.5, 6, 4, 4, 7, 5,
+        4, 8, 4, 5, 9
+    ]
+    const options = { maxDepth: 0, discardTerminalOverlaps: false }
+    const freshCache = new Map()
+    const freshResult = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        buildGeometry(positions),
+        [cutout],
+        { ...options, preparedPolygonCache: freshCache }
+    )
+    const sharedCache = new Map()
+    PcbScene3dDrillCutoutFilter.removeNestedCutouts([cutout], {
+        preparedPolygonCache: sharedCache
+    })
+    const drillPrepared = sharedCache.get(cutout)
+
+    const primedResult = PcbScene3dCutoutGeometryFilter.filter(
+        THREE,
+        buildGeometry(positions),
+        [cutout],
+        { ...options, preparedPolygonCache: sharedCache }
+    )
+
+    assert.deepEqual(positionArray(primedResult), positionArray(freshResult))
+    assert.notStrictEqual(sharedCache.get(cutout), drillPrepared)
 })
 
 test('matches captured concave and collinear polygon buffers exactly', () => {

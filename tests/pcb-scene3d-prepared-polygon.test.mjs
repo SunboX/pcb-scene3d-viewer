@@ -465,6 +465,28 @@ test('resolves sampled-circle metadata once per construction', () => {
     }
 })
 
+test('reports whether circle detection was performed for non-circular polygons', () => {
+    const points = [
+        { x: 0, y: 0 },
+        { x: 4, y: 0 },
+        { x: 3, y: 2 },
+        { x: 0, y: 3 }
+    ]
+    const enabled = new PcbScene3dPreparedPolygon(points, {
+        detectCircle: true
+    })
+    const disabled = new PcbScene3dPreparedPolygon(points, {
+        detectCircle: false
+    })
+    const defaulted = new PcbScene3dPreparedPolygon(points)
+
+    assert.equal(enabled.circle, null)
+    assert.equal(disabled.circle, null)
+    assert.equal(enabled.circleDetectionEnabled, true)
+    assert.equal(disabled.circleDetectionEnabled, false)
+    assert.equal(defaulted.circleDetectionEnabled, false)
+})
+
 test('returns complete segment and vertex broad-phase candidates into targets', () => {
     const points = [
         { x: -5, y: -3 },
