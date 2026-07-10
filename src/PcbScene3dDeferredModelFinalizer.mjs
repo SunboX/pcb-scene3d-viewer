@@ -7,8 +7,8 @@ export class PcbScene3dDeferredModelFinalizer {
     #reportError
 
     /**
-     * @param {Promise<void>} modelPromise
-     * @param {{ isDisposed: () => boolean, onSuccess: () => void, onError: (error: any) => void }} hooks
+     * @param {Promise<any>} modelPromise
+     * @param {{ isDisposed: () => boolean, onSuccess: (value: any) => void, onError: (error: any) => void }} hooks
      */
     constructor(modelPromise, hooks) {
         let releaseGate = () => {}
@@ -19,7 +19,7 @@ export class PcbScene3dDeferredModelFinalizer {
         this.#reportError = true
         this.#completion = Promise.all([
             modelPromise.then(
-                () => ({ status: 'fulfilled' }),
+                (value) => ({ status: 'fulfilled', value }),
                 (error) => ({ status: 'rejected', error })
             ),
             integrationGate
@@ -33,7 +33,7 @@ export class PcbScene3dDeferredModelFinalizer {
                 }
                 return
             }
-            hooks.onSuccess()
+            hooks.onSuccess(result.value)
         })
     }
 

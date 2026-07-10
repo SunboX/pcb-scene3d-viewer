@@ -500,6 +500,7 @@ export class PcbScene3dRuntime {
      */
     async #loadDeferredDetail() {
         let externalModels = null
+        let hasDeferredStageFailure = false
         try {
             await PcbScene3dRuntimeHelpers.yieldToNextFrame(globalThis)
             if (this.#isDisposed) {
@@ -509,7 +510,10 @@ export class PcbScene3dRuntime {
                 this.#loadExternalModels(),
                 {
                     isDisposed: () => this.#isDisposed,
-                    onSuccess: () => {
+                    onSuccess: (diagnostics) => {
+                        if (!hasDeferredStageFailure && diagnostics.length) {
+                            this.#hooks.setDiagnostics?.(diagnostics)
+                        }
                         this.#applyViewScale(this.#presetState.get())
                         this.#render()
                     },
@@ -543,6 +547,7 @@ export class PcbScene3dRuntime {
             if (this.#isDisposed) {
                 return
             }
+            hasDeferredStageFailure = true
             externalModels?.release({ reportError: false }).catch(() => {})
             this.#hooks.setDiagnostics?.([
                 'Deferred 3D detail could not finish loading: ' +
@@ -611,12 +616,12 @@ export class PcbScene3dRuntime {
     }
     /**
      * Attempts to load any resolved external 3D models.
-     * @returns {Promise<void>}
+     * @returns {Promise<string[]>}
      */
     async #loadExternalModels() {
         const externalModelsGroup = this.#groups.get('external-models')
         if (!externalModelsGroup) {
-            return
+            return []
         }
 
         const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
@@ -667,9 +672,7 @@ export class PcbScene3dRuntime {
                 this.#applyToggleVisibility()
             }
         })
-        if (diagnostics.length && !this.#isDisposed) {
-            this.#hooks.setDiagnostics?.(diagnostics)
-        }
+        return diagnostics
     }
     /**
      * Creates and configures orbit/pan/zoom controls using Three's standard
@@ -727,7 +730,6 @@ export class PcbScene3dRuntime {
             if (Number(event?.button) !== 0) {
                 return
             }
-
             this.#pointerDownPosition = {
                 x: Number(event?.clientX || 0),
                 y: Number(event?.clientY || 0)
@@ -737,7 +739,6 @@ export class PcbScene3dRuntime {
             if (Number(event?.button) !== 0) {
                 return
             }
-
             if (
                 !this.#pointerDownPosition ||
                 PcbScene3dRuntimeHelpers.pointerTravel(
@@ -751,7 +752,6 @@ export class PcbScene3dRuntime {
                 this.#pointerDownPosition = null
                 return
             }
-
             this.#pointerDownPosition = null
             this.#handleSelectionPointer(event)
         })

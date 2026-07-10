@@ -252,10 +252,59 @@ test('PcbScene3dRuntime reports immediate model rejection without an unhandled r
     }
 })
 
-test('PcbScene3dRuntime finalizes delayed models after a surface-stage failure', async () => {
+test('PcbScene3dRuntime publishes successful model diagnostics at the integration point', async () => {
+    const surfaceRelease = createDeferred()
+    const diagnostics = []
+    const events = []
+    const modelDiagnostic = 'placement model diagnostic'
+    const harness = createRuntimeHarness({
+        loadSurface: async () => {
+            events.push('surface-start')
+            await surfaceRelease.promise
+            events.push('surface-complete')
+            return false
+        },
+        loadModels: async () => {
+            events.push('model-complete')
+            return [modelDiagnostic]
+        },
+        onDiagnostics: (messages) => {
+            diagnostics.push(messages)
+        }
+    })
+
+    try {
+        await waitForCondition(
+            () =>
+                events.includes('surface-start') &&
+                events.includes('model-complete'),
+            'surface start and model completion'
+        )
+        assert.equal(
+            diagnostics.some((messages) => messages.includes(modelDiagnostic)),
+            false
+        )
+
+        surfaceRelease.resolve()
+        await waitForCondition(
+            () =>
+                diagnostics.some((messages) =>
+                    messages.includes(modelDiagnostic)
+                ),
+            'model diagnostic integration'
+        )
+    } finally {
+        surfaceRelease.resolve()
+        harness.restore()
+    }
+})
+
+test('PcbScene3dRuntime finalizes delayed models without replacing a surface-stage diagnostic', async () => {
     const modelRelease = createDeferred()
     const diagnostics = []
     const events = []
+    const stageDiagnostic =
+        'Deferred 3D detail could not finish loading: surface failed'
     let loadedModel = null
     const harness = createRuntimeHarness({
         loadSurface: async () => {
@@ -267,7 +316,7 @@ test('PcbScene3dRuntime finalizes delayed models after a surface-stage failure',
             loadedModel = {}
             options.externalModelsGroup.add(loadedModel)
             events.push('model-attached')
-            return []
+            return ['late model diagnostic']
         },
         applyViewCompensation: (group, scale) => {
             for (const child of group?.children || []) {
@@ -283,9 +332,7 @@ test('PcbScene3dRuntime finalizes delayed models after a surface-stage failure',
         await waitForCondition(
             () =>
                 diagnostics.some((messages) =>
-                    messages.includes(
-                        'Deferred 3D detail could not finish loading: surface failed'
-                    )
+                    messages.includes(stageDiagnostic)
                 ),
             'surface-stage diagnostic'
         )
@@ -307,6 +354,7 @@ test('PcbScene3dRuntime finalizes delayed models after a surface-stage failure',
             z: 1
         })
         assert.equal(renderer?.renderCount, renderCount + 1)
+        assert.equal(diagnostics.at(-1)?.includes(stageDiagnostic), true)
     } finally {
         modelRelease.resolve()
         harness.restore()
