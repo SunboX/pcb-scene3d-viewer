@@ -9,6 +9,8 @@ import { PcbScene3dCopperFillMeshBuilder } from './PcbScene3dCopperFillMeshBuild
 import { PcbScene3dMaskCoveredCopperSideGroupBuilder } from './PcbScene3dMaskCoveredCopperSideGroupBuilder.mjs'
 import { PcbScene3dCopperDrillCutoutBuilder } from './PcbScene3dCopperDrillCutoutBuilder.mjs'
 import { PcbScene3dCopperFillAreaClipper } from './PcbScene3dCopperFillAreaClipper.mjs'
+import { PcbScene3dCopperFillCoverageContext } from './PcbScene3dCopperFillCoverageContext.mjs'
+import { PcbScene3dCopperFillLoopSetResolver } from './PcbScene3dCopperFillLoopSetResolver.mjs'
 
 /**
  * Builds copper-detail meshes for the interactive 3D PCB scene.
@@ -284,6 +286,14 @@ export class PcbScene3dCopperFactory {
         occlusionCutouts,
         options = {}
     ) {
+        const fills = detail?.fills || []
+        const loopSets = PcbScene3dCopperFillLoopSetResolver.resolve(
+            fills,
+            normalizeBoardPoint,
+            mirrorY
+        )
+        const coverageContext =
+            PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
         let trackMesh = PcbScene3dCopperFactory.#buildTrackMesh(
             THREE,
             detail?.tracks || [],
@@ -305,26 +315,22 @@ export class PcbScene3dCopperFactory {
         if (
             PcbScene3dCopperFactory.#shouldUnionCoveredLayerPrimitives(options)
         ) {
-            trackMesh = PcbScene3dCopperFillAreaClipper.filter(
+            trackMesh = PcbScene3dCopperFillAreaClipper.filterPrepared(
                 THREE,
                 trackMesh,
-                detail?.fills || [],
-                normalizeBoardPoint,
-                mirrorY,
+                coverageContext,
                 { subdividePartialTriangles: false }
             )
-            arcMesh = PcbScene3dCopperFillAreaClipper.filter(
+            arcMesh = PcbScene3dCopperFillAreaClipper.filterPrepared(
                 THREE,
                 arcMesh,
-                detail?.fills || [],
-                normalizeBoardPoint,
-                mirrorY,
+                coverageContext,
                 { subdividePartialTriangles: false }
             )
         }
         const fillMesh = PcbScene3dCopperFillMeshBuilder.build(
             THREE,
-            detail?.fills || [],
+            fills,
             z,
             PcbScene3dCopperPrismBuilder.thicknessMil(),
             normalizeBoardPoint,
@@ -336,7 +342,9 @@ export class PcbScene3dCopperFactory {
                 clipContainedFillOverlaps:
                     PcbScene3dCopperFactory.#shouldUnionCoveredLayerPrimitives(
                         options
-                    )
+                    ),
+                loopSets,
+                coverageContext
             }
         )
         return PcbScene3dMaskCoveredCopperSideGroupBuilder.build(THREE, {

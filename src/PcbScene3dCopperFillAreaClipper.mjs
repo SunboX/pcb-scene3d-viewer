@@ -1,10 +1,11 @@
-import { PcbAssemblyFillGeometryResolver } from './PcbAssemblyFillGeometryResolver.mjs'
+import { PcbScene3dCopperFillCoverageContext } from './PcbScene3dCopperFillCoverageContext.mjs'
+import { PcbScene3dCopperFillLoopSetResolver } from './PcbScene3dCopperFillLoopSetResolver.mjs'
+import { PcbScene3dTriangleVertexQueryBounds } from './PcbScene3dTriangleVertexQueryBounds.mjs'
 
 /**
  * Clips redundant copper relief where track geometry is already inside a fill.
  */
 export class PcbScene3dCopperFillAreaClipper {
-    static #AREA_EPSILON = 0.001
     static #GEOMETRY_EPSILON = 0.001
     static #MAX_DEPTH = 10
     static #MAX_EDGE_LENGTH = 2
@@ -27,17 +28,41 @@ export class PcbScene3dCopperFillAreaClipper {
         mirrorY,
         options = {}
     ) {
-        const areas = PcbScene3dCopperFillAreaClipper.#prepareAreas(
+        const loopSets = PcbScene3dCopperFillLoopSetResolver.resolve(
             fills,
             normalizeBoardPoint,
             mirrorY
         )
+        const coverageContext =
+            PcbScene3dCopperFillCoverageContext.fromLoopSets(loopSets)
+
+        return PcbScene3dCopperFillAreaClipper.filterPrepared(
+            THREE,
+            mesh,
+            coverageContext,
+            options
+        )
+    }
+
+    /**
+     * Removes triangles covered by a prepared fill-coverage context.
+     * @param {any} THREE Three.js namespace.
+     * @param {any | null} mesh Mesh to clip.
+     * @param {{ queryAreas: (bounds: object, target: object[], options?: object) => object[] }} coverageContext Prepared side-local fill coverage.
+     * @param {{ subdividePartialTriangles?: boolean, beforeSourceIndex?: number, allowedSourceIndexes?: Set<number> | number[] | null }} [options] Clipping and source-order options.
+     * @returns {any | null}
+     */
+    static filterPrepared(THREE, mesh, coverageContext, options = {}) {
         const sourceGeometry = mesh?.geometry?.index
             ? mesh.geometry.toNonIndexed?.() || mesh.geometry
             : mesh?.geometry
         const position = sourceGeometry?.getAttribute?.('position')
 
-        if (!mesh || !position?.count || !areas.length) {
+        if (
+            !mesh ||
+            !position?.count ||
+            typeof coverageContext?.queryAreas !== 'function'
+        ) {
             return mesh
         }
 
@@ -50,7 +75,7 @@ export class PcbScene3dCopperFillAreaClipper {
                     position,
                     index
                 ),
-                areas,
+                coverageContext,
                 0,
                 state,
                 options
@@ -76,112 +101,28 @@ export class PcbScene3dCopperFillAreaClipper {
     }
 
     /**
-     * Resolves normalized fill areas with internal holes.
-     * @param {object[]} fills Copper fill primitives.
-     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
-     * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
-     * @returns {{ outer: { x: number, y: number }[], holes: { points: { x: number, y: number }[], bounds: object, segments: object[] }[], bounds: object, segments: object[] }[]}
-     */
-    static #prepareAreas(fills, normalizeBoardPoint, mirrorY) {
-        return (fills || []).flatMap((fill) =>
-            PcbAssemblyFillGeometryResolver.resolveAll(fill)
-                .map((loops) =>
-                    PcbScene3dCopperFillAreaClipper.#prepareLoopSet(
-                        loops,
-                        normalizeBoardPoint,
-                        mirrorY
-                    )
-                )
-                .filter(Boolean)
-        )
-    }
-
-    /**
-     * Resolves one normalized fill loop set.
-     * @param {{ outer?: any[], holes?: any[][] }} loops Fill loop set.
-     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
-     * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
-     * @returns {object | null}
-     */
-    static #prepareLoopSet(loops, normalizeBoardPoint, mirrorY) {
-        const outer = PcbScene3dCopperFillAreaClipper.#normalizeLoop(
-            loops?.outer,
-            normalizeBoardPoint,
-            mirrorY
-        )
-
-        if (!PcbScene3dCopperFillAreaClipper.#isValidLoop(outer)) {
-            return null
-        }
-
-        const holes = (loops?.holes || [])
-            .map((hole) =>
-                PcbScene3dCopperFillAreaClipper.#normalizeLoop(
-                    hole,
-                    normalizeBoardPoint,
-                    mirrorY
-                )
-            )
-            .filter((hole) =>
-                PcbScene3dCopperFillAreaClipper.#isValidLoop(hole)
-            )
-            .map((hole) => ({
-                points: hole,
-                bounds: PcbScene3dCopperFillAreaClipper.#resolveBounds(hole),
-                segments: PcbScene3dCopperFillAreaClipper.#segments(hole)
-            }))
-
-        return {
-            outer,
-            holes,
-            bounds: PcbScene3dCopperFillAreaClipper.#resolveBounds(outer),
-            segments: PcbScene3dCopperFillAreaClipper.#segments(outer)
-        }
-    }
-
-    /**
-     * Normalizes one fill loop.
-     * @param {any[]} loop Source loop points.
-     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
-     * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
-     * @returns {{ x: number, y: number }[]}
-     */
-    static #normalizeLoop(loop, normalizeBoardPoint, mirrorY) {
-        const points = []
-        for (const point of loop || []) {
-            const normalized = normalizeBoardPoint(
-                Number(point?.x ?? point?.[0]),
-                Number(point?.y ?? point?.[1])
-            )
-            const nextPoint = {
-                x: Number(normalized?.x),
-                y: mirrorY ? -Number(normalized?.y) : Number(normalized?.y)
-            }
-            if (Number.isFinite(nextPoint.x) && Number.isFinite(nextPoint.y)) {
-                points.push(nextPoint)
-            }
-        }
-        return PcbScene3dCopperFillAreaClipper.#cleanLoop(points)
-    }
-
-    /**
      * Appends one triangle after removing filled-area overlap.
      * @param {number[]} positions Output position buffer.
      * @param {{ x: number, y: number, z: number }[]} triangle Source triangle.
-     * @param {object[]} areas Filled copper areas.
+     * @param {{ queryAreas: (bounds: object, target: object[], options?: object) => object[] }} coverageContext Prepared fill coverage.
      * @param {number} depth Subdivision depth.
      * @param {{ changed: boolean }} state Mutation state.
-     * @param {{ subdividePartialTriangles?: boolean }} options Clipping options.
+     * @param {{ subdividePartialTriangles?: boolean, beforeSourceIndex?: number, allowedSourceIndexes?: Set<number> | number[] | null }} options Clipping options.
      * @returns {void}
      */
     static #appendFilteredTriangle(
         positions,
         triangle,
-        areas,
+        coverageContext,
         depth,
         state,
         options
     ) {
+        const areas = coverageContext.queryAreas(
+            PcbScene3dCopperFillAreaClipper.#resolveBounds(triangle),
+            [],
+            options
+        )
         const coverage =
             PcbScene3dCopperFillAreaClipper.#resolveTriangleCoverage(
                 triangle,
@@ -233,7 +174,7 @@ export class PcbScene3dCopperFillAreaClipper {
             PcbScene3dCopperFillAreaClipper.#appendFilteredTriangle(
                 positions,
                 child,
-                areas,
+                coverageContext,
                 depth + 1,
                 state,
                 options
@@ -258,12 +199,19 @@ export class PcbScene3dCopperFillAreaClipper {
      */
     static #resolveTriangleCoverage(triangle, areas) {
         const samples = [
-            ...triangle,
+            triangle[0],
+            triangle[1],
+            triangle[2],
             PcbScene3dCopperFillAreaClipper.#centroid(triangle)
         ]
-        const coveredSamples = samples.filter((point) =>
-            PcbScene3dCopperFillAreaClipper.#isPointInAnyArea(point, areas)
-        ).length
+        let coveredSamples = 0
+        for (const point of samples) {
+            if (
+                PcbScene3dCopperFillAreaClipper.#isPointInAnyArea(point, areas)
+            ) {
+                coveredSamples += 1
+            }
+        }
         const crosses =
             PcbScene3dCopperFillAreaClipper.#triangleCrossesAnyBoundary(
                 triangle,
@@ -288,15 +236,19 @@ export class PcbScene3dCopperFillAreaClipper {
      * @returns {boolean}
      */
     static #isPointInAnyArea(point, areas) {
-        return areas.some((area) =>
-            PcbScene3dCopperFillAreaClipper.#isPointInArea(point, area)
-        )
+        for (const area of areas) {
+            if (PcbScene3dCopperFillAreaClipper.#isPointInArea(point, area)) {
+                return true
+            }
+        }
+
+        return false
     }
 
     /**
      * Returns true when one point is inside a fill outer and outside holes.
      * @param {{ x: number, y: number }} point Candidate point.
-     * @param {{ outer: { x: number, y: number }[], holes: object[], bounds: object }} area Filled copper area.
+     * @param {{ outer: object, holes: object[], bounds: object }} area Filled copper area.
      * @returns {boolean}
      */
     static #isPointInArea(point, area) {
@@ -305,7 +257,10 @@ export class PcbScene3dCopperFillAreaClipper {
                 area.bounds,
                 point
             ) ||
-            !PcbScene3dCopperFillAreaClipper.#pointInPolygon(point, area.outer)
+            !PcbScene3dCopperFillAreaClipper.#pointInPreparedPolygon(
+                point,
+                area.outer
+            )
         ) {
             return false
         }
@@ -316,9 +271,9 @@ export class PcbScene3dCopperFillAreaClipper {
                     hole.bounds,
                     point
                 ) &&
-                PcbScene3dCopperFillAreaClipper.#pointInPolygon(
+                PcbScene3dCopperFillAreaClipper.#pointInPreparedPolygon(
                     point,
-                    hole.points
+                    hole
                 )
         )
     }
@@ -341,7 +296,8 @@ export class PcbScene3dCopperFillAreaClipper {
                 ) &&
                 PcbScene3dCopperFillAreaClipper.#triangleCrossesAreaBoundary(
                     triangle,
-                    area
+                    area,
+                    triangleBounds
                 )
         )
     }
@@ -349,15 +305,16 @@ export class PcbScene3dCopperFillAreaClipper {
     /**
      * Returns true when a triangle crosses one filled area's boundaries.
      * @param {{ x: number, y: number }[]} triangle Triangle points.
-     * @param {{ outer: { x: number, y: number }[], holes: object[], segments: object[] }} area Filled copper area.
+     * @param {{ outer: object, holes: object[] }} area Filled copper area.
+     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} triangleBounds Triangle bounds.
      * @returns {boolean}
      */
-    static #triangleCrossesAreaBoundary(triangle, area) {
-        return [area, ...area.holes].some((loop) =>
+    static #triangleCrossesAreaBoundary(triangle, area, triangleBounds) {
+        return [area.outer, ...area.holes].some((loop) =>
             PcbScene3dCopperFillAreaClipper.#triangleCrossesLoopBoundary(
                 triangle,
-                loop.points || loop.outer,
-                loop.segments
+                loop,
+                triangleBounds
             )
         )
     }
@@ -365,11 +322,11 @@ export class PcbScene3dCopperFillAreaClipper {
     /**
      * Returns true when triangle edges cross one loop.
      * @param {{ x: number, y: number }[]} triangle Triangle points.
-     * @param {{ x: number, y: number }[]} loop Loop points.
-     * @param {{ start: object, end: object, bounds: object }[]} segments Loop segments.
+     * @param {{ points: { x: number, y: number }[], bounds: object, querySegments: (bounds: object, target: object[]) => object[], queryVertices: (bounds: object, target: object[]) => object[] }} loop Prepared loop.
+     * @param {{ minX: number, maxX: number, minY: number, maxY: number }} triangleBounds Triangle bounds.
      * @returns {boolean}
      */
-    static #triangleCrossesLoopBoundary(triangle, loop, segments) {
+    static #triangleCrossesLoopBoundary(triangle, loop, triangleBounds) {
         for (let index = 0; index < triangle.length; index += 1) {
             const start = triangle[index]
             const end = triangle[(index + 1) % triangle.length]
@@ -378,25 +335,37 @@ export class PcbScene3dCopperFillAreaClipper {
                 end
             ])
             if (
-                segments.some(
-                    (segment) =>
-                        PcbScene3dCopperFillAreaClipper.#boundsOverlap(
-                            edgeBounds,
-                            segment.bounds
-                        ) &&
-                        PcbScene3dCopperFillAreaClipper.#segmentsIntersect(
-                            start,
-                            end,
-                            segment.start,
-                            segment.end
-                        )
-                )
+                loop
+                    .querySegments(edgeBounds, [])
+                    .some(
+                        (segment) =>
+                            PcbScene3dCopperFillAreaClipper.#boundsOverlap(
+                                edgeBounds,
+                                segment.bounds
+                            ) &&
+                            PcbScene3dCopperFillAreaClipper.#segmentsIntersect(
+                                start,
+                                end,
+                                segment.start,
+                                segment.end
+                            )
+                    )
             ) {
                 return true
             }
         }
 
-        return loop.some((point) =>
+        const queryBounds = PcbScene3dTriangleVertexQueryBounds.resolve(
+            triangle,
+            triangleBounds,
+            loop.bounds,
+            PcbScene3dCopperFillAreaClipper.#GEOMETRY_EPSILON
+        )
+        const vertices = queryBounds
+            ? loop.queryVertices(queryBounds, [])
+            : loop.points
+
+        return vertices.some((point) =>
             PcbScene3dCopperFillAreaClipper.#isPointInsideTriangle(
                 point,
                 triangle
@@ -416,25 +385,6 @@ export class PcbScene3dCopperFillAreaClipper {
             y: Number(position.getY(startIndex + offset)),
             z: Number(position.getZ(startIndex + offset))
         }))
-    }
-
-    /**
-     * Builds loop segments with cached bounds.
-     * @param {{ x: number, y: number }[]} points Loop points.
-     * @returns {{ start: object, end: object, bounds: object }[]}
-     */
-    static #segments(points) {
-        return points.map((start, index) => {
-            const end = points[(index + 1) % points.length]
-            return {
-                start,
-                end,
-                bounds: PcbScene3dCopperFillAreaClipper.#resolveBounds([
-                    start,
-                    end
-                ])
-            }
-        })
     }
 
     /**
@@ -518,20 +468,26 @@ export class PcbScene3dCopperFillAreaClipper {
     }
 
     /**
-     * Returns true when one point is inside a polygon.
+     * Replays the legacy horizontal-ray expression on prepared edge candidates.
      * @param {{ x: number, y: number }} point Candidate point.
-     * @param {{ x: number, y: number }[]} polygon Polygon points.
+     * @param {{ bounds: object, querySegments: (bounds: object, target: object[]) => object[] }} polygon Prepared polygon.
      * @returns {boolean}
      */
-    static #pointInPolygon(point, polygon) {
+    static #pointInPreparedPolygon(point, polygon) {
+        const segments = polygon.querySegments(
+            {
+                minX: point.x,
+                maxX: polygon.bounds.maxX,
+                minY: point.y,
+                maxY: point.y
+            },
+            []
+        )
         let inside = false
-        for (
-            let index = 0, previousIndex = polygon.length - 1;
-            index < polygon.length;
-            previousIndex = index, index += 1
-        ) {
-            const current = polygon[index]
-            const previous = polygon[previousIndex]
+
+        for (const segment of segments) {
+            const current = segment.end
+            const previous = segment.start
             const intersects =
                 current.y > point.y !== previous.y > point.y &&
                 point.x <
@@ -552,19 +508,22 @@ export class PcbScene3dCopperFillAreaClipper {
      * @returns {boolean}
      */
     static #isPointInsideTriangle(point, triangle) {
-        const signs = triangle.map((current, index) => {
+        let hasNegative = false
+        let hasPositive = false
+
+        for (let index = 0; index < triangle.length; index += 1) {
+            const current = triangle[index]
             const next = triangle[(index + 1) % triangle.length]
-            return (
+            const sign =
                 (point.x - next.x) * (current.y - next.y) -
                 (current.x - next.x) * (point.y - next.y)
-            )
-        })
-        const hasNegative = signs.some(
-            (sign) => sign < -PcbScene3dCopperFillAreaClipper.#GEOMETRY_EPSILON
-        )
-        const hasPositive = signs.some(
-            (sign) => sign > PcbScene3dCopperFillAreaClipper.#GEOMETRY_EPSILON
-        )
+
+            hasNegative ||=
+                sign < -PcbScene3dCopperFillAreaClipper.#GEOMETRY_EPSILON
+            hasPositive ||=
+                sign > PcbScene3dCopperFillAreaClipper.#GEOMETRY_EPSILON
+        }
+
         return !(hasNegative && hasPositive)
     }
 
@@ -597,70 +556,6 @@ export class PcbScene3dCopperFillAreaClipper {
      */
     static #orientation(a, b, point) {
         return (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
-    }
-
-    /**
-     * Removes duplicate and closing points.
-     * @param {{ x: number, y: number }[]} points Candidate points.
-     * @returns {{ x: number, y: number }[]}
-     */
-    static #cleanLoop(points) {
-        const output = []
-        for (const point of points || []) {
-            const previous = output[output.length - 1]
-            if (
-                previous &&
-                Math.abs(previous.x - point.x) <
-                    PcbScene3dCopperFillAreaClipper.#GEOMETRY_EPSILON &&
-                Math.abs(previous.y - point.y) <
-                    PcbScene3dCopperFillAreaClipper.#GEOMETRY_EPSILON
-            ) {
-                continue
-            }
-            output.push(point)
-        }
-
-        const first = output[0]
-        const last = output[output.length - 1]
-        if (
-            first &&
-            last &&
-            Math.abs(first.x - last.x) <
-                PcbScene3dCopperFillAreaClipper.#GEOMETRY_EPSILON &&
-            Math.abs(first.y - last.y) <
-                PcbScene3dCopperFillAreaClipper.#GEOMETRY_EPSILON
-        ) {
-            output.pop()
-        }
-        return output
-    }
-
-    /**
-     * Checks whether one loop has enough area.
-     * @param {{ x: number, y: number }[]} loop Candidate loop.
-     * @returns {boolean}
-     */
-    static #isValidLoop(loop) {
-        return (
-            loop.length >= 3 &&
-            Math.abs(PcbScene3dCopperFillAreaClipper.#signedArea(loop)) >
-                PcbScene3dCopperFillAreaClipper.#AREA_EPSILON
-        )
-    }
-
-    /**
-     * Computes signed loop area.
-     * @param {{ x: number, y: number }[]} loop Candidate loop.
-     * @returns {number}
-     */
-    static #signedArea(loop) {
-        let area = 0
-        for (let index = 0; index < loop.length; index += 1) {
-            const current = loop[index]
-            const next = loop[(index + 1) % loop.length]
-            area += current.x * next.y - next.x * current.y
-        }
-        return area / 2
     }
 
     /**

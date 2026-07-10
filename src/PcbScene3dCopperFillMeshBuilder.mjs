@@ -1,6 +1,6 @@
 import earcut from 'earcut'
-import { PcbAssemblyFillGeometryResolver } from './PcbAssemblyFillGeometryResolver.mjs'
 import { PcbScene3dCopperFillAreaClipper } from './PcbScene3dCopperFillAreaClipper.mjs'
+import { PcbScene3dCopperFillLoopSetResolver } from './PcbScene3dCopperFillLoopSetResolver.mjs'
 import { PcbScene3dCopperFillPolygonBoolean } from './PcbScene3dCopperFillPolygonBoolean.mjs'
 import { PcbScene3dCopperOcclusionClipper } from './PcbScene3dCopperOcclusionClipper.mjs'
 
@@ -8,8 +8,6 @@ import { PcbScene3dCopperOcclusionClipper } from './PcbScene3dCopperOcclusionCli
  * Builds saved copper fill meshes for the interactive 3D scene.
  */
 export class PcbScene3dCopperFillMeshBuilder {
-    static #AREA_EPSILON = 0.001
-
     /**
      * Builds one combined copper fill mesh.
      * @param {any} THREE Three.js namespace.
@@ -20,7 +18,7 @@ export class PcbScene3dCopperFillMeshBuilder {
      * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
      * @param {any} material Copper material.
      * @param {{ x: number, y: number }[][]} [cutouts] Optional normalized overlay cutouts.
-     * @param {{ surfaceOnly?: boolean, clipContainedFillOverlaps?: boolean }} [options] Optional mesh options.
+     * @param {{ surfaceOnly?: boolean, clipContainedFillOverlaps?: boolean, loopSets?: { outer: number[][], holes: number[][][], bounds: object }[], coverageContext?: object }} [options] Optional mesh options.
      * @returns {any | null}
      */
     static build(
@@ -38,6 +36,13 @@ export class PcbScene3dCopperFillMeshBuilder {
         const halfThickness = Math.max(Number(thickness || 0), 0.001) / 2
         const bottomZ = Number(z || 0) - halfThickness
         const topZ = Number(z || 0) + halfThickness
+        const loopSets = Array.isArray(options?.loopSets)
+            ? options.loopSets
+            : PcbScene3dCopperFillLoopSetResolver.resolve(
+                  fills,
+                  normalizeBoardPoint,
+                  mirrorY
+              )
 
         if (
             PcbScene3dCopperFillMeshBuilder.#shouldClipContainedFillOverlaps(
@@ -47,22 +52,18 @@ export class PcbScene3dCopperFillMeshBuilder {
             PcbScene3dCopperFillMeshBuilder.#appendClippedFillPositions(
                 THREE,
                 positions,
-                fills,
+                loopSets,
                 bottomZ,
                 topZ,
-                normalizeBoardPoint,
-                mirrorY,
                 options
             )
         } else {
-            for (const fill of fills || []) {
-                PcbScene3dCopperFillMeshBuilder.#appendFillPositions(
+            for (const loopSet of loopSets) {
+                PcbScene3dCopperFillMeshBuilder.#appendNormalizedLoopSetPositions(
                     positions,
-                    fill,
+                    loopSet,
                     bottomZ,
                     topZ,
-                    normalizeBoardPoint,
-                    mirrorY,
                     options
                 )
             }
@@ -108,65 +109,23 @@ export class PcbScene3dCopperFillMeshBuilder {
     }
 
     /**
-     * Appends one filled primitive to a shared position buffer.
-     * @param {number[]} positions Position buffer.
-     * @param {object} fill Filled copper primitive.
-     * @param {number} bottomZ Lower Z.
-     * @param {number} topZ Upper Z.
-     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
-     * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
-     * @param {{ surfaceOnly?: boolean }} options Mesh options.
-     * @returns {void}
-     */
-    static #appendFillPositions(
-        positions,
-        fill,
-        bottomZ,
-        topZ,
-        normalizeBoardPoint,
-        mirrorY,
-        options
-    ) {
-        for (const loops of PcbAssemblyFillGeometryResolver.resolveAll(fill)) {
-            PcbScene3dCopperFillMeshBuilder.#appendLoopSetPositions(
-                positions,
-                loops,
-                bottomZ,
-                topZ,
-                normalizeBoardPoint,
-                mirrorY,
-                options
-            )
-        }
-    }
-
-    /**
      * Appends fill positions while removing duplicate overlap surfaces.
      * @param {any} THREE Three.js namespace.
      * @param {number[]} positions Position buffer.
-     * @param {object[]} fills Filled copper primitives.
+     * @param {{ outer: number[][], holes: number[][][], bounds: object }[]} loopSets Normalized fill islands.
      * @param {number} bottomZ Lower Z.
      * @param {number} topZ Upper Z.
-     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
-     * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
-     * @param {{ surfaceOnly?: boolean, clipContainedFillOverlaps?: boolean }} options Mesh options.
+     * @param {{ surfaceOnly?: boolean, clipContainedFillOverlaps?: boolean, coverageContext?: object }} options Mesh options.
      * @returns {void}
      */
     static #appendClippedFillPositions(
         THREE,
         positions,
-        fills,
+        loopSets,
         bottomZ,
         topZ,
-        normalizeBoardPoint,
-        mirrorY,
         options
     ) {
-        const loopSets = PcbScene3dCopperFillMeshBuilder.#resolveLoopSets(
-            fills,
-            normalizeBoardPoint,
-            mirrorY
-        )
         const emittedPolygons = []
         const emittedLoopSets = []
 
@@ -345,56 +304,6 @@ export class PcbScene3dCopperFillMeshBuilder {
     }
 
     /**
-     * Appends one fill island loop set to a shared position buffer.
-     * @param {number[]} positions Position buffer.
-     * @param {{ outer: number[][], holes: number[][][] }} loops Fill loop set.
-     * @param {number} bottomZ Lower Z.
-     * @param {number} topZ Upper Z.
-     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
-     * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
-     * @param {{ surfaceOnly?: boolean }} options Mesh options.
-     * @returns {void}
-     */
-    static #appendLoopSetPositions(
-        positions,
-        loops,
-        bottomZ,
-        topZ,
-        normalizeBoardPoint,
-        mirrorY,
-        options
-    ) {
-        const outer = PcbScene3dCopperFillMeshBuilder.#normalizeLoop(
-            loops.outer,
-            normalizeBoardPoint,
-            mirrorY
-        )
-        const holes = (loops.holes || [])
-            .map((loop) =>
-                PcbScene3dCopperFillMeshBuilder.#normalizeLoop(
-                    loop,
-                    normalizeBoardPoint,
-                    mirrorY
-                )
-            )
-            .filter((loop) =>
-                PcbScene3dCopperFillMeshBuilder.#isValidLoop(loop)
-            )
-
-        if (!PcbScene3dCopperFillMeshBuilder.#isValidLoop(outer)) {
-            return
-        }
-
-        PcbScene3dCopperFillMeshBuilder.#appendNormalizedLoopSetPositions(
-            positions,
-            { outer, holes },
-            bottomZ,
-            topZ,
-            options
-        )
-    }
-
-    /**
      * Appends one already-normalized fill island loop set.
      * @param {number[]} positions Position buffer.
      * @param {{ outer: number[][], holes: number[][][] }} loops Fill loop set.
@@ -450,63 +359,6 @@ export class PcbScene3dCopperFillMeshBuilder {
                 bottomZ,
                 topZ
             )
-        }
-    }
-
-    /**
-     * Resolves normalized fill loop sets.
-     * @param {object[]} fills Filled copper primitives.
-     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
-     * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
-     * @returns {{ outer: number[][], holes: number[][][], bounds: object }[]}
-     */
-    static #resolveLoopSets(fills, normalizeBoardPoint, mirrorY) {
-        return (fills || []).flatMap((fill) =>
-            PcbAssemblyFillGeometryResolver.resolveAll(fill)
-                .map((loops) =>
-                    PcbScene3dCopperFillMeshBuilder.#normalizeLoopSet(
-                        loops,
-                        normalizeBoardPoint,
-                        mirrorY
-                    )
-                )
-                .filter(Boolean)
-        )
-    }
-
-    /**
-     * Normalizes one fill loop set.
-     * @param {{ outer: number[][], holes: number[][][] }} loops Source loops.
-     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
-     * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
-     * @returns {{ outer: number[][], holes: number[][][], bounds: object } | null}
-     */
-    static #normalizeLoopSet(loops, normalizeBoardPoint, mirrorY) {
-        const outer = PcbScene3dCopperFillMeshBuilder.#normalizeLoop(
-            loops.outer,
-            normalizeBoardPoint,
-            mirrorY
-        )
-        if (!PcbScene3dCopperFillMeshBuilder.#isValidLoop(outer)) {
-            return null
-        }
-
-        const holes = (loops.holes || [])
-            .map((loop) =>
-                PcbScene3dCopperFillMeshBuilder.#normalizeLoop(
-                    loop,
-                    normalizeBoardPoint,
-                    mirrorY
-                )
-            )
-            .filter((loop) =>
-                PcbScene3dCopperFillMeshBuilder.#isValidLoop(loop)
-            )
-
-        return {
-            outer,
-            holes,
-            bounds: PcbScene3dCopperFillMeshBuilder.#loopBounds(outer)
         }
     }
 
@@ -577,31 +429,6 @@ export class PcbScene3dCopperFillMeshBuilder {
      */
     static #shouldClipContainedFillOverlaps(options) {
         return options?.clipContainedFillOverlaps === true
-    }
-
-    /**
-     * Normalizes one loop into local copper-side coordinates.
-     * @param {number[][]} loop Source loop.
-     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
-     * @param {boolean} mirrorY Whether to mirror underside Y coordinates.
-     * @returns {number[][]}
-     */
-    static #normalizeLoop(loop, normalizeBoardPoint, mirrorY) {
-        const points = []
-        for (const point of loop || []) {
-            const normalized = normalizeBoardPoint(
-                Number(point?.[0]),
-                Number(point?.[1])
-            )
-            const nextPoint = [
-                Number(normalized?.x),
-                mirrorY ? -Number(normalized?.y) : Number(normalized?.y)
-            ]
-            if (nextPoint.every(Number.isFinite)) {
-                points.push(nextPoint)
-            }
-        }
-        return PcbScene3dCopperFillMeshBuilder.#cleanLoop(points)
     }
 
     /**
@@ -709,59 +536,6 @@ export class PcbScene3dCopperFillMeshBuilder {
      */
     static #appendVertex(positions, point, z) {
         positions.push(point[0], point[1], z)
-    }
-
-    /**
-     * Removes invalid and duplicate loop points.
-     * @param {number[][]} points Candidate points.
-     * @returns {number[][]}
-     */
-    static #cleanLoop(points) {
-        const loop = []
-        for (const point of points || []) {
-            const x = Number(point?.[0])
-            const y = Number(point?.[1])
-            if (!Number.isFinite(x) || !Number.isFinite(y)) {
-                continue
-            }
-
-            const previous = loop[loop.length - 1]
-            if (
-                previous &&
-                Math.abs(previous[0] - x) < 0.001 &&
-                Math.abs(previous[1] - y) < 0.001
-            ) {
-                continue
-            }
-            loop.push([x, y])
-        }
-
-        const first = loop[0]
-        const last = loop[loop.length - 1]
-        if (
-            first &&
-            last &&
-            Math.abs(first[0] - last[0]) < 0.001 &&
-            Math.abs(first[1] - last[1]) < 0.001
-        ) {
-            loop.pop()
-        }
-
-        return loop
-    }
-
-    /**
-     * Checks whether one loop has enough non-collinear area.
-     * @param {number[][]} loop Candidate loop.
-     * @returns {boolean}
-     */
-    static #isValidLoop(loop) {
-        return (
-            Array.isArray(loop) &&
-            loop.length >= 3 &&
-            Math.abs(PcbScene3dCopperFillMeshBuilder.#signedArea(loop)) >
-                PcbScene3dCopperFillMeshBuilder.#AREA_EPSILON
-        )
     }
 
     /**
@@ -896,20 +670,5 @@ export class PcbScene3dCopperFillMeshBuilder {
         }
 
         return inside
-    }
-
-    /**
-     * Computes signed loop area.
-     * @param {number[][]} loop Candidate loop.
-     * @returns {number}
-     */
-    static #signedArea(loop) {
-        let area = 0
-        for (let index = 0; index < loop.length; index += 1) {
-            const current = loop[index]
-            const next = loop[(index + 1) % loop.length]
-            area += current[0] * next[1] - next[0] * current[1]
-        }
-        return area / 2
     }
 }
