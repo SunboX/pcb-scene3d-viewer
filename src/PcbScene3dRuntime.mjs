@@ -543,12 +543,12 @@ export class PcbScene3dRuntime {
             if (this.#isDisposed) {
                 return
             }
+            externalModels?.release({ reportError: false }).catch(() => {})
             this.#hooks.setDiagnostics?.([
                 'Deferred 3D detail could not finish loading: ' +
                     String(error?.message || error || 'Unknown error.')
             ])
             this.#render()
-            externalModels?.release()
         }
     }
     /**
@@ -629,6 +629,13 @@ export class PcbScene3dRuntime {
             ),
             isDisposed: () => this.#isDisposed,
             onPlacementGroup: (placement, placementGroup) => {
+                PcbScene3dExternalModels.applyViewCompensation(
+                    placementGroup,
+                    PcbScene3dRuntime.resolveViewScale(
+                        this.#presetState.get(),
+                        this.#sceneDescription
+                    )
+                )
                 this.#registerSelectionRoot(
                     placement?.designator,
                     placementGroup
@@ -660,7 +667,7 @@ export class PcbScene3dRuntime {
                 this.#applyToggleVisibility()
             }
         })
-        if (diagnostics.length) {
+        if (diagnostics.length && !this.#isDisposed) {
             this.#hooks.setDiagnostics?.(diagnostics)
         }
     }
@@ -673,13 +680,11 @@ export class PcbScene3dRuntime {
         if (!this.#camera || !this.#renderer || !this.#orbitControlsClass) {
             return
         }
-
         const THREE = this.#three
         const domElement = this.#renderer?.domElement
         if (!domElement) {
             return
         }
-
         this.#controls = new this.#orbitControlsClass(this.#camera, domElement)
         this.#controls.enableDamping = false
         this.#controls.screenSpacePanning = true
@@ -691,14 +696,12 @@ export class PcbScene3dRuntime {
             THREE,
             this.#presetState.get()
         )
-
         PcbScene3dCameraRig.applyPreset(
             this.#camera,
             this.#controls,
             this.#presetState.get(),
             this.#sceneDescription
         )
-
         this.#bindListener(this.#controls, 'change', () => {
             this.#renderScheduler.schedule()
         })
@@ -712,17 +715,14 @@ export class PcbScene3dRuntime {
             () => this.#handleResize()
         )
     }
-
     /** @returns {void} */
     #bindSelectionInteraction() {
         if (!this.#renderer || !this.#camera || !this.#three) {
             return
         }
-
         this.#raycaster = new this.#three.Raycaster()
         this.#pointer = new this.#three.Vector2()
         const domElement = this.#renderer.domElement
-
         this.#bindListener(domElement, 'pointerdown', (event) => {
             if (Number(event?.button) !== 0) {
                 return

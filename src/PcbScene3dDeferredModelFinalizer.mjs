@@ -4,6 +4,7 @@
 export class PcbScene3dDeferredModelFinalizer {
     #releaseGate
     #completion
+    #reportError
 
     /**
      * @param {Promise<void>} modelPromise
@@ -15,6 +16,7 @@ export class PcbScene3dDeferredModelFinalizer {
             releaseGate = resolve
         })
         this.#releaseGate = releaseGate
+        this.#reportError = true
         this.#completion = Promise.all([
             modelPromise.then(
                 () => ({ status: 'fulfilled' }),
@@ -26,7 +28,9 @@ export class PcbScene3dDeferredModelFinalizer {
                 return
             }
             if (result.status === 'rejected') {
-                hooks.onError(result.error)
+                if (this.#reportError) {
+                    hooks.onError(result.error)
+                }
                 return
             }
             hooks.onSuccess()
@@ -35,9 +39,13 @@ export class PcbScene3dDeferredModelFinalizer {
 
     /**
      * Opens the integration gate and resolves after model finalization.
+     * @param {{ reportError?: boolean }} [options]
      * @returns {Promise<void>}
      */
-    release() {
+    release(options = {}) {
+        if (options.reportError === false) {
+            this.#reportError = false
+        }
         this.#releaseGate()
         return this.#completion
     }
