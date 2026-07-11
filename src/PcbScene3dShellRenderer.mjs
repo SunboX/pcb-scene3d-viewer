@@ -1,3 +1,7 @@
+import { CircuitJsonDocumentContext } from 'circuitjson-toolkit'
+import { CircuitJsonBomBuilder } from 'circuitjson-toolkit/extensions'
+import { PcbScene3dCircuitJsonGeometry } from './PcbScene3dCircuitJsonGeometry.mjs'
+import { PcbScene3dCircuitJsonInput } from './PcbScene3dCircuitJsonInput.mjs'
 import { PcbScene3dText } from './PcbScene3dText.mjs'
 
 /**
@@ -13,8 +17,8 @@ export class PcbScene3dShellRenderer {
      */
     static render(documentModel, translate = null, options = {}) {
         const t = PcbScene3dText.createTranslator(translate)
-        const pcb = documentModel?.pcb
-        if (!pcb) {
+        const summary = PcbScene3dShellRenderer.#summary(documentModel, options)
+        if (!summary) {
             return (
                 '<section class="viewer-empty">' +
                 PcbScene3dShellRenderer.#escapeHtml(t('scene3d.noPcb')) +
@@ -22,10 +26,10 @@ export class PcbScene3dShellRenderer {
             )
         }
 
-        const widthMil = Math.round(pcb.boardOutline.widthMil || 0)
-        const heightMil = Math.round(pcb.boardOutline.heightMil || 0)
-        const componentCount = pcb.components.length
-        const bomRows = documentModel?.bom?.length || 0
+        const widthMil = Math.round(summary.widthMil || 0)
+        const heightMil = Math.round(summary.heightMil || 0)
+        const componentCount = summary.componentCount
+        const bomRows = summary.bomRows
 
         return (
             '<section class="scene-3d"><header class="svg-panel__header"><h3>' +
@@ -127,6 +131,71 @@ export class PcbScene3dShellRenderer {
             bomRows +
             '</dd></div></dl></section>'
         )
+    }
+
+    /**
+     * Resolves shell statistics from legacy or canonical CircuitJSON input.
+     * @param {unknown} documentModel Document input.
+     * @param {{ drawFauxBoard?: boolean }} options Shell and adapter options.
+     * @returns {{ widthMil: number, heightMil: number, componentCount: number, bomRows: number } | null}
+     */
+    static #summary(documentModel, options) {
+        const legacyPcb = PcbScene3dShellRenderer.#ownData(documentModel, 'pcb')
+        if (legacyPcb && typeof legacyPcb === 'object') {
+            const boardOutline = legacyPcb.boardOutline || {}
+            const components = Array.isArray(legacyPcb.components)
+                ? legacyPcb.components
+                : []
+            const bom = PcbScene3dShellRenderer.#ownData(documentModel, 'bom')
+            return {
+                widthMil: Number(boardOutline.widthMil || 0),
+                heightMil: Number(boardOutline.heightMil || 0),
+                componentCount: components.length,
+                bomRows: Array.isArray(bom) ? bom.length : 0
+            }
+        }
+        if (!PcbScene3dCircuitJsonInput.isModel(documentModel)) return null
+
+        const context = CircuitJsonDocumentContext.prepare(documentModel, {
+            indexes: ['elements']
+        })
+        const index = context.getIndex('elements')
+        if (
+            !index.elementsByType.get('pcb_board')?.length &&
+            !index.elementsByType.get('pcb_panel')?.length &&
+            !(
+                options?.drawFauxBoard === true &&
+                index.elementsByType.get('pcb_component')?.length
+            )
+        ) {
+            return null
+        }
+        const board = PcbScene3dCircuitJsonGeometry.buildBoard(index, options)
+        return {
+            widthMil: board.widthMil,
+            heightMil: board.heightMil,
+            componentCount: (index.elementsByType.get('pcb_component') || [])
+                .length,
+            bomRows: CircuitJsonBomBuilder.build(context.model).length
+        }
+    }
+
+    /**
+     * Reads one own data property without invoking accessors.
+     * @param {unknown} value Record candidate.
+     * @param {PropertyKey} key Property key.
+     * @returns {unknown}
+     */
+    static #ownData(value, key) {
+        if (!value || typeof value !== 'object') return undefined
+        try {
+            const descriptor = Object.getOwnPropertyDescriptor(value, key)
+            return descriptor && Object.hasOwn(descriptor, 'value')
+                ? descriptor.value
+                : undefined
+        } catch {
+            return undefined
+        }
     }
 
     /**

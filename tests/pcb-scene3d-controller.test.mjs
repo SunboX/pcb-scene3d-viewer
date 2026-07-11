@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { CircuitJsonDocumentContext } from 'circuitjson-toolkit'
+import { DocumentResult } from 'circuitjson-toolkit/parser'
 import { PcbScene3dController } from '../src/PcbScene3dController.mjs'
 
 /**
@@ -8,7 +10,6 @@ import { PcbScene3dController } from '../src/PcbScene3dController.mjs'
 class FakeEventTarget {
     /** @type {Map<string, Set<(event: any) => void>>} */
     #listeners
-
     constructor() {
         this.#listeners = new Map()
     }
@@ -22,7 +23,6 @@ class FakeEventTarget {
         if (!this.#listeners.has(type)) {
             this.#listeners.set(type, new Set())
         }
-
         this.#listeners.get(type)?.add(listener)
     }
 
@@ -54,7 +54,6 @@ class FakeEventTarget {
 class FakeClassList {
     /** @type {Set<string>} */
     #tokens
-
     constructor(initialTokens = []) {
         this.#tokens = new Set(initialTokens)
     }
@@ -90,16 +89,12 @@ class FakeClassList {
 class FakeButton extends FakeEventTarget {
     /** @type {{ [key: string]: string }} */
     dataset
-
     /** @type {FakeClassList} */
     classList
-
     /** @type {Map<string, string>} */
     #attributes
-
     /** @type {string} */
     #preset
-
     /**
      * @param {string} preset
      */
@@ -135,7 +130,6 @@ class FakeButton extends FakeEventTarget {
 class FakeExportButton extends FakeEventTarget {
     /** @type {Map<string, string>} */
     #attributes
-
     constructor() {
         super()
         this.#attributes = new Map([['data-scene-3d-export', 'models-zip']])
@@ -156,13 +150,10 @@ class FakeExportButton extends FakeEventTarget {
 class FakeToggle extends FakeEventTarget {
     /** @type {{ [key: string]: string }} */
     dataset
-
     /** @type {boolean} */
     checked
-
     /** @type {string} */
     #toggleName
-
     /**
      * @param {string} toggleName
      * @param {boolean} checked
@@ -193,7 +184,6 @@ class FakeToggle extends FakeEventTarget {
 class FakeDiagnosticsNode {
     /** @type {string} */
     textContent
-
     constructor() {
         this.textContent = ''
     }
@@ -205,10 +195,8 @@ class FakeDiagnosticsNode {
 class FakeSelectionNode extends FakeEventTarget {
     /** @type {string} */
     textContent
-
     /** @type {string} */
     _innerHTML
-
     constructor() {
         super()
         this.textContent = ''
@@ -853,6 +841,10 @@ test('PcbScene3dController exports a ZIP from the resolved scene models', async 
     const viewportNode = new FakeViewportNode(rootNode)
     const exportCalls = []
     const downloadCalls = []
+    const modelLoaderOptions = {
+        allowNetworkModelFetch: true,
+        modelCache: new Map()
+    }
     const sceneDescription = {
         board: {},
         components: [
@@ -908,6 +900,7 @@ test('PcbScene3dController exports a ZIP from the resolved scene models', async 
             createRuntime: () => ({
                 dispose() {}
             }),
+            modelLoaderOptions,
             exportArchive: async (options) => {
                 exportCalls.push(options)
                 return {
@@ -933,6 +926,7 @@ test('PcbScene3dController exports a ZIP from the resolved scene models', async 
     assert.equal(exportCalls.length, 1)
     assert.equal(exportCalls[0].archiveBaseName, 'Demo Board')
     assert.equal(exportCalls[0].sceneDescription, sceneDescription)
+    assert.equal(exportCalls[0].modelLoaderOptions, modelLoaderOptions)
     assert.deepEqual(downloadCalls, [['Demo-Board-models.zip', [1, 2, 3]]])
     assert.match(
         rootNode.getDiagnosticsNode().textContent,
@@ -950,49 +944,51 @@ test('PcbScene3dController reports when no models are available for ZIP export',
     const rootNode = new FakeSceneRootNode()
     const viewportNode = new FakeViewportNode(rootNode)
     let downloadCount = 0
-
-    const controller = new PcbScene3dController(
-        viewportNode,
-        {
-            fileName: 'empty-board.PcbDoc',
-            summary: {
-                title: 'Empty Board'
-            },
-            pcb: {
-                boardOutline: {},
-                components: []
+    const exportCalls = []
+    const documentModel = CircuitJsonDocumentContext.prepare(
+        DocumentResult.createValidated({
+            model: [],
+            source: {
+                format: 'altium',
+                fileName: 'canonical-empty.PcbDoc',
+                fileType: 'pcb'
             }
-        },
-        {
-            buildScene: () => ({
-                board: {},
-                components: [],
-                externalPlacements: [],
-                detail: {}
-            }),
-            createRuntime: () => ({
-                dispose() {}
-            }),
-            exportArchive: async () => ({
-                archiveName: 'Empty-Board-models.zip',
+        })
+    )
+
+    const controller = new PcbScene3dController(viewportNode, documentModel, {
+        buildScene: () => ({
+            board: {},
+            components: [],
+            externalPlacements: [],
+            detail: {}
+        }),
+        createRuntime: () => ({
+            dispose() {}
+        }),
+        exportArchive: async (options) => {
+            exportCalls.push(options)
+            return {
+                archiveName: 'canonical-empty-models.zip',
                 archiveBytes: new Uint8Array(),
                 exportedEntries: [],
                 skippedEntries: []
-            }),
-            downloadArchive: () => {
-                downloadCount += 1
             }
+        },
+        downloadArchive: () => {
+            downloadCount += 1
         }
-    )
+    })
 
     rootNode.getExportButton().dispatch('click')
     await Promise.resolve()
     await Promise.resolve()
 
     assert.equal(downloadCount, 0)
+    assert.equal(exportCalls[0].archiveBaseName, 'canonical-empty')
     assert.match(
         rootNode.getDiagnosticsNode().textContent,
-        /No STEP or WRL models were resolved for export\./
+        /No resolved 3D models were available for export\./
     )
     controller.dispose()
 })

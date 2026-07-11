@@ -8,6 +8,8 @@ import { PcbScene3dExternalModelLoadOrder } from './PcbScene3dExternalModelLoadO
 import { PcbScene3dExternalModelSourceOriginPolicy } from './PcbScene3dExternalModelSourceOriginPolicy.mjs'
 import { PcbScene3dExternalPlacementDefaults } from './PcbScene3dExternalPlacementDefaults.mjs'
 import { PcbScene3dModelBounds } from './PcbScene3dModelBounds.mjs'
+import { PcbScene3dModelIdentity } from './PcbScene3dModelIdentity.mjs'
+import { PcbScene3dModelContent } from './PcbScene3dModelContent.mjs'
 import { PcbScene3dMountRig } from './PcbScene3dMountRig.mjs'
 import { PcbScene3dStepLoader } from './PcbScene3dStepLoader.mjs'
 import { PcbScene3dViewCompensation } from './PcbScene3dViewCompensation.mjs'
@@ -18,10 +20,13 @@ import { PcbScene3dViewCompensation } from './PcbScene3dViewCompensation.mjs'
 export class PcbScene3dExternalModels {
     /**
      * Loads all available external models into the supplied group.
-     * @param {{ three: any, sceneDescription: any, externalModelsGroup: any, modelViewScale?: { x?: number, y?: number, z?: number }, isDisposed?: () => boolean, onPlacementGroup?: (placement: any, placementGroup: any) => void, stepLoader?: PcbScene3dStepLoader }} options
+     * @param {{ three: any, sceneDescription: any, externalModelsGroup: any, modelViewScale?: { x?: number, y?: number, z?: number }, isDisposed?: () => boolean, onPlacementGroup?: (placement: any, placementGroup: any) => void, stepLoader?: PcbScene3dStepLoader, modelLoaderOptions?: object }} options
      * @returns {Promise<string[]>}
      */
     static async loadIntoScene(options) {
+        const modelLoaderOptions = PcbScene3dModelContent.createFetchScope(
+            options?.modelLoaderOptions
+        )
         const placements = PcbScene3dExternalModelLoadOrder.sort(
             PcbScene3dExternalModels.#resolvePlacements(
                 options?.sceneDescription
@@ -52,7 +57,8 @@ export class PcbScene3dExternalModels {
                             stepLoader,
                             cachedModelGroups,
                             options?.modelViewScale,
-                            options?.sceneDescription
+                            options?.sceneDescription,
+                            modelLoaderOptions
                         )
                     if (!loadedGroup || options?.isDisposed?.()) {
                         continue
@@ -183,6 +189,7 @@ export class PcbScene3dExternalModels {
      * @param {Map<string, any>} cachedModelGroups
      * @param {{ x?: number, y?: number, z?: number } | null | undefined} modelViewScale Active scene view scale.
      * @param {object | null | undefined} sceneDescription Scene description.
+     * @param {object | null | undefined} modelLoaderOptions Model loader options.
      * @returns {Promise<any>}
      */
     static async #loadPlacementGroup(
@@ -191,7 +198,8 @@ export class PcbScene3dExternalModels {
         stepLoader,
         cachedModelGroups,
         modelViewScale,
-        sceneDescription
+        sceneDescription,
+        modelLoaderOptions
     ) {
         const model = placement?.externalModel
         if (!model) {
@@ -203,7 +211,8 @@ export class PcbScene3dExternalModels {
                 THREE,
                 model,
                 stepLoader,
-                cachedModelGroups
+                cachedModelGroups,
+                modelLoaderOptions
             )
 
         return PcbScene3dExternalModels.#buildPlacementWrapper(
@@ -222,13 +231,15 @@ export class PcbScene3dExternalModels {
      * @param {any} model
      * @param {PcbScene3dStepLoader} stepLoader
      * @param {Map<string, any>} cachedModelGroups
+     * @param {object | null | undefined} modelLoaderOptions Model loader options.
      * @returns {Promise<any>}
      */
     static async #loadCachedModelGroup(
         THREE,
         model,
         stepLoader,
-        cachedModelGroups
+        cachedModelGroups,
+        modelLoaderOptions
     ) {
         const identity = PcbScene3dExternalModels.#resolveModelIdentity(model)
         if (cachedModelGroups.has(identity)) {
@@ -238,7 +249,8 @@ export class PcbScene3dExternalModels {
         const modelGroup = await PcbScene3dExternalModels.#loadModelGroup(
             THREE,
             model,
-            stepLoader
+            stepLoader,
+            modelLoaderOptions
         )
         cachedModelGroups.set(identity, modelGroup)
 
@@ -250,14 +262,16 @@ export class PcbScene3dExternalModels {
      * @param {any} THREE
      * @param {any} model
      * @param {PcbScene3dStepLoader} stepLoader
+     * @param {object | null | undefined} modelLoaderOptions Model loader options.
      * @returns {Promise<any>}
      */
-    static async #loadModelGroup(THREE, model, stepLoader) {
+    static async #loadModelGroup(THREE, model, stepLoader, modelLoaderOptions) {
         return PcbScene3dExternalModelGroupLoader.load(
             THREE,
             model,
             stepLoader,
-            new URL(import.meta.url).searchParams.get('v') || ''
+            new URL(import.meta.url).searchParams.get('v') || '',
+            modelLoaderOptions || {}
         )
     }
 
@@ -719,22 +733,7 @@ export class PcbScene3dExternalModels {
      * @returns {string}
      */
     static #resolveModelIdentity(model) {
-        if (String(model?.origin || '') === 'embedded') {
-            return [
-                'embedded',
-                String(model?.sourceStream || ''),
-                String(model?.name || ''),
-                String(model?.checksum || ''),
-                String(model?.format || '')
-            ].join('::')
-        }
-
-        return [
-            'session',
-            String(model?.relativePath || ''),
-            String(model?.name || ''),
-            String(model?.format || '')
-        ].join('::')
+        return PcbScene3dModelIdentity.resolve(model)
     }
 
     /**

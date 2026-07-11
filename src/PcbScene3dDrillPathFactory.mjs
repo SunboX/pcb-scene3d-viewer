@@ -2,6 +2,7 @@
  * Builds reusable circular and slotted drill paths for the 3D PCB scene.
  */
 export class PcbScene3dDrillPathFactory {
+    static #PAD_HOLE_SHAPE_RECT = 1
     static #PAD_HOLE_SHAPE_SLOT = 2
     static #ARC_SEGMENTS = 12
 
@@ -34,7 +35,7 @@ export class PcbScene3dDrillPathFactory {
     /**
      * Resolves deduped board-space drill specs from pads and vias.
      * @param {{ pads?: any[], vias?: any[] }} detail
-     * @returns {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[]}
+     * @returns {{ x: number, y: number, diameter: number, width?: number, height?: number, shape?: 'circle' | 'pill' | 'rect', slotLength?: number | null, rotationDeg?: number | null }[]}
      */
     static resolveBoardDrillSpecs(detail) {
         const seen = new Set()
@@ -64,7 +65,7 @@ export class PcbScene3dDrillPathFactory {
     /**
      * Builds one local pad drill path centered on the pad origin.
      * @param {any} THREE
-     * @param {{ holeDiameter?: number, holeShape?: number | null, holeSlotLength?: number | null, holeRotation?: number | null, rotation?: number | null }} pad
+     * @param {{ holeDiameter?: number, holeWidth?: number, holeHeight?: number, holeShape?: number | null, holeSlotLength?: number | null, holeRotation?: number | null, rotation?: number | null }} pad
      * @returns {any | null}
      */
     static buildPadHolePath(THREE, pad) {
@@ -73,7 +74,14 @@ export class PcbScene3dDrillPathFactory {
             ? PcbScene3dDrillPathFactory.buildDrillPath(THREE, {
                   ...drillSpec,
                   x: 0,
-                  y: 0
+                  y: 0,
+                  rotationDeg:
+                      drillSpec.shape === 'circle'
+                          ? 0
+                          : PcbScene3dDrillPathFactory.#normalizeAngle(
+                                Number(drillSpec.rotationDeg || 0) -
+                                    Number(pad?.rotation || 0)
+                            )
               })
             : null
     }
@@ -94,6 +102,9 @@ export class PcbScene3dDrillPathFactory {
             x: 0,
             y: 0,
             diameter: holeDiameter,
+            width: holeDiameter,
+            height: holeDiameter,
+            shape: 'circle',
             slotLength: null,
             rotationDeg: 0
         })
@@ -102,13 +113,17 @@ export class PcbScene3dDrillPathFactory {
     /**
      * Builds one drill path from a normalized drill descriptor.
      * @param {any} THREE
-     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }} drillSpec
+     * @param {{ x: number, y: number, diameter: number, width?: number, height?: number, shape?: 'circle' | 'pill' | 'rect', slotLength?: number | null, rotationDeg?: number | null }} drillSpec
      * @returns {any | null}
      */
     static buildDrillPath(THREE, drillSpec) {
         const diameter = Number(drillSpec?.diameter || 0)
         if (diameter <= 0) {
             return null
+        }
+
+        if (drillSpec?.shape === 'rect') {
+            return PcbScene3dDrillPathFactory.#buildRectPath(THREE, drillSpec)
         }
 
         if (Number(drillSpec?.slotLength || 0) > diameter + 0.001) {
@@ -121,7 +136,7 @@ export class PcbScene3dDrillPathFactory {
     /**
      * Resolves board-space via drill specs from normalized via detail.
      * @param {{ x?: number, y?: number, holeDiameter?: number }[]} vias
-     * @returns {{ x: number, y: number, diameter: number, slotLength: null, rotationDeg: 0 }[]}
+     * @returns {{ x: number, y: number, diameter: number, width: number, height: number, shape: 'circle', slotLength: null, rotationDeg: 0 }[]}
      */
     static #resolveViaDrillSpecs(vias) {
         return (vias || [])
@@ -135,6 +150,9 @@ export class PcbScene3dDrillPathFactory {
                     x: Number(via?.x || 0),
                     y: Number(via?.y || 0),
                     diameter,
+                    width: diameter,
+                    height: diameter,
+                    shape: 'circle',
                     slotLength: null,
                     rotationDeg: 0
                 }
@@ -145,7 +163,7 @@ export class PcbScene3dDrillPathFactory {
     /**
      * Resolves board-space pad drill specs from normalized pad detail.
      * @param {any[]} pads
-     * @returns {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[]}
+     * @returns {{ x: number, y: number, diameter: number, width?: number, height?: number, shape?: 'circle' | 'pill' | 'rect', slotLength?: number | null, rotationDeg?: number | null }[]}
      */
     static #resolvePadDrillSpecs(pads) {
         return (pads || [])
@@ -161,11 +179,10 @@ export class PcbScene3dDrillPathFactory {
                     x: Number(pad?.x || 0),
                     y: Number(pad?.y || 0),
                     rotationDeg:
-                        drillSpec.slotLength === null
+                        drillSpec.shape === 'circle'
                             ? 0
                             : PcbScene3dDrillPathFactory.#normalizeAngle(
-                                  Number(pad?.rotation || 0) +
-                                      Number(drillSpec.rotationDeg || 0)
+                                  Number(drillSpec.rotationDeg || 0)
                               )
                 }
             })
@@ -174,8 +191,8 @@ export class PcbScene3dDrillPathFactory {
 
     /**
      * Resolves one pad-local drill spec when the pad is through-hole.
-     * @param {{ holeDiameter?: number, holeShape?: number | null, holeSlotLength?: number | null, holeRotation?: number | null }} pad
-     * @returns {{ diameter: number, slotLength?: number | null, rotationDeg?: number | null } | null}
+     * @param {{ holeDiameter?: number, holeWidth?: number, holeHeight?: number, holeShape?: number | null, holeSlotLength?: number | null, holeRotation?: number | null }} pad
+     * @returns {{ diameter: number, width: number, height: number, shape: 'circle' | 'pill' | 'rect', slotLength?: number | null, rotationDeg?: number | null } | null}
      */
     static #resolvePadDrillSpec(pad) {
         const diameter = Number(pad?.holeDiameter || 0)
@@ -183,18 +200,68 @@ export class PcbScene3dDrillPathFactory {
             return null
         }
 
+        const holeShape = Number(pad?.holeShape)
+        const shape =
+            holeShape === PcbScene3dDrillPathFactory.#PAD_HOLE_SHAPE_RECT
+                ? 'rect'
+                : holeShape === PcbScene3dDrillPathFactory.#PAD_HOLE_SHAPE_SLOT
+                  ? 'pill'
+                  : 'circle'
+        const width = Number(pad?.holeWidth || diameter)
+        const height = Number(pad?.holeHeight || diameter)
         const slotLength =
-            Number(pad?.holeShape) ===
-                PcbScene3dDrillPathFactory.#PAD_HOLE_SHAPE_SLOT &&
-            Number(pad?.holeSlotLength || 0) > diameter
+            shape === 'pill' && Number(pad?.holeSlotLength || 0) > diameter
                 ? Number(pad?.holeSlotLength || 0)
                 : null
 
         return {
             diameter,
+            width,
+            height,
+            shape,
             slotLength,
-            rotationDeg: Number(pad?.holeRotation || 0)
+            rotationDeg: Number(pad?.holeRotation ?? pad?.rotation ?? 0)
         }
+    }
+
+    /**
+     * Builds one rotated rectangular drill path.
+     * @param {any} THREE
+     * @param {{ x: number, y: number, diameter: number, width?: number, height?: number, rotationDeg?: number | null }} drillSpec
+     * @returns {any}
+     */
+    static #buildRectPath(THREE, drillSpec) {
+        const halfWidth = Math.max(
+            Number(drillSpec?.width || drillSpec?.diameter || 0) / 2,
+            0.6
+        )
+        const halfHeight = Math.max(
+            Number(drillSpec?.height || drillSpec?.diameter || 0) / 2,
+            0.6
+        )
+        const rotationRad = (Number(drillSpec.rotationDeg || 0) * Math.PI) / 180
+        const centerX = Number(drillSpec.x || 0)
+        const centerY = Number(drillSpec.y || 0)
+        const points = [
+            { x: -halfWidth, y: -halfHeight },
+            { x: halfWidth, y: -halfHeight },
+            { x: halfWidth, y: halfHeight },
+            { x: -halfWidth, y: halfHeight }
+        ].map((point) =>
+            PcbScene3dDrillPathFactory.#rotateAndTranslatePoint(
+                point,
+                rotationRad,
+                centerX,
+                centerY
+            )
+        )
+        const path = new THREE.Path()
+        path.moveTo(points[0].x, points[0].y)
+        for (let index = 1; index < points.length; index += 1) {
+            path.lineTo(points[index].x, points[index].y)
+        }
+        path.closePath()
+        return path
     }
 
     /**
@@ -219,7 +286,7 @@ export class PcbScene3dDrillPathFactory {
     /**
      * Builds one slotted drill path as a rotated rounded rectangle.
      * @param {any} THREE
-     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }} drillSpec
+     * @param {{ x: number, y: number, diameter: number, width?: number, height?: number, shape?: string, slotLength?: number | null, rotationDeg?: number | null }} drillSpec
      * @returns {any}
      */
     static #buildSlotPath(THREE, drillSpec) {
@@ -345,6 +412,9 @@ export class PcbScene3dDrillPathFactory {
             Number(drillSpec.x || 0).toFixed(4),
             Number(drillSpec.y || 0).toFixed(4),
             Number(drillSpec.diameter || 0).toFixed(4),
+            String(drillSpec.shape || 'circle'),
+            Number(drillSpec.width || drillSpec.diameter || 0).toFixed(4),
+            Number(drillSpec.height || drillSpec.diameter || 0).toFixed(4),
             Number(drillSpec.slotLength || 0).toFixed(4),
             Number(drillSpec.rotationDeg || 0).toFixed(4)
         ].join(':')

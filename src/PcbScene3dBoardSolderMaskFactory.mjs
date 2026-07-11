@@ -43,46 +43,69 @@ export class PcbScene3dBoardSolderMaskFactory {
             return group
         }
 
-        const geometry = PcbScene3dBoardSolderMaskFactory.#buildMaskGeometry(
-            THREE,
-            board,
-            sceneDescription?.detail || {},
-            normalizeBoardPoint
-        )
-        const topMaterial = PcbScene3dBoardSolderMaskFactory.#buildMaterial(
-            THREE,
-            board,
-            THREE.FrontSide,
-            sceneDescription?.sourceFormat
-        )
-        const bottomMaterial = PcbScene3dBoardSolderMaskFactory.#buildMaterial(
-            THREE,
-            board,
-            THREE.BackSide,
-            sceneDescription?.sourceFormat
-        )
-        const z = Number(board?.thicknessMil || 0) / 2
+        const contours = PcbScene3dBoardSolderMaskFactory.#boardContours(board)
+        contours.forEach((contour, index) => {
+            const geometry =
+                PcbScene3dBoardSolderMaskFactory.#buildMaskGeometry(
+                    THREE,
+                    contour,
+                    sceneDescription?.detail || {},
+                    normalizeBoardPoint
+                )
+            const topMaterial = PcbScene3dBoardSolderMaskFactory.#buildMaterial(
+                THREE,
+                contour,
+                THREE.FrontSide,
+                sceneDescription?.sourceFormat
+            )
+            const bottomMaterial =
+                PcbScene3dBoardSolderMaskFactory.#buildMaterial(
+                    THREE,
+                    contour,
+                    THREE.BackSide,
+                    sceneDescription?.sourceFormat
+                )
+            const z = Number(contour?.thicknessMil || 0) / 2
+            const suffix = contours.length === 1 ? '' : '-' + (index + 1)
 
-        group.add(
-            PcbScene3dBoardSolderMaskFactory.#buildSurfaceMesh(
-                THREE,
-                geometry,
-                topMaterial,
-                z + PcbScene3dBoardSolderMaskFactory.#FACE_Z_OFFSET_MIL,
-                'board-solder-mask-top'
+            group.add(
+                PcbScene3dBoardSolderMaskFactory.#buildSurfaceMesh(
+                    THREE,
+                    geometry,
+                    topMaterial,
+                    z + PcbScene3dBoardSolderMaskFactory.#FACE_Z_OFFSET_MIL,
+                    'board-solder-mask-top' + suffix
+                )
             )
-        )
-        group.add(
-            PcbScene3dBoardSolderMaskFactory.#buildSurfaceMesh(
-                THREE,
-                geometry,
-                bottomMaterial,
-                -z - PcbScene3dBoardSolderMaskFactory.#FACE_Z_OFFSET_MIL,
-                'board-solder-mask-bottom'
+            group.add(
+                PcbScene3dBoardSolderMaskFactory.#buildSurfaceMesh(
+                    THREE,
+                    geometry,
+                    bottomMaterial,
+                    -z - PcbScene3dBoardSolderMaskFactory.#FACE_Z_OFFSET_MIL,
+                    'board-solder-mask-bottom' + suffix
+                )
             )
-        )
+        })
 
         return group
+    }
+
+    /**
+     * Resolves independently renderable solder-mask contours.
+     * @param {object} board Aggregate board metadata.
+     * @returns {object[]}
+     */
+    static #boardContours(board) {
+        const contours = Array.isArray(board?.contours)
+            ? board.contours.filter(Boolean)
+            : []
+        if (!contours.length) return [board]
+        return contours.map((contour) => ({
+            ...board,
+            ...contour,
+            contours: []
+        }))
     }
 
     /**

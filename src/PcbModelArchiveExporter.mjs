@@ -2,6 +2,9 @@ import { zipSync } from 'fflate'
 import { PcbAssemblyMeshUtils } from './PcbAssemblyMeshUtils.mjs'
 import { PcbAssemblyModelMeshLoader } from './PcbAssemblyModelMeshLoader.mjs'
 import { PcbAssemblyStepWriter } from './PcbAssemblyStepWriter.mjs'
+import { PcbModelArchiveSourceBundle } from './PcbModelArchiveSourceBundle.mjs'
+import { PcbScene3dModelContent } from './PcbScene3dModelContent.mjs'
+import { PcbScene3dModelIdentity } from './PcbScene3dModelIdentity.mjs'
 
 const STATIC_BODY_COLOR = [0.5, 0.5, 0.5]
 
@@ -12,10 +15,13 @@ const STATIC_BODY_COLOR = [0.5, 0.5, 0.5]
 export class PcbModelArchiveExporter {
     /**
      * Builds one ZIP archive from the resolved scene description.
-     * @param {{ archiveBaseName?: string, sceneDescription?: { components?: any[], externalPlacements?: any[], staticBodyPlacements?: any[] }, modelMeshLoader?: ((placement: object) => Promise<object | object[]> | object | object[]) | PcbAssemblyModelMeshLoader, includeRawModels?: boolean, includeStitchedComponents?: boolean, stitchedDesignators?: string[] }} [options]
+     * @param {{ archiveBaseName?: string, sceneDescription?: { components?: any[], externalPlacements?: any[], staticBodyPlacements?: any[] }, modelMeshLoader?: ((placement: object) => Promise<object | object[]> | object | object[]) | PcbAssemblyModelMeshLoader, modelLoaderOptions?: object, includeRawModels?: boolean, includeStitchedComponents?: boolean, stitchedDesignators?: string[] }} [options]
      * @returns {Promise<{ archiveName: string, archiveBytes: Uint8Array, exportedEntries: { archivePath: string, pattern: string, designator: string, format: string, modelName: string, kind?: string }[], skippedEntries: { designator: string, reason: string }[] }>}
      */
     static async buildArchive(options = {}) {
+        const modelLoaderOptions = PcbScene3dModelContent.createFetchScope(
+            options.modelLoaderOptions
+        )
         const archiveName = PcbModelArchiveExporter.#resolveArchiveName(
             options.archiveBaseName
         )
@@ -28,18 +34,20 @@ export class PcbModelArchiveExporter {
         const exportedEntries = []
         const skippedEntries = []
         const archiveInput = {}
+        const rawBundleDirectories = new Set()
 
         for (const entry of resolvedEntries) {
             try {
-                const archivePath = PcbModelArchiveExporter.#resolveArchivePath(
+                const bundle = await PcbModelArchiveSourceBundle.build(
                     entry,
-                    exportedEntries
+                    rawBundleDirectories,
+                    modelLoaderOptions
                 )
-                const modelBytes =
-                    await PcbModelArchiveExporter.#readModelBytes(entry.model)
-                archiveInput[archivePath] = modelBytes
+                Object.assign(archiveInput, bundle.files)
                 exportedEntries.push({
-                    archivePath,
+                    archivePath: bundle.archivePath,
+                    bundleDirectory: bundle.bundleDirectory,
+                    companionPaths: bundle.companionPaths,
                     pattern: entry.pattern,
                     designator: entry.designator,
                     format: entry.model.format,
@@ -61,7 +69,8 @@ export class PcbModelArchiveExporter {
                 : await PcbModelArchiveExporter.#buildStitchedEntries(
                       options.sceneDescription,
                       options.modelMeshLoader,
-                      options.stitchedDesignators
+                      options.stitchedDesignators,
+                      modelLoaderOptions
                   )
         skippedEntries.push(...stitchedEntries.skippedEntries)
         for (const entry of stitchedEntries.entries) {
@@ -197,12 +206,14 @@ export class PcbModelArchiveExporter {
      * @param {{ components?: object[], externalPlacements?: object[], staticBodyPlacements?: object[] } | undefined} sceneDescription Scene data.
      * @param {((placement: object) => Promise<object | object[]> | object | object[]) | PcbAssemblyModelMeshLoader | undefined} modelMeshLoader Mesh loader override.
      * @param {string[] | undefined} stitchedDesignators Optional designator filter.
+     * @param {object | undefined} modelLoaderOptions Shared model loading policy.
      * @returns {Promise<{ entries: { pattern: string, designator: string, modelName: string, payloadText: string }[], skippedEntries: { designator: string, reason: string }[] }>}
      */
     static async #buildStitchedEntries(
         sceneDescription,
         modelMeshLoader,
-        stitchedDesignators
+        stitchedDesignators,
+        modelLoaderOptions
     ) {
         const candidates = PcbModelArchiveExporter.#collectStitchedCandidates(
             sceneDescription,
@@ -212,8 +223,10 @@ export class PcbModelArchiveExporter {
             return { entries: [], skippedEntries: [] }
         }
 
-        const loader =
-            PcbModelArchiveExporter.#resolveModelMeshLoader(modelMeshLoader)
+        const loader = PcbModelArchiveExporter.#resolveModelMeshLoader(
+            modelMeshLoader,
+            modelLoaderOptions
+        )
         const ownsLoader =
             !(
                 typeof modelMeshLoader === 'function' ||
@@ -473,9 +486,10 @@ export class PcbModelArchiveExporter {
     /**
      * Resolves a mesh loader for generated stitched components.
      * @param {((placement: object) => Promise<object | object[]> | object | object[]) | PcbAssemblyModelMeshLoader | undefined} modelMeshLoader Loader option.
+     * @param {object | undefined} modelLoaderOptions Shared model loading policy.
      * @returns {((placement: object) => Promise<object | object[]> | object | object[]) | PcbAssemblyModelMeshLoader}
      */
-    static #resolveModelMeshLoader(modelMeshLoader) {
+    static #resolveModelMeshLoader(modelMeshLoader, modelLoaderOptions) {
         if (
             typeof modelMeshLoader === 'function' ||
             modelMeshLoader instanceof PcbAssemblyModelMeshLoader
@@ -483,7 +497,7 @@ export class PcbModelArchiveExporter {
             return modelMeshLoader
         }
 
-        return new PcbAssemblyModelMeshLoader()
+        return new PcbAssemblyModelMeshLoader(modelLoaderOptions)
     }
 
     /**
@@ -574,36 +588,6 @@ export class PcbModelArchiveExporter {
     }
 
     /**
-     * Resolves one archive file name for the exported model.
-     * @param {{ pattern: string, model: { format?: string } }} entry
-     * @param {{ archivePath: string }[]} exportedEntries
-     * @returns {string}
-     */
-    static #resolveArchivePath(entry, exportedEntries) {
-        const sanitizedPattern = PcbModelArchiveExporter.#sanitizeFileToken(
-            entry.pattern
-        )
-        const extension = PcbModelArchiveExporter.#resolveExtension(
-            entry.model?.format
-        )
-        const basePath = sanitizedPattern + '.' + extension
-        let archivePath = basePath
-        let duplicateIndex = 2
-
-        while (
-            exportedEntries.some(
-                (exportedEntry) => exportedEntry.archivePath === archivePath
-            )
-        ) {
-            archivePath =
-                sanitizedPattern + '--' + duplicateIndex + '.' + extension
-            duplicateIndex += 1
-        }
-
-        return archivePath
-    }
-
-    /**
      * Resolves one archive path for a stitched component STEP.
      * @param {{ designator: string }} entry Stitched entry.
      * @param {{ archivePath: string }[]} exportedEntries Existing entries.
@@ -632,28 +616,6 @@ export class PcbModelArchiveExporter {
         }
 
         return archivePath
-    }
-
-    /**
-     * Reads one resolved model into ZIP-ready bytes.
-     * @param {{ origin?: string, payloadText?: string, file?: Blob | File | null }} model
-     * @returns {Promise<Uint8Array>}
-     */
-    static async #readModelBytes(model) {
-        if (model?.origin === 'embedded') {
-            const payloadText = String(model?.payloadText || '')
-            if (!payloadText) {
-                throw new Error('Embedded STEP payload is unavailable.')
-            }
-
-            return new TextEncoder().encode(payloadText)
-        }
-
-        if (typeof model?.file?.arrayBuffer === 'function') {
-            return new Uint8Array(await model.file.arrayBuffer())
-        }
-
-        throw new Error('Session model bytes are unavailable.')
     }
 
     /**
@@ -704,53 +666,7 @@ export class PcbModelArchiveExporter {
      * @returns {string}
      */
     static #resolveModelIdentity(model) {
-        if (String(model?.origin || '') === 'embedded') {
-            return [
-                'embedded',
-                String(model?.sourceStream || ''),
-                String(model?.name || ''),
-                String(model?.checksum || ''),
-                String(model?.format || '')
-            ].join('::')
-        }
-
-        return [
-            'session',
-            String(model?.relativePath || ''),
-            String(model?.name || ''),
-            String(model?.format || '')
-        ].join('::')
-    }
-
-    /**
-     * Resolves a safe archive extension from the model format.
-     * @param {string | undefined} format
-     * @returns {string}
-     */
-    static #resolveExtension(format) {
-        const normalizedFormat = String(format || '')
-            .trim()
-            .toLowerCase()
-        if (
-            [
-                'step',
-                'stp',
-                'wrl',
-                'vrml',
-                'glb',
-                'gltf',
-                'stl',
-                'obj'
-            ].includes(normalizedFormat)
-        ) {
-            return normalizedFormat === 'stp'
-                ? 'step'
-                : normalizedFormat === 'vrml'
-                  ? 'wrl'
-                  : normalizedFormat
-        }
-
-        return 'step'
+        return PcbScene3dModelIdentity.resolve(model)
     }
 
     /**

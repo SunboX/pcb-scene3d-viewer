@@ -221,6 +221,26 @@ Shape {
     assert.deepEqual(meshes[0].color, [0.05, 0.07, 0.09])
 })
 
+test('PcbAssemblyModelMeshLoader reads canonical WRL bytes', async () => {
+    const loader = new PcbAssemblyModelMeshLoader()
+    const meshes = await loader.loadPlacement({
+        externalModel: {
+            format: 'wrl',
+            name: 'canonical.wrl',
+            data: new TextEncoder().encode(`
+#VRML V2.0 utf8
+Shape {
+  geometry IndexedFaceSet {
+    coord Coordinate { point [ 0 0 0, 100 0 0, 0 100 0 ] }
+    coordIndex [ 0, 1, 2, -1 ]
+  }
+}`)
+        }
+    })
+
+    assertTriangleMeshes(meshes)
+})
+
 test('PcbAssemblyModelMeshLoader loads ASCII STL meshes', async () => {
     const loader = new PcbAssemblyModelMeshLoader()
     const meshes = await loader.loadPlacement({
@@ -373,6 +393,250 @@ test('PcbAssemblyModelMeshLoader fetches remote GLTF sidecar buffers', async () 
     )
     assert.equal(calls[0].headers.Authorization, 'Bearer fake-token')
     assert.equal(calls[1].headers.Authorization, 'Bearer fake-token')
+})
+
+test('PcbAssemblyModelMeshLoader withholds static auth from cross-origin sidecars', async () => {
+    const calls = []
+    const binaryBuffer = createTriangleBinaryBuffer()
+    const gltf = createTriangleGltf()
+    gltf.buffers = [
+        {
+            byteLength: binaryBuffer.byteLength,
+            uri: 'https://other.invalid/triangle.bin'
+        }
+    ]
+    const loader = new PcbAssemblyModelMeshLoader({
+        authHeaders: { Authorization: 'Bearer private-token' },
+        authHeadersForUrl(url, context) {
+            return context.sameOrigin
+                ? {}
+                : { 'X-Explicit-Cross-Origin': 'allowed' }
+        },
+        async fetch(url, options) {
+            calls.push({ url, headers: options.headers })
+            if (url === 'https://trusted.invalid/triangle.gltf') {
+                return { ok: true, text: async () => JSON.stringify(gltf) }
+            }
+            return {
+                ok: true,
+                arrayBuffer: async () => binaryBuffer.buffer
+            }
+        }
+    })
+
+    assertTriangleMeshes(
+        await loader.loadPlacement({
+            externalModel: {
+                format: 'gltf',
+                resolvedUrl: 'https://trusted.invalid/triangle.gltf'
+            }
+        })
+    )
+
+    assert.equal(calls[0].headers.Authorization, 'Bearer private-token')
+    assert.equal(calls[1].headers.Authorization, undefined)
+    assert.equal(calls[1].headers['X-Explicit-Cross-Origin'], 'allowed')
+})
+
+test('PcbAssemblyModelMeshLoader enforces per-resource fetch byte limits', async () => {
+    const loader = new PcbAssemblyModelMeshLoader({
+        maxModelBytes: 3,
+        async fetch() {
+            return {
+                ok: true,
+                arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer
+            }
+        }
+    })
+
+    await assert.rejects(
+        loader.loadPlacement({
+            externalModel: {
+                format: 'obj',
+                resolvedUrl: 'https://assets.invalid/body.obj'
+            }
+        }),
+        /maximum model resource size of 3 bytes/u
+    )
+})
+
+test('PcbAssemblyModelMeshLoader shares count and aggregate limits with GLTF sidecars', async () => {
+    const binaryBuffer = createTriangleBinaryBuffer()
+    const gltf = createTriangleGltf()
+    gltf.buffers = [
+        {
+            byteLength: binaryBuffer.byteLength,
+            uri: 'triangle.bin'
+        }
+    ]
+    const mainBytes = new TextEncoder().encode(JSON.stringify(gltf))
+    const createLoader = (limits) =>
+        new PcbAssemblyModelMeshLoader({
+            ...limits,
+            async fetch(url) {
+                return {
+                    ok: true,
+                    arrayBuffer: async () =>
+                        url.endsWith('.gltf')
+                            ? mainBytes.buffer
+                            : binaryBuffer.buffer
+                }
+            }
+        })
+    const placement = {
+        externalModel: {
+            format: 'gltf',
+            resolvedUrl: 'https://assets.invalid/triangle.gltf'
+        }
+    }
+
+    await assert.rejects(
+        createLoader({ maxModelResources: 1 }).loadPlacement(placement),
+        /maximum model resource count of 1/u
+    )
+    await assert.rejects(
+        createLoader({
+            maxModelTotalBytes: mainBytes.byteLength
+        }).loadPlacement(placement),
+        new RegExp(
+            `maximum aggregate model size of ${mainBytes.byteLength} bytes`,
+            'u'
+        )
+    )
+})
+
+test('PcbAssemblyModelMeshLoader resolves GLTF sidecars beside project-relative models', async () => {
+    const calls = []
+    const binaryBuffer = createTriangleBinaryBuffer()
+    const gltf = createTriangleGltf()
+    gltf.buffers = [
+        {
+            byteLength: binaryBuffer.byteLength,
+            uri: 'buffers/triangle.bin'
+        }
+    ]
+    const loader = new PcbAssemblyModelMeshLoader({
+        async fetch(url) {
+            calls.push(url)
+            if (url === 'models/triangle.gltf') {
+                return {
+                    ok: true,
+                    text: async () => JSON.stringify(gltf)
+                }
+            }
+            if (url === 'models/buffers/triangle.bin') {
+                return {
+                    ok: true,
+                    arrayBuffer: async () => binaryBuffer.buffer
+                }
+            }
+            throw new Error('Unexpected model URL: ' + url)
+        }
+    })
+
+    assertTriangleMeshes(
+        await loader.loadPlacement({
+            externalModel: {
+                format: 'gltf',
+                name: 'triangle.gltf',
+                resolvedUrl: 'models/triangle.gltf'
+            }
+        })
+    )
+    assert.deepEqual(calls, [
+        'models/triangle.gltf',
+        'models/buffers/triangle.bin'
+    ])
+})
+
+test('PcbAssemblyModelMeshLoader fetches missing sidecars for resident GLTF JSON only when configured', async () => {
+    const binaryBuffer = createTriangleBinaryBuffer()
+    const gltf = createTriangleGltf()
+    gltf.buffers = [
+        {
+            byteLength: binaryBuffer.byteLength,
+            uri: 'buffers/triangle.bin'
+        }
+    ]
+    const fetchCalls = []
+    const loader = new PcbAssemblyModelMeshLoader({
+        async fetch(url) {
+            fetchCalls.push(url)
+            return {
+                ok: true,
+                arrayBuffer: async () => binaryBuffer.buffer
+            }
+        }
+    })
+
+    assertTriangleMeshes(
+        await loader.loadPlacement({
+            externalModel: {
+                format: 'gltf',
+                name: 'triangle.gltf',
+                resolvedUrl: 'models/triangle.gltf',
+                data: JSON.stringify(gltf)
+            }
+        })
+    )
+    assert.deepEqual(fetchCalls, ['models/buffers/triangle.bin'])
+})
+
+test('PcbAssemblyModelMeshLoader accepts canonical string data for every text model format', async () => {
+    const sources = [
+        {
+            format: 'wrl',
+            name: 'triangle.wrl',
+            data: `
+#VRML V2.0 utf8
+Shape {
+  geometry IndexedFaceSet {
+    coord Coordinate { point [ 0 0 0, 100 0 0, 0 100 0 ] }
+    coordIndex [ 0, 1, 2, -1 ]
+  }
+}`
+        },
+        {
+            format: 'stl',
+            name: 'triangle.stl',
+            data: `
+solid triangle
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex ${MIL100_MM} 0 0
+vertex 0 ${MIL100_MM} 0
+endloop
+endfacet
+endsolid triangle`
+        },
+        {
+            format: 'obj',
+            name: 'triangle.obj',
+            data: `
+v 0 0 0
+v ${MIL100_MM} 0 0
+v 0 ${MIL100_MM} 0
+f 1 2 3`
+        },
+        {
+            format: 'gltf',
+            name: 'triangle.gltf',
+            data: JSON.stringify(createTriangleGltf())
+        }
+    ]
+
+    for (const source of sources) {
+        for (const field of ['data', 'text']) {
+            const loader = new PcbAssemblyModelMeshLoader()
+            const externalModel = {
+                format: source.format,
+                name: source.name,
+                [field]: source.data
+            }
+            assertTriangleMeshes(await loader.loadPlacement({ externalModel }))
+        }
+    }
 })
 
 test('PcbAssemblyModelMeshLoader preserves OBJ vertex and material metadata', async () => {

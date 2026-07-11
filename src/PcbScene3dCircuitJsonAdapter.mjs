@@ -1,18 +1,23 @@
 import {
-    CircuitJsonDocument,
-    CircuitJsonIndexer,
+    CircuitJsonDocumentContext,
     CircuitJsonUnits
 } from 'circuitjson-toolkit'
+import { CircuitJsonPcbHolePrimitiveModel } from 'circuitjson-toolkit/extensions'
 import { PcbScene3dCircuitJsonGeometry } from './PcbScene3dCircuitJsonGeometry.mjs'
+import { PcbScene3dCircuitJsonDrillDetail } from './PcbScene3dCircuitJsonDrillDetail.mjs'
 import { PcbScene3dCircuitJsonModelTransform } from './PcbScene3dCircuitJsonModelTransform.mjs'
 import { PcbScene3dCircuitJsonCopperPourBuilder } from './PcbScene3dCircuitJsonCopperPourBuilder.mjs'
 import { PcbScene3dCircuitJsonSilkscreenBuilder } from './PcbScene3dCircuitJsonSilkscreenBuilder.mjs'
 import { PcbScene3dFootprintBodyBuilder } from './PcbScene3dFootprintBodyBuilder.mjs'
 import { PcbScene3dCircuitJsonLayer } from './PcbScene3dCircuitJsonLayer.mjs'
+import { PcbScene3dCircuitJsonInput } from './PcbScene3dCircuitJsonInput.mjs'
 import { PcbScene3dCircuitJsonTraceRouteBuilder } from './PcbScene3dCircuitJsonTraceRouteBuilder.mjs'
 import { PcbScene3dCircuitJsonThermalSpokeBuilder } from './PcbScene3dCircuitJsonThermalSpokeBuilder.mjs'
 import { PcbScene3dCircuitJsonModelUrlResolver } from './PcbScene3dCircuitJsonModelUrlResolver.mjs'
 import { PcbScene3dCircuitJsonSolderPasteBuilder } from './PcbScene3dCircuitJsonSolderPasteBuilder.mjs'
+import { CircuitJsonCadModelAssetResolver } from './CircuitJsonCadModelAssetResolver.mjs'
+import { PcbScene3dDescriptorSafeRecord } from './PcbScene3dDescriptorSafeRecord.mjs'
+import { PcbScene3dCircuitJsonModelAsset } from './PcbScene3dCircuitJsonModelAsset.mjs'
 
 const DEFAULT_COMPONENT_HEIGHT_MIL = 60
 const RECTANGULAR_PAD_SHAPE = 2
@@ -39,7 +44,7 @@ export class PcbScene3dCircuitJsonAdapter {
      * @returns {boolean}
      */
     static isCircuitJsonModel(value) {
-        return CircuitJsonDocument.isModel(value)
+        return PcbScene3dCircuitJsonInput.isModel(value)
     }
 
     /**
@@ -52,7 +57,14 @@ export class PcbScene3dCircuitJsonAdapter {
             return false
         }
 
-        if (String(value?.sourceFormat || '') === 'circuitjson') {
+        if (!Array.isArray(value)) return true
+
+        if (
+            String(
+                PcbScene3dCircuitJsonAdapter.#ownData(value, 'sourceFormat') ||
+                    ''
+            ) === 'circuitjson'
+        ) {
             return true
         }
 
@@ -60,21 +72,46 @@ export class PcbScene3dCircuitJsonAdapter {
     }
 
     /**
+     * Normalizes and validates one candidate through the shared CircuitJSON
+     * context while reusing an existing proof and element index.
+     * @param {unknown} circuitJson CircuitJSON model, document, or context.
+     * @returns {CircuitJsonDocumentContext} Prepared shared context.
+     */
+    static prepare(circuitJson) {
+        return CircuitJsonDocumentContext.prepare(circuitJson, {
+            indexes: ['elements']
+        })
+    }
+
+    /**
      * Builds the internal render model used by the Three.js runtime.
-     * @param {object[]} circuitJson Serialized CircuitJSON model.
+     * @param {unknown} circuitJson CircuitJSON model, document envelope, or prepared context.
      * @param {{ modelUrlResolver?: (url: string, context: object) => string | object | null | undefined, projectBaseUrl?: string, boardDrillQuality?: string, showPcbNotes?: boolean, showPcbPaste?: boolean }} [options] Adapter options.
      * @returns {object}
      */
     static build(circuitJson, options = {}) {
-        CircuitJsonDocument.assertModel(circuitJson)
-        const index = CircuitJsonIndexer.index(circuitJson)
-        const board = PcbScene3dCircuitJsonGeometry.buildBoard(index, options)
-        const detail = PcbScene3dCircuitJsonAdapter.#buildDetail(index, options)
+        const context = PcbScene3dCircuitJsonAdapter.prepare(circuitJson)
+        const index = context.getIndex('elements')
+        const resolvedOptions =
+            PcbScene3dCircuitJsonAdapter.#hasExternalModelReferences(index)
+                ? CircuitJsonCadModelAssetResolver.withContextAssetResolver(
+                      options,
+                      context
+                  )
+                : options
+        const board = PcbScene3dCircuitJsonGeometry.buildBoard(
+            index,
+            resolvedOptions
+        )
+        const detail = PcbScene3dCircuitJsonAdapter.#buildDetail(
+            index,
+            resolvedOptions
+        )
         const externalPlacements =
             PcbScene3dCircuitJsonAdapter.#buildExternalPlacements(
                 index,
                 board,
-                options
+                resolvedOptions
             )
         const externalPlacementByComponentId =
             PcbScene3dCircuitJsonAdapter.#externalPlacementByComponentId(
@@ -105,13 +142,60 @@ export class PcbScene3dCircuitJsonAdapter {
     }
 
     /**
+     * Returns whether CAD rows reference models that may need asset lookup.
+     * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
+     * @returns {boolean}
+     */
+    static #hasExternalModelReferences(index) {
+        return (index.elementsByType.get('cad_component') || []).some(
+            (component) =>
+                MODEL_URL_FIELDS.some(([field]) =>
+                    String(
+                        PcbScene3dCircuitJsonAdapter.#ownData(
+                            component,
+                            field
+                        ) || ''
+                    ).trim()
+                ) ||
+                Boolean(
+                    PcbScene3dCircuitJsonModelAsset.reference(
+                        PcbScene3dCircuitJsonAdapter.#ownData(
+                            component,
+                            'model_asset'
+                        )
+                    )
+                )
+        )
+    }
+
+    /**
      * Returns true for parser-produced arrays that already carry a legacy
      * renderer model and must keep using their format-specific scene builder.
      * @param {unknown} value Candidate model.
      * @returns {boolean}
      */
     static #hasCompatibilityModel(value) {
-        return Boolean(value?.pcb || value?.schematic || value?.bom)
+        return ['pcb', 'schematic', 'bom'].some((name) =>
+            Boolean(PcbScene3dCircuitJsonAdapter.#ownData(value, name))
+        )
+    }
+
+    /**
+     * Reads one own data property without invoking caller accessors.
+     * @param {unknown} value Record candidate.
+     * @param {string} name Property name.
+     * @returns {unknown} Own data value or undefined.
+     */
+    static #ownData(value, name) {
+        if (!value || typeof value !== 'object') return undefined
+        try {
+            const descriptor = Object.getOwnPropertyDescriptor(value, name)
+            return descriptor && Object.hasOwn(descriptor, 'value')
+                ? descriptor.value
+                : undefined
+        } catch {
+            return undefined
+        }
     }
 
     /**
@@ -405,12 +489,16 @@ export class PcbScene3dCircuitJsonAdapter {
         const match = MODEL_URL_FIELDS.find(([field]) =>
             String(cadComponent?.[field] || '').trim()
         )
-        if (!match) {
-            return null
-        }
+        const reference = match
+            ? {
+                  field: match[0],
+                  format: match[1],
+                  sourceUrl: String(cadComponent?.[match[0]] || '').trim()
+              }
+            : PcbScene3dCircuitJsonAdapter.#modelAssetReference(cadComponent)
+        if (!reference) return null
 
-        const [field, format] = match
-        const sourceUrl = String(cadComponent?.[field] || '').trim()
+        const { field, format, sourceUrl } = reference
         const context = {
             format,
             field,
@@ -433,6 +521,18 @@ export class PcbScene3dCircuitJsonAdapter {
     }
 
     /**
+     * Resolves a canonical `model_asset` fallback reference.
+     * @param {object} cadComponent CAD component element.
+     * @returns {{ field: string, format: string, sourceUrl: string } | null}
+     */
+    static #modelAssetReference(cadComponent) {
+        const reference = PcbScene3dCircuitJsonModelAsset.reference(
+            cadComponent?.model_asset
+        )
+        return reference ? { field: 'model_asset', ...reference } : null
+    }
+
+    /**
      * Applies optional caller-owned model URL resolution.
      * @param {string} sourceUrl Source URL.
      * @param {object} context Resolver context.
@@ -447,7 +547,7 @@ export class PcbScene3dCircuitJsonAdapter {
                 return { resolvedUrl: resolved }
             }
             if (resolved && typeof resolved === 'object') {
-                return { ...resolved }
+                return PcbScene3dDescriptorSafeRecord.copy(resolved)
             }
         }
 
@@ -663,13 +763,20 @@ export class PcbScene3dCircuitJsonAdapter {
     static #buildPlatedHoles(index) {
         return (index.elementsByType.get('pcb_plated_hole') || []).map(
             (hole) => {
+                const geometry = CircuitJsonPcbHolePrimitiveModel.build(hole, {
+                    x: Number(hole?.x || 0),
+                    y: Number(hole?.y || 0)
+                })
                 const size =
-                    PcbScene3dCircuitJsonAdapter.#platedHoleOuterSize(hole)
+                    PcbScene3dCircuitJsonAdapter.#platedHoleOuterSize(geometry)
                 const center = CircuitJsonUnits.pointMmToMil({
                     x: hole?.x,
                     y: hole?.y
                 })
-                const drill = PcbScene3dCircuitJsonGeometry.holeDrillSpec(hole)
+                const drill = PcbScene3dCircuitJsonGeometry.holeDrillSpec(
+                    hole,
+                    geometry
+                )
                 const exposesCopper =
                     PcbScene3dCircuitJsonAdapter.#exposesCopperThroughMask(
                         hole,
@@ -678,19 +785,18 @@ export class PcbScene3dCircuitJsonAdapter {
                 return {
                     x: center.x,
                     y: center.y,
-                    rotation: Number(hole?.ccw_rotation || 0),
-                    shapeTop: PcbScene3dCircuitJsonAdapter.#padShape(hole),
-                    shapeMid: PcbScene3dCircuitJsonAdapter.#padShape(hole),
-                    shapeBottom: PcbScene3dCircuitJsonAdapter.#padShape(hole),
+                    rotation: Number(geometry.rotation || 0),
+                    shapeTop: PcbScene3dCircuitJsonAdapter.#padShape(geometry),
+                    shapeMid: PcbScene3dCircuitJsonAdapter.#padShape(geometry),
+                    shapeBottom:
+                        PcbScene3dCircuitJsonAdapter.#padShape(geometry),
                     sizeTopX: size.width,
                     sizeTopY: size.height,
                     sizeMidX: size.width,
                     sizeMidY: size.height,
                     sizeBottomX: size.width,
                     sizeBottomY: size.height,
-                    holeDiameter: drill.diameter,
-                    holeSlotLength: drill.slotLength,
-                    holeRotation: drill.rotationDeg,
+                    ...PcbScene3dCircuitJsonDrillDetail.fields(drill),
                     holeOffsetX: drill.center.x - center.x,
                     holeOffsetY: drill.center.y - center.y,
                     hasTopSolderMaskOpening: exposesCopper,
@@ -721,9 +827,7 @@ export class PcbScene3dCircuitJsonAdapter {
                 sizeMidY: 0,
                 sizeBottomX: 0,
                 sizeBottomY: 0,
-                holeDiameter: drill.diameter,
-                holeSlotLength: drill.slotLength,
-                holeRotation: drill.rotationDeg,
+                ...PcbScene3dCircuitJsonDrillDetail.fields(drill),
                 hasTopSolderMaskOpening: false,
                 hasBottomSolderMaskOpening: false
             }
@@ -782,10 +886,17 @@ export class PcbScene3dCircuitJsonAdapter {
      * @returns {number}
      */
     static #roundedPadCornerRadiusPercent(pad, size) {
+        const width = CircuitJsonUnits.optionalLength(pad?.width)
+        const height = CircuitJsonUnits.optionalLength(pad?.height)
+        const radius = CircuitJsonUnits.optionalLength(pad?.radius)
+        if (width > 0 && height > 0 && radius > 0) {
+            return Math.min((radius / Math.min(width, height)) * 100, 50)
+        }
+
         const shortestSide = Math.min(Number(size.width), Number(size.height))
-        const radius = CircuitJsonUnits.mmToMil(pad?.radius, 0)
-        if (shortestSide > 0 && radius > 0) {
-            return Math.min((radius / shortestSide) * 100, 50)
+        const radiusMil = CircuitJsonUnits.mmToMil(pad?.radius, 0)
+        if (shortestSide > 0 && radiusMil > 0) {
+            return Math.min((radiusMil / shortestSide) * 100, 50)
         }
 
         return 50
@@ -793,23 +904,13 @@ export class PcbScene3dCircuitJsonAdapter {
 
     /**
      * Resolves plated-hole copper size from CircuitJSON fields.
-     * @param {object} hole Plated-hole element.
+     * @param {object} geometry Shared drilled-primitive geometry.
      * @returns {{ width: number, height: number }}
      */
-    static #platedHoleOuterSize(hole) {
-        if (Number(hole?.outer_diameter || 0) > 0) {
-            const diameter = CircuitJsonUnits.mmToMil(hole.outer_diameter, 1)
-            return { width: diameter, height: diameter }
-        }
+    static #platedHoleOuterSize(geometry) {
         return {
-            width: CircuitJsonUnits.mmToMil(
-                hole?.outer_width || hole?.rect_pad_width,
-                1
-            ),
-            height: CircuitJsonUnits.mmToMil(
-                hole?.outer_height || hole?.rect_pad_height,
-                1
-            )
+            width: CircuitJsonUnits.mmToMil(geometry?.width, 1),
+            height: CircuitJsonUnits.mmToMil(geometry?.height, 1)
         }
     }
 
@@ -820,7 +921,9 @@ export class PcbScene3dCircuitJsonAdapter {
      */
     static #padShape(pad) {
         const shape = String(pad?.shape || '')
-        return shape.includes('rect') || shape.endsWith('pill')
+        return shape.includes('rect') ||
+            shape.includes('polygon') ||
+            shape.endsWith('pill')
             ? RECTANGULAR_PAD_SHAPE
             : CIRCULAR_PAD_SHAPE
     }

@@ -180,6 +180,28 @@ export class PcbAssemblyPadMeshBuilder {
 
         const holeX = x + Number(pad?.holeOffsetX || 0)
         const holeY = y + Number(pad?.holeOffsetY || 0)
+        if (Number(pad?.holeShape) === 1) {
+            const width = PcbAssemblyPadMeshBuilder.#firstPositive([
+                pad?.holeWidth,
+                pad?.holeGeometry?.width,
+                diameter
+            ])
+            const height = PcbAssemblyPadMeshBuilder.#firstPositive([
+                pad?.holeHeight,
+                pad?.holeGeometry?.height,
+                diameter
+            ])
+            return PcbAssemblyPadMeshBuilder.#rotatedPoints(
+                PcbAssemblyPadMeshBuilder.#rectanglePoints(holeX, holeY, {
+                    width,
+                    height
+                }),
+                holeX,
+                holeY,
+                Number(pad?.holeRotation ?? pad?.rotation ?? 0) -
+                    Number(pad?.rotation || 0)
+            )
+        }
         const slotLength = PcbAssemblyPadMeshBuilder.#firstPositive([
             pad?.holeSlotLength,
             pad?.slotLength,

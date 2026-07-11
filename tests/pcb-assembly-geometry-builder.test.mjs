@@ -615,7 +615,8 @@ test('PcbAssemblyGeometryBuilder emits footprint-derived component leads', async
         {
             type: 'source_component',
             source_component_id: 'source_u1',
-            name: 'U1'
+            name: 'U1',
+            ftype: 'simple_chip'
         },
         {
             type: 'pcb_component',
@@ -623,12 +624,16 @@ test('PcbAssemblyGeometryBuilder emits footprint-derived component leads', async
             source_component_id: 'source_u1',
             center: { x: 1, y: 2 },
             layer: 'top',
-            rotation: 0
+            rotation: 0,
+            width: 0,
+            height: 0
         },
         {
             type: 'cad_component',
             cad_component_id: 'cad_u1',
             pcb_component_id: 'pcb_u1',
+            source_component_id: 'source_u1',
+            position: { x: 1, y: 2, z: 0.8 },
             footprinter_string: 'soic8'
         }
     ])
@@ -660,7 +665,8 @@ test('PcbAssemblyGeometryBuilder emits footprint-derived header pins', async () 
             type: 'source_component',
             source_component_id: 'source_j1',
             name: 'J1',
-            ftype: 'simple_pin_header'
+            ftype: 'simple_pin_header',
+            pin_count: 4
         },
         {
             type: 'pcb_component',
@@ -668,12 +674,16 @@ test('PcbAssemblyGeometryBuilder emits footprint-derived header pins', async () 
             source_component_id: 'source_j1',
             center: { x: 1, y: 2 },
             layer: 'top',
-            rotation: 0
+            rotation: 0,
+            width: 0,
+            height: 0
         },
         {
             type: 'cad_component',
             cad_component_id: 'cad_j1',
             pcb_component_id: 'pcb_j1',
+            source_component_id: 'source_j1',
+            position: { x: 1, y: 2, z: 0.8 },
             footprinter_string: 'pinrow4_nopinlabels'
         }
     ])
@@ -706,7 +716,8 @@ test('PcbAssemblyGeometryBuilder keeps bottom fallback SMD bodies below the boar
         {
             type: 'source_component',
             source_component_id: 'source_u1',
-            name: 'U1'
+            name: 'U1',
+            ftype: 'simple_chip'
         },
         {
             type: 'pcb_component',
@@ -714,12 +725,16 @@ test('PcbAssemblyGeometryBuilder keeps bottom fallback SMD bodies below the boar
             source_component_id: 'source_u1',
             center: { x: 1, y: 2 },
             layer: 'bottom',
-            rotation: 0
+            rotation: 0,
+            width: 0,
+            height: 0
         },
         {
             type: 'cad_component',
             cad_component_id: 'cad_u1',
             pcb_component_id: 'pcb_u1',
+            source_component_id: 'source_u1',
+            position: { x: 1, y: 2, z: -0.8 },
             footprinter_string: 'soic8'
         }
     ])

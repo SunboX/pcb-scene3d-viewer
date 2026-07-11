@@ -2,13 +2,13 @@ import { PcbScene3dBoardEdgeCutoutBuilder } from './PcbScene3dBoardEdgeCutoutBui
 import { PcbScene3dBoardCutoutPathFactory } from './PcbScene3dBoardCutoutPathFactory.mjs'
 import { PcbScene3dDrillPathFactory } from './PcbScene3dDrillPathFactory.mjs'
 import { PcbScene3dOutlineBuilder } from './PcbScene3dOutlineBuilder.mjs'
+import { PcbScene3dPlatedDrillSpecResolver } from './PcbScene3dPlatedDrillSpecResolver.mjs'
 
 /**
  * Builds the board solid profile, including drilled holes.
  */
 export class PcbScene3dBoardShapeFactory {
     static #CURVE_SEGMENTS = 8
-    static #PAD_HOLE_SHAPE_SLOT = 2
     static #PLATED_WALL_MATERIAL_INDEX = 2
     static #EDGE_WALL_MATERIAL_INDEX = 1
     static #CONTOUR_SAMPLE_POINTS = 64
@@ -235,7 +235,9 @@ export class PcbScene3dBoardShapeFactory {
                 const diameter = Number(normalizedSpec.diameter || 0)
                 const slotLength = Number(normalizedSpec.slotLength || 0)
                 const isCircular =
-                    diameter > 0 && slotLength <= diameter + 0.001
+                    PcbScene3dBoardShapeFactory.#isCircularDrillSpec(
+                        normalizedSpec
+                    )
                 const points = isCircular
                     ? PcbScene3dBoardEdgeCutoutBuilder.buildCircularCutoutPoints(
                           Number(normalizedSpec.x || 0),
@@ -338,7 +340,7 @@ export class PcbScene3dBoardShapeFactory {
      * @returns {{ points: { x: number, y: number }[], segments: { start: { x: number, y: number }, end: { x: number, y: number }, dx: number, dy: number, lengthSquared: number, bounds: { minX: number, maxX: number, minY: number, maxY: number } }[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, isCircular?: boolean, centerX?: number, centerY?: number, radius?: number }[]}
      */
     static #resolvePlatedContours(THREE, detail, normalizeBoardPoint) {
-        return PcbScene3dBoardShapeFactory.#resolvePlatedDrillSpecs(detail)
+        return PcbScene3dPlatedDrillSpecResolver.resolve(detail)
             .map((drillSpec) => {
                 const point = normalizeBoardPoint(drillSpec.x, drillSpec.y)
                 const normalizedSpec = {
@@ -373,14 +375,18 @@ export class PcbScene3dBoardShapeFactory {
 
     /**
      * Returns true when a drill aperture can be matched as a circle.
-     * @param {{ diameter?: number, slotLength?: number | null }} drillSpec
+     * @param {{ diameter?: number, shape?: string, slotLength?: number | null }} drillSpec
      * @returns {boolean}
      */
     static #isCircularDrillSpec(drillSpec) {
         const diameter = Number(drillSpec?.diameter || 0)
         const slotLength = Number(drillSpec?.slotLength || 0)
 
-        return diameter > 0 && slotLength <= diameter + 0.001
+        return (
+            diameter > 0 &&
+            drillSpec?.shape !== 'rect' &&
+            slotLength <= diameter + 0.001
+        )
     }
 
     /**
@@ -414,94 +420,6 @@ export class PcbScene3dBoardShapeFactory {
             centerY,
             radius
         }
-    }
-
-    /**
-     * Resolves deduped drill specs that represent plated holes.
-     * @param {{ pads?: any[], vias?: any[] }} detail
-     * @returns {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }[]}
-     */
-    static #resolvePlatedDrillSpecs(detail) {
-        const platedKeys = new Set()
-
-        for (const via of detail?.vias || []) {
-            const diameter = Number(via?.holeDiameter || 0)
-            if (diameter <= 0) {
-                continue
-            }
-
-            platedKeys.add(
-                PcbScene3dBoardShapeFactory.#buildDrillSpecKey({
-                    x: Number(via?.x || 0),
-                    y: Number(via?.y || 0),
-                    diameter,
-                    slotLength: null,
-                    rotationDeg: 0
-                })
-            )
-        }
-
-        for (const pad of detail?.pads || []) {
-            const diameter = Number(pad?.holeDiameter || 0)
-            if (
-                diameter <= 0 ||
-                !PcbScene3dBoardShapeFactory.#hasPadCopperAnnulus(pad, diameter)
-            ) {
-                continue
-            }
-
-            const slotLength =
-                Number(pad?.holeShape) ===
-                    PcbScene3dBoardShapeFactory.#PAD_HOLE_SHAPE_SLOT &&
-                Number(pad?.holeSlotLength || 0) > diameter
-                    ? Number(pad?.holeSlotLength || 0)
-                    : null
-            platedKeys.add(
-                PcbScene3dBoardShapeFactory.#buildDrillSpecKey({
-                    x: Number(pad?.x || 0),
-                    y: Number(pad?.y || 0),
-                    diameter,
-                    slotLength,
-                    rotationDeg:
-                        slotLength === null
-                            ? 0
-                            : PcbScene3dBoardShapeFactory.#normalizeAngle(
-                                  Number(pad?.rotation || 0) +
-                                      Number(pad?.holeRotation || 0)
-                              )
-                })
-            )
-        }
-
-        return PcbScene3dDrillPathFactory.resolveBoardDrillSpecs(detail).filter(
-            (drillSpec) =>
-                platedKeys.has(
-                    PcbScene3dBoardShapeFactory.#buildDrillSpecKey(drillSpec)
-                )
-        )
-    }
-
-    /**
-     * Checks whether one pad has copper larger than its drill aperture.
-     * @param {any} pad
-     * @param {number} diameter
-     * @returns {boolean}
-     */
-    static #hasPadCopperAnnulus(pad, diameter) {
-        const drillSpan = Math.max(diameter, Number(pad?.holeSlotLength || 0))
-
-        return [
-            pad?.sizeTopX,
-            pad?.sizeTopY,
-            pad?.sizeMidX,
-            pad?.sizeMidY,
-            pad?.sizeBottomX,
-            pad?.sizeBottomY
-        ].some(
-            (size) =>
-                Number(size || 0) >
-                drillSpan + PcbScene3dBoardShapeFactory.#GEOMETRY_EPSILON
-        )
     }
 
     /**
@@ -969,30 +887,5 @@ export class PcbScene3dBoardShapeFactory {
         const dy = point.y - projectedY
 
         return dx * dx + dy * dy
-    }
-
-    /**
-     * Builds a stable drill spec key.
-     * @param {{ x: number, y: number, diameter: number, slotLength?: number | null, rotationDeg?: number | null }} drillSpec
-     * @returns {string}
-     */
-    static #buildDrillSpecKey(drillSpec) {
-        return [
-            Number(drillSpec.x || 0).toFixed(4),
-            Number(drillSpec.y || 0).toFixed(4),
-            Number(drillSpec.diameter || 0).toFixed(4),
-            Number(drillSpec.slotLength || 0).toFixed(4),
-            Number(drillSpec.rotationDeg || 0).toFixed(4)
-        ].join(':')
-    }
-
-    /**
-     * Normalizes one angle into the inclusive `[0, 360)` range.
-     * @param {number} angleDeg
-     * @returns {number}
-     */
-    static #normalizeAngle(angleDeg) {
-        const normalized = Number(angleDeg || 0) % 360
-        return normalized < 0 ? normalized + 360 : normalized
     }
 }

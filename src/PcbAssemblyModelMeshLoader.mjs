@@ -1,5 +1,7 @@
 import { PcbAssemblyGltfModelMeshParser } from './PcbAssemblyGltfModelMeshParser.mjs'
 import { PcbAssemblyTextModelMeshParser } from './PcbAssemblyTextModelMeshParser.mjs'
+import { PcbScene3dDescriptorSafeRecord } from './PcbScene3dDescriptorSafeRecord.mjs'
+import { PcbScene3dModelContent } from './PcbScene3dModelContent.mjs'
 import { PcbScene3dStepLoader } from './PcbScene3dStepLoader.mjs'
 
 /**
@@ -10,39 +12,24 @@ export class PcbAssemblyModelMeshLoader {
     /** @type {PcbScene3dStepLoader} */
     #stepLoader
 
-    /** @type {((url: string, options: object) => Promise<any>) | null} */
-    #fetch
+    /** @type {boolean} */
+    #canFetch
 
-    /** @type {Record<string, string>} */
-    #authHeaders
-
-    /** @type {number} */
-    #fetchTimeoutMs
-
-    /** @type {Map<string, Promise<Uint8Array>>} */
-    #modelCache
+    /** @type {object} */
+    #modelOptions
 
     /**
      * @param {{ stepLoader?: PcbScene3dStepLoader, fetch?: (url: string, options: object) => Promise<any>, allowNetworkModelFetch?: boolean, authHeaders?: Record<string, string>, fetchTimeoutMs?: number, modelCache?: Map<string, Promise<Uint8Array>> }} [options] Loader options.
      */
     constructor(options = {}) {
         this.#stepLoader = options.stepLoader || new PcbScene3dStepLoader()
-        this.#fetch =
-            typeof options.fetch === 'function'
-                ? options.fetch
-                : options.allowNetworkModelFetch === true &&
-                    typeof globalThis.fetch === 'function'
-                  ? globalThis.fetch.bind(globalThis)
-                  : null
-        this.#authHeaders = PcbAssemblyModelMeshLoader.#headers(
-            options.authHeaders
-        )
-        this.#fetchTimeoutMs = Math.max(
-            Number(options.fetchTimeoutMs || 30_000),
-            1
-        )
-        this.#modelCache =
+        const modelCache =
             options.modelCache instanceof Map ? options.modelCache : new Map()
+        this.#modelOptions = PcbScene3dModelContent.createFetchScope({
+            ...PcbScene3dDescriptorSafeRecord.copy(options),
+            modelCache
+        })
+        this.#canFetch = PcbScene3dModelContent.canFetch(this.#modelOptions)
     }
 
     /**
@@ -51,9 +38,10 @@ export class PcbAssemblyModelMeshLoader {
      * @returns {Promise<object[]>}
      */
     async loadPlacement(placement) {
-        const model = await this.#modelWithFetchedContent(
+        const suppliedModel = PcbAssemblyModelMeshLoader.#withCanonicalTextData(
             placement?.externalModel || null
         )
+        const model = await this.#modelWithFetchedContent(suppliedModel)
         const format = String(model?.format || '').toLowerCase()
         if (format === 'step' || format === 'stp') {
             return this.#loadStepMeshes(model)
@@ -88,12 +76,15 @@ export class PcbAssemblyModelMeshLoader {
      * @returns {Promise<object | null>}
      */
     async #modelWithFetchedContent(model) {
-        if (!model || PcbAssemblyModelMeshLoader.#hasModelContent(model)) {
-            return model
-        }
-
+        if (!model) return model
         const url = String(model.resolvedUrl || model.sourceUrl || '').trim()
-        if (!url || !this.#fetch) {
+        const format = String(model?.format || '').toLowerCase()
+        if (PcbAssemblyModelMeshLoader.#hasModelContent(model)) {
+            return format === 'gltf' && url && this.#canFetch
+                ? await this.#modelWithFetchedGltfBuffers(model, url)
+                : model
+        }
+        if (!url || !this.#canFetch) {
             return model
         }
 
@@ -102,7 +93,7 @@ export class PcbAssemblyModelMeshLoader {
             ...model,
             payloadBytes: bytes
         }
-        if (String(model?.format || '').toLowerCase() === 'gltf') {
+        if (format === 'gltf') {
             return await this.#modelWithFetchedGltfBuffers(fetchedModel, url)
         }
 
@@ -114,21 +105,16 @@ export class PcbAssemblyModelMeshLoader {
      * @param {string} url Resolved model URL.
      * @returns {Promise<Uint8Array>}
      */
-    async #fetchModelBytes(url) {
-        const cacheKey = String(url || '')
-        const cached = this.#modelCache.get(cacheKey)
-        if (cached) {
-            return await cached
-        }
-
-        const pending = this.#fetchModelBytesUncached(url)
-        this.#modelCache.set(cacheKey, pending)
-        try {
-            return await pending
-        } catch (error) {
-            this.#modelCache.delete(cacheKey)
-            throw error
-        }
+    async #fetchModelBytes(url, mainUrl = url) {
+        return PcbScene3dModelContent.bytes(
+            {
+                format: 'model-resource',
+                resolvedUrl: url,
+                mainModelUrl: mainUrl
+            },
+            this.#modelOptions,
+            'Model'
+        )
     }
 
     /**
@@ -138,7 +124,19 @@ export class PcbAssemblyModelMeshLoader {
      * @returns {Promise<object>}
      */
     async #modelWithFetchedGltfBuffers(model, modelUrl) {
-        const uris = PcbAssemblyModelMeshLoader.#externalGltfBufferUris(model)
+        const existingBuffers = PcbAssemblyModelMeshLoader.#resourceArray(
+            model?.externalBuffers
+        )
+        const existingUris = new Set(
+            existingBuffers
+                .map((resource) =>
+                    String(resource?.uri || resource?.name || '').trim()
+                )
+                .filter(Boolean)
+        )
+        const uris = PcbAssemblyModelMeshLoader.#externalGltfBufferUris(
+            model
+        ).filter((uri) => !existingUris.has(uri))
         if (!uris.length) {
             return model
         }
@@ -153,18 +151,13 @@ export class PcbAssemblyModelMeshLoader {
                 uri,
                 name: uri,
                 sourceUrl,
-                payloadBytes: await this.#fetchModelBytes(sourceUrl)
+                payloadBytes: await this.#fetchModelBytes(sourceUrl, modelUrl)
             })
         }
 
         return {
             ...model,
-            externalBuffers: [
-                ...PcbAssemblyModelMeshLoader.#resourceArray(
-                    model?.externalBuffers
-                ),
-                ...fetchedBuffers
-            ]
+            externalBuffers: [...existingBuffers, ...fetchedBuffers]
         }
     }
 
@@ -215,47 +208,32 @@ export class PcbAssemblyModelMeshLoader {
      * @returns {string}
      */
     static #resolveSidecarUrl(uri, modelUrl) {
-        try {
-            return new URL(uri, modelUrl).toString()
-        } catch (_error) {
-            return uri
-        }
+        return PcbScene3dModelContent.resolveRelativeUrl(uri, modelUrl)
     }
 
     /**
-     * Reads model bytes from the configured fetcher.
-     * @param {string} url Resolved model URL.
-     * @returns {Promise<Uint8Array>}
+     * Maps canonical string `text` or `data` to the text parser contract.
+     * @param {object | null} model External model metadata.
+     * @returns {object | null}
      */
-    async #fetchModelBytesUncached(url) {
-        const controller =
-            typeof AbortController === 'function' ? new AbortController() : null
-        const timeout = controller
-            ? setTimeout(() => controller.abort(), this.#fetchTimeoutMs)
-            : null
-
+    static #withCanonicalTextData(model) {
+        if (!model || typeof model !== 'object') return model
+        let descriptors
         try {
-            const response = await this.#fetch(url, {
-                headers: { ...this.#authHeaders },
-                signal: controller?.signal
-            })
-            return await PcbAssemblyModelMeshLoader.#bytesFromFetchResponse(
-                response
-            )
-        } catch (error) {
-            if (error?.name === 'AbortError') {
-                throw new Error(
-                    'Model fetch timed out after ' +
-                        this.#fetchTimeoutMs +
-                        'ms: ' +
-                        url
-                )
-            }
-            throw error
-        } finally {
-            if (timeout) {
-                clearTimeout(timeout)
-            }
+            descriptors = Object.getOwnPropertyDescriptors(model)
+        } catch {
+            return model
+        }
+        if (typeof descriptors.payloadText?.value === 'string') {
+            return model
+        }
+        const text = ['text', 'data']
+            .map((key) => descriptors[key]?.value)
+            .find((value) => typeof value === 'string')
+        if (typeof text !== 'string') return model
+        return {
+            ...PcbScene3dDescriptorSafeRecord.copy(model),
+            payloadText: text
         }
     }
 
@@ -342,22 +320,43 @@ export class PcbAssemblyModelMeshLoader {
         if (typeof model?.payloadText === 'string') {
             return model.payloadText
         }
-
-        if (typeof model?.file?.text === 'function') {
-            return await model.file.text()
-        }
-
-        if (typeof model?.file?.arrayBuffer === 'function') {
-            return new TextDecoder().decode(
-                new Uint8Array(await model.file.arrayBuffer())
-            )
-        }
-
-        if (model?.file instanceof Uint8Array) {
-            return new TextDecoder().decode(model.file)
+        for (const value of [
+            model?.payloadBytes,
+            model?.bytes,
+            model?.data,
+            model?.file
+        ]) {
+            if (typeof value?.text === 'function') {
+                return await value.text()
+            }
+            const bytes =
+                await PcbAssemblyModelMeshLoader.#bytesFromValue(value)
+            if (bytes) return new TextDecoder().decode(bytes)
         }
 
         throw new Error('WRL model content is not available.')
+    }
+
+    /**
+     * Reads one local model payload as bytes.
+     * @param {unknown} value Byte or blob candidate.
+     * @returns {Promise<Uint8Array | null>}
+     */
+    static async #bytesFromValue(value) {
+        if (!value) return null
+        if (value instanceof Uint8Array) return value
+        if (value instanceof ArrayBuffer) return new Uint8Array(value)
+        if (ArrayBuffer.isView(value)) {
+            return new Uint8Array(
+                value.buffer,
+                value.byteOffset,
+                value.byteLength
+            )
+        }
+        if (typeof value.arrayBuffer === 'function') {
+            return new Uint8Array(await value.arrayBuffer())
+        }
+        return null
     }
 
     /**
@@ -410,54 +409,6 @@ export class PcbAssemblyModelMeshLoader {
             model?.bytes ||
             model?.data ||
             model?.file
-        )
-    }
-
-    /**
-     * Converts a fetch response or byte-like result into bytes.
-     * @param {any} response Fetch response or direct byte-like value.
-     * @returns {Promise<Uint8Array>}
-     */
-    static async #bytesFromFetchResponse(response) {
-        if (response?.ok === false) {
-            throw new Error(
-                'Model fetch failed with HTTP status ' +
-                    String(response.status || 'unknown') +
-                    '.'
-            )
-        }
-        if (response instanceof Uint8Array) {
-            return response
-        }
-        if (response instanceof ArrayBuffer) {
-            return new Uint8Array(response)
-        }
-        if (ArrayBuffer.isView(response) && !(response instanceof DataView)) {
-            return new Uint8Array(
-                response.buffer,
-                response.byteOffset,
-                response.byteLength
-            )
-        }
-        if (typeof response?.arrayBuffer === 'function') {
-            return new Uint8Array(await response.arrayBuffer())
-        }
-        if (typeof response?.text === 'function') {
-            return new TextEncoder().encode(await response.text())
-        }
-        throw new Error('Fetched model content is not readable.')
-    }
-
-    /**
-     * Normalizes string headers.
-     * @param {object | undefined} headers Candidate headers.
-     * @returns {Record<string, string>}
-     */
-    static #headers(headers) {
-        return Object.fromEntries(
-            Object.entries(headers || {})
-                .map(([key, value]) => [String(key), String(value)])
-                .filter(([key, value]) => key && value)
         )
     }
 

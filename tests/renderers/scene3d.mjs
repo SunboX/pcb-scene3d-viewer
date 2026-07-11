@@ -1,7 +1,59 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { CircuitJsonDocumentContext } from 'circuitjson-toolkit'
+import { DocumentResult } from 'circuitjson-toolkit/parser'
 import { PcbScene3dShellRenderer } from '../../src/PcbScene3dShellRenderer.mjs'
+
+/**
+ * Builds one canonical model for shell input-shape parity.
+ * @returns {object[]}
+ */
+function createShellCircuitJson() {
+    return [
+        {
+            type: 'pcb_board',
+            pcb_board_id: 'board_shell',
+            center: { x: 0, y: 0 },
+            width: 30.48,
+            height: 20.32,
+            thickness: 1.6
+        },
+        {
+            type: 'source_component',
+            source_component_id: 'source_u1',
+            name: 'U1',
+            ftype: 'simple_chip'
+        },
+        {
+            type: 'source_component',
+            source_component_id: 'source_r1',
+            name: 'R1',
+            ftype: 'simple_resistor',
+            resistance: '10k'
+        },
+        {
+            type: 'pcb_component',
+            pcb_component_id: 'pcb_u1',
+            source_component_id: 'source_u1',
+            center: { x: 0, y: 0 },
+            layer: 'top',
+            rotation: 0,
+            width: 2,
+            height: 1
+        },
+        {
+            type: 'pcb_component',
+            pcb_component_id: 'pcb_r1',
+            source_component_id: 'source_r1',
+            center: { x: 5, y: 0 },
+            layer: 'top',
+            rotation: 0,
+            width: 2,
+            height: 1
+        }
+    ]
+}
 
 /**
  * Reads the full application stylesheet in import order.
@@ -54,6 +106,62 @@ test('renderScene3d emits viewport and control chrome for the 3D scene', () => {
     assert.match(markup, /scene-3d__selection/)
     assert.match(markup, /Click a component to inspect it\./)
     assert.match(markup, /scene-3d__diagnostics/)
+})
+
+test('renderScene3d renders legacy, raw, document, and context inputs with parity', () => {
+    const legacy = {
+        pcb: {
+            boardOutline: { widthMil: 1200, heightMil: 800, segments: [] },
+            components: [{ designator: 'U1' }, { designator: 'R1' }]
+        },
+        bom: [{ quantity: 1 }, { quantity: 1 }]
+    }
+    const raw = createShellCircuitJson()
+    const document = DocumentResult.createValidated({
+        model: createShellCircuitJson()
+    })
+    const context = CircuitJsonDocumentContext.prepare(document)
+
+    const markups = [legacy, raw, document, context].map((input) =>
+        PcbScene3dShellRenderer.render(input)
+    )
+
+    for (const markup of markups) {
+        assert.match(markup, /1200 x 800 mil/)
+        assert.match(markup, />2 components</)
+        assert.match(markup, /<dt>BOM groups<\/dt><dd>2<\/dd>/)
+    }
+    assert.deepEqual(context.statistics.indexBuilds, { elements: 1 })
+})
+
+test('renderScene3d groups canonical BOM rows with CircuitJSON parity', () => {
+    const model = createShellCircuitJson()
+    model.push({
+        type: 'source_component',
+        source_component_id: 'source_r2',
+        name: 'R2',
+        ftype: 'simple_resistor',
+        resistance: '10k'
+    })
+
+    const markup = PcbScene3dShellRenderer.render(model)
+
+    assert.match(markup, /<dt>BOM groups<\/dt><dd>2<\/dd>/)
+})
+
+test('renderScene3d honors faux boards for component-only CircuitJSON', () => {
+    const model = createShellCircuitJson().filter(
+        (element) => element.type !== 'pcb_board'
+    )
+
+    const emptyMarkup = PcbScene3dShellRenderer.render(model)
+    const fauxMarkup = PcbScene3dShellRenderer.render(model, null, {
+        drawFauxBoard: true
+    })
+
+    assert.match(emptyMarkup, /viewer-empty/)
+    assert.match(fauxMarkup, /scene-3d__viewport/)
+    assert.match(fauxMarkup, />2 components</)
 })
 
 /**

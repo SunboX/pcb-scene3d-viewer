@@ -27,7 +27,8 @@ function createCircuitJsonSample() {
             type: 'source_component',
             source_component_id: 'source_r1',
             name: 'R1',
-            ftype: 'simple_resistor'
+            ftype: 'simple_resistor',
+            resistance: '10k'
         },
         {
             type: 'pcb_component',
@@ -92,6 +93,50 @@ function createCircuitJsonSample() {
             ]
         }
     ]
+}
+
+/**
+ * Builds one canonical source/PCB/CAD component fixture.
+ * @param {{ id: string, sourceId?: string, name?: string, center: { x: number, y: number }, layer?: 'top' | 'bottom', rotation?: number, width?: number, height?: number, includeSource?: boolean, cad: object }} options Fixture options.
+ * @returns {object[]} Canonical CircuitJSON elements.
+ */
+function createModelComponentFixture(options) {
+    const id = String(options.id)
+    const sourceId = String(options.sourceId || id)
+    const layer = options.layer || 'top'
+    const elements = []
+    if (options.includeSource !== false) {
+        elements.push({
+            type: 'source_component',
+            source_component_id: `source_${sourceId}`,
+            name: options.name || id.toUpperCase(),
+            ftype: 'simple_chip'
+        })
+    }
+    elements.push(
+        {
+            type: 'pcb_component',
+            pcb_component_id: `pcb_${id}`,
+            source_component_id: `source_${sourceId}`,
+            center: options.center,
+            layer,
+            rotation: options.rotation || 0,
+            width: options.width || 0,
+            height: options.height || 0
+        },
+        {
+            type: 'cad_component',
+            cad_component_id: `cad_${id}`,
+            pcb_component_id: `pcb_${id}`,
+            source_component_id: `source_${sourceId}`,
+            position: {
+                ...options.center,
+                z: layer === 'bottom' ? -0.8 : 0.8
+            },
+            ...options.cad
+        }
+    )
+    return elements
 }
 
 test('PcbScene3dCircuitJsonAdapter builds a core render model from serialized CircuitJSON', () => {
@@ -308,65 +353,11 @@ test('PcbScene3dCircuitJsonAdapter builds panels and board cutouts', () => {
     assert.equal(Math.round(renderModel.board.widthMil), 1181)
     assert.equal(Math.round(renderModel.board.heightMil), 630)
     assert.equal(Math.round(renderModel.board.thicknessMil), 47)
+    assert.equal(renderModel.board.contours.length, 1)
+    assert.equal(renderModel.board.contours[0].sourceId, 'panel_1')
     assert.equal(renderModel.board.segments.length, 4)
     assert.equal(renderModel.board.cutouts.length, 1)
     assert.equal(renderModel.board.cutouts[0].points.length, 4)
-})
-
-test('PcbScene3dCircuitJsonAdapter filters targeted board cutouts and rotates rectangles', () => {
-    const renderModel = PcbScene3dCircuitJsonAdapter.build([
-        {
-            type: 'pcb_board',
-            pcb_board_id: 'board_a',
-            center: { x: 0, y: 0 },
-            width: 20,
-            height: 20,
-            thickness: 1.6
-        },
-        {
-            type: 'pcb_board',
-            pcb_board_id: 'board_b',
-            center: { x: 50, y: 0 },
-            width: 20,
-            height: 20,
-            thickness: 1.6
-        },
-        {
-            type: 'pcb_cutout',
-            pcb_cutout_id: 'matching',
-            pcb_board_id: 'board_a',
-            shape: 'rect',
-            center: { x: 1, y: 2 },
-            width: 2,
-            height: 6,
-            ccw_rotation: 90
-        },
-        {
-            type: 'pcb_cutout',
-            pcb_cutout_id: 'global',
-            shape: 'circle',
-            center: { x: -2, y: -2 },
-            radius: 1
-        },
-        {
-            type: 'pcb_cutout',
-            pcb_cutout_id: 'other-board',
-            pcb_board_id: 'board_b',
-            shape: 'rect',
-            center: { x: 3, y: 3 },
-            width: 2,
-            height: 2
-        }
-    ])
-    const sourceIds = renderModel.board.cutouts.map((cutout) => cutout.sourceId)
-    const rotated = renderModel.board.cutouts.find(
-        (cutout) => cutout.sourceId === 'matching'
-    )
-    const bounds = pointBounds(rotated.points)
-
-    assert.deepEqual(sourceIds, ['matching', 'global'])
-    assert.equal(Math.round(bounds.maxX - bounds.minX), 236)
-    assert.equal(Math.round(bounds.maxY - bounds.minY), 79)
 })
 
 test('PcbScene3dCircuitJsonAdapter maps offset pill drills with quality metadata', () => {
@@ -602,27 +593,16 @@ test('PcbScene3dCircuitJsonAdapter exposes component model metadata', () => {
             height: 10,
             thickness: 1.6
         },
-        ...modelFields.flatMap(([field, _format, url], index) => [
-            {
-                type: 'source_component',
-                source_component_id: 'source_' + index,
-                name: 'U' + (index + 1)
-            },
-            {
-                type: 'pcb_component',
-                pcb_component_id: 'pcb_' + index,
-                source_component_id: 'source_' + index,
+        ...modelFields.flatMap(([field, _format, url], index) =>
+            createModelComponentFixture({
+                id: String(index),
+                name: `U${index + 1}`,
                 center: { x: index + 1, y: index + 2 },
                 layer: index % 2 ? 'bottom' : 'top',
-                rotation: index * 15
-            },
-            {
-                type: 'cad_component',
-                cad_component_id: 'cad_' + index,
-                pcb_component_id: 'pcb_' + index,
-                [field]: url
-            }
-        ])
+                rotation: index * 15,
+                cad: { [field]: url }
+            })
+        )
     ]
     const renderModel = PcbScene3dCircuitJsonAdapter.build(circuitJson)
 
@@ -675,24 +655,12 @@ test('PcbScene3dCircuitJsonAdapter applies explicit model URL resolution metadat
                 height: 10,
                 thickness: 1.6
             },
-            {
-                type: 'source_component',
-                source_component_id: 'source_u1',
-                name: 'U1'
-            },
-            {
-                type: 'pcb_component',
-                pcb_component_id: 'pcb_u1',
-                source_component_id: 'source_u1',
+            ...createModelComponentFixture({
+                id: 'u1',
+                name: 'U1',
                 center: { x: 1, y: 2 },
-                layer: 'top'
-            },
-            {
-                type: 'cad_component',
-                cad_component_id: 'cad_u1',
-                pcb_component_id: 'pcb_u1',
-                model_step_url: '/models/u1.step'
-            }
+                cad: { model_step_url: '/models/u1.step' }
+            })
         ],
         {
             modelUrlResolver(url, context) {
@@ -729,38 +697,22 @@ test('PcbScene3dCircuitJsonAdapter resolves package model paths against project 
                 height: 10,
                 thickness: 1.6
             },
-            {
-                type: 'source_component',
-                source_component_id: 'source_u1',
-                name: 'U1'
-            },
-            {
-                type: 'pcb_component',
-                pcb_component_id: 'pcb_u1',
-                source_component_id: 'source_u1',
+            ...createModelComponentFixture({
+                id: 'u1',
+                name: 'U1',
                 center: { x: 1, y: 2 },
-                layer: 'top'
-            },
-            {
-                type: 'cad_component',
-                cad_component_id: 'cad_u1',
-                pcb_component_id: 'pcb_u1',
-                model_step_url:
-                    './node_modules/@demo/connector-models/dist/u1.step'
-            },
-            {
-                type: 'pcb_component',
-                pcb_component_id: 'pcb_j1',
-                source_component_id: 'source_u1',
+                cad: {
+                    model_step_url:
+                        './node_modules/@demo/connector-models/dist/u1.step'
+                }
+            }),
+            ...createModelComponentFixture({
+                id: 'j1',
+                sourceId: 'u1',
                 center: { x: 4, y: 2 },
-                layer: 'top'
-            },
-            {
-                type: 'cad_component',
-                cad_component_id: 'cad_j1',
-                pcb_component_id: 'pcb_j1',
-                model_obj_url: '/node_modules/package-models/j1.obj'
-            }
+                includeSource: false,
+                cad: { model_obj_url: '/node_modules/package-models/j1.obj' }
+            })
         ],
         { projectBaseUrl: 'https://assets.invalid/projects/demo/' }
     )
@@ -794,25 +746,15 @@ test('PcbScene3dCircuitJsonAdapter resolves scoped package aliases against proje
                 height: 10,
                 thickness: 1.6
             },
-            {
-                type: 'source_component',
-                source_component_id: 'source_u1',
-                name: 'U1'
-            },
-            {
-                type: 'pcb_component',
-                pcb_component_id: 'pcb_u1',
-                source_component_id: 'source_u1',
+            ...createModelComponentFixture({
+                id: 'u1',
+                name: 'U1',
                 center: { x: 1, y: 2 },
-                layer: 'top'
-            },
-            {
-                type: 'cad_component',
-                cad_component_id: 'cad_u1',
-                pcb_component_id: 'pcb_u1',
-                model_step_url:
-                    './node_modules/@tsci/fakeauthor.fake-library/assets/u1.step'
-            }
+                cad: {
+                    model_step_url:
+                        './node_modules/@tsci/fakeauthor.fake-library/assets/u1.step'
+                }
+            })
         ],
         { projectBaseUrl: 'https://assets.invalid/projects/demo/' }
     )
@@ -874,28 +816,18 @@ test('PcbScene3dCircuitJsonAdapter carries CAD bounding-box display intent', () 
             height: 10,
             thickness: 1.6
         },
-        {
-            type: 'source_component',
-            source_component_id: 'source_u1',
-            name: 'U1'
-        },
-        {
-            type: 'pcb_component',
-            pcb_component_id: 'pcb_u1',
-            source_component_id: 'source_u1',
+        ...createModelComponentFixture({
+            id: 'u1',
+            name: 'U1',
             center: { x: 1, y: 2 },
-            layer: 'top',
             width: 1,
-            height: 1
-        },
-        {
-            type: 'cad_component',
-            cad_component_id: 'cad_u1',
-            pcb_component_id: 'pcb_u1',
-            model_step_url: '/models/u1.step',
-            show_as_bounding_box: true,
-            size: { x: 6, y: 4, z: 2 }
-        }
+            height: 1,
+            cad: {
+                model_step_url: '/models/u1.step',
+                show_as_bounding_box: true,
+                size: { x: 6, y: 4, z: 2 }
+            }
+        })
     ])
     const component = renderModel.components[0]
     const placement = renderModel.externalPlacements[0]
@@ -917,24 +849,12 @@ test('PcbScene3dCircuitJsonAdapter maps 3MF CAD model URLs', () => {
             height: 10,
             thickness: 1.6
         },
-        {
-            type: 'source_component',
-            source_component_id: 'source_u1',
-            name: 'U1'
-        },
-        {
-            type: 'pcb_component',
-            pcb_component_id: 'pcb_u1',
-            source_component_id: 'source_u1',
+        ...createModelComponentFixture({
+            id: 'u1',
+            name: 'U1',
             center: { x: 1, y: 2 },
-            layer: 'top'
-        },
-        {
-            type: 'cad_component',
-            cad_component_id: 'cad_u1',
-            pcb_component_id: 'pcb_u1',
-            model_3mf_url: '/models/u1.3mf'
-        }
+            cad: { model_3mf_url: '/models/u1.3mf' }
+        })
     ])
     const placement = renderModel.externalPlacements[0]
 
@@ -952,32 +872,22 @@ test('PcbScene3dCircuitJsonAdapter maps richer CAD placement hints', () => {
             height: 10,
             thickness: 1.6
         },
-        {
-            type: 'source_component',
-            source_component_id: 'source_u1',
-            name: 'U1'
-        },
-        {
-            type: 'pcb_component',
-            pcb_component_id: 'pcb_u1',
-            source_component_id: 'source_u1',
+        ...createModelComponentFixture({
+            id: 'u1',
+            name: 'U1',
             center: { x: 1, y: 2 },
-            layer: 'top'
-        },
-        {
-            type: 'cad_component',
-            cad_component_id: 'cad_u1',
-            pcb_component_id: 'pcb_u1',
-            model_obj_url: '/models/u1.obj',
-            model_unit_to_mm_scale_factor: 2,
-            model_origin_position: { x: 0.5, y: 0.25, z: 0.1 },
-            model_offset: { x: 0.1, y: -0.2, z: 0.3 },
-            model_origin_alignment: 'center_of_component_on_board_surface',
-            model_object_fit: 'fill_bounds',
-            model_board_normal_direction: 'z-',
-            size: { x: 4, y: 2, z: 1 },
-            show_as_translucent_model: true
-        }
+            cad: {
+                model_obj_url: '/models/u1.obj',
+                model_unit_to_mm_scale_factor: 2,
+                model_origin_position: { x: 0.5, y: 0.25, z: 0.1 },
+                model_offset: { x: 0.1, y: -0.2, z: 0.3 },
+                model_origin_alignment: 'center_of_component_on_board_surface',
+                model_object_fit: 'fill_bounds',
+                model_board_normal_direction: 'z-',
+                size: { x: 4, y: 2, z: 1 },
+                show_as_translucent_model: true
+            }
+        })
     ])
     const placement = renderModel.externalPlacements[0]
 

@@ -68,6 +68,39 @@ export class PcbScene3dRuntimeBoardMeshes {
      * @returns {any}
      */
     static buildBoardMesh(THREE, sceneDescription, normalizeDetailPoint) {
+        const contours = PcbScene3dRuntimeBoardMeshes.#boardContours(
+            sceneDescription.board
+        )
+        if (contours.length === 1) {
+            return PcbScene3dRuntimeBoardMeshes.#buildBoardMesh(
+                THREE,
+                { ...sceneDescription, board: contours[0] },
+                normalizeDetailPoint
+            )
+        }
+
+        const group = new THREE.Group()
+        group.name = 'board-contours'
+        contours.forEach((board, index) => {
+            const mesh = PcbScene3dRuntimeBoardMeshes.#buildBoardMesh(
+                THREE,
+                { ...sceneDescription, board },
+                normalizeDetailPoint
+            )
+            mesh.name = 'board-contour-' + (index + 1)
+            group.add(mesh)
+        })
+        return group
+    }
+
+    /**
+     * Builds one independently extruded board contour.
+     * @param {any} THREE Three.js namespace.
+     * @param {{ board?: any, detail?: any, boardAssemblyModel?: any }} sceneDescription Scene metadata.
+     * @param {(x: number, y: number) => { x: number, y: number }} normalizeDetailPoint Detail coordinate normalizer.
+     * @returns {any}
+     */
+    static #buildBoardMesh(THREE, sceneDescription, normalizeDetailPoint) {
         const board = sceneDescription.board
         const geometry = PcbScene3dBoardShapeFactory.buildGeometry(
             THREE,
@@ -140,6 +173,39 @@ export class PcbScene3dRuntimeBoardMeshes {
      * @returns {any}
      */
     static buildBoardOutline(THREE, sceneDescription, normalizeDetailPoint) {
+        const contours = PcbScene3dRuntimeBoardMeshes.#boardContours(
+            sceneDescription.board
+        )
+        if (contours.length === 1) {
+            return PcbScene3dRuntimeBoardMeshes.#buildBoardOutline(
+                THREE,
+                { ...sceneDescription, board: contours[0] },
+                normalizeDetailPoint
+            )
+        }
+
+        const group = new THREE.Group()
+        group.name = 'board-contour-outlines'
+        contours.forEach((board, index) => {
+            const outline = PcbScene3dRuntimeBoardMeshes.#buildBoardOutline(
+                THREE,
+                { ...sceneDescription, board },
+                normalizeDetailPoint
+            )
+            outline.name = 'board-contour-outline-' + (index + 1)
+            group.add(outline)
+        })
+        return group
+    }
+
+    /**
+     * Builds one independently rendered board contour outline.
+     * @param {any} THREE Three.js namespace.
+     * @param {{ board?: any, detail?: any }} sceneDescription Scene metadata.
+     * @param {(x: number, y: number) => { x: number, y: number }} normalizeDetailPoint Detail coordinate normalizer.
+     * @returns {any}
+     */
+    static #buildBoardOutline(THREE, sceneDescription, normalizeDetailPoint) {
         const shape = PcbScene3dBoardShapeFactory.buildShape(
             THREE,
             sceneDescription.board,
@@ -164,6 +230,24 @@ export class PcbScene3dRuntimeBoardMeshes {
             geometry,
             new THREE.LineBasicMaterial({ color: 0xc9ca78, transparent: true })
         )
+    }
+
+    /**
+     * Resolves independently renderable contours while preserving legacy boards.
+     * @param {object} board Aggregate board metadata.
+     * @returns {object[]}
+     */
+    static #boardContours(board) {
+        const contours = Array.isArray(board?.contours)
+            ? board.contours.filter(Boolean)
+            : []
+        if (!contours.length) return [board || {}]
+
+        return contours.map((contour) => ({
+            ...board,
+            ...contour,
+            contours: []
+        }))
     }
 
     /**

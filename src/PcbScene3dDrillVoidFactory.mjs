@@ -51,7 +51,7 @@ export class PcbScene3dDrillVoidFactory {
         PcbScene3dDrillPathFactory.resolveBoardDrillSpecs(detail).forEach(
             (drillSpec) => {
                 if (
-                    PcbScene3dDrillVoidFactory.#isSlottedDrill(drillSpec) ||
+                    PcbScene3dDrillVoidFactory.#isNonCircularDrill(drillSpec) ||
                     edgeDrillKeys.has(
                         PcbScene3dDrillVoidFactory.#drillKey(drillSpec)
                     )
@@ -152,14 +152,15 @@ export class PcbScene3dDrillVoidFactory {
     }
 
     /**
-     * Checks whether one drill is a routed slot.
-     * @param {{ diameter?: number, slotLength?: number | null }} drillSpec Drill spec.
+     * Checks whether one drill needs its non-circular substrate wall directly.
+     * @param {{ diameter?: number, shape?: string, slotLength?: number | null }} drillSpec Drill spec.
      * @returns {boolean}
      */
-    static #isSlottedDrill(drillSpec) {
+    static #isNonCircularDrill(drillSpec) {
         return (
+            drillSpec?.shape === 'rect' ||
             Number(drillSpec?.slotLength || 0) >
-            Number(drillSpec?.diameter || 0) + 0.001
+                Number(drillSpec?.diameter || 0) + 0.001
         )
     }
 

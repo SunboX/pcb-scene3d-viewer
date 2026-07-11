@@ -29,7 +29,7 @@ test('PcbScene3dBoardShapeFactory cuts circular and slotted drills into the boar
                     holeDiameter: 12,
                     holeShape: 2,
                     holeSlotLength: 28,
-                    holeRotation: 0,
+                    holeRotation: 90,
                     rotation: 90
                 }
             ]
@@ -66,6 +66,46 @@ test('PcbScene3dBoardShapeFactory cuts circular and slotted drills into the boar
         slottedDrillBounds.maxY - slottedDrillBounds.minY >
             slottedDrillBounds.maxX - slottedDrillBounds.minX + 6
     )
+})
+
+test('PcbScene3dBoardShapeFactory cuts rotated rectangular drill apertures', () => {
+    const shape = PcbScene3dBoardShapeFactory.buildShape(
+        THREE,
+        {
+            widthMil: 100,
+            heightMil: 80,
+            segments: []
+        },
+        {
+            vias: [],
+            pads: [
+                {
+                    x: 50,
+                    y: 40,
+                    holeDiameter: 10,
+                    holeWidth: 20,
+                    holeHeight: 10,
+                    holeShape: 1,
+                    holeRotation: 30
+                }
+            ]
+        },
+        (x, y) => ({ x: x - 50, y: y - 40 })
+    )
+    const points = shape.holes[0].getPoints()
+    const bounds = points.reduce(
+        (result, point) => ({
+            minX: Math.min(result.minX, point.x),
+            maxX: Math.max(result.maxX, point.x),
+            minY: Math.min(result.minY, point.y),
+            maxY: Math.max(result.maxY, point.y)
+        }),
+        { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
+    )
+
+    assert.equal(points.length, 5)
+    assert.ok(Math.abs(bounds.maxX - bounds.minX - 22.3205) < 0.001)
+    assert.ok(Math.abs(bounds.maxY - bounds.minY - 18.6603) < 0.001)
 })
 
 test('PcbScene3dBoardShapeFactory cuts explicit board cutouts into the board shape', () => {
@@ -225,6 +265,41 @@ test('PcbScene3dBoardShapeFactory colors plated drill walls as copper only', () 
             1
         ) > 0,
         'Expected non-plated drill wall to keep edge material'
+    )
+})
+
+test('PcbScene3dBoardShapeFactory classifies plated slots by board-space drill rotation', () => {
+    const geometry = PcbScene3dBoardShapeFactory.buildGeometry(
+        THREE,
+        {
+            widthMil: 120,
+            heightMil: 100,
+            thicknessMil: 12,
+            segments: []
+        },
+        {
+            vias: [],
+            pads: [
+                {
+                    x: 60,
+                    y: 50,
+                    rotation: 20,
+                    sizeTopX: 36,
+                    sizeTopY: 24,
+                    holeDiameter: 10,
+                    holeShape: 2,
+                    holeSlotLength: 28,
+                    holeRotation: 70
+                }
+            ]
+        },
+        (x, y) => ({ x: x - 60, y: y - 50 })
+    )
+
+    assert.equal(
+        geometry.groups.some((group) => Number(group.materialIndex) === 2),
+        true,
+        'Expected independently rotated plated slot walls to use copper material'
     )
 })
 

@@ -70,7 +70,8 @@ Components describe fallback package bodies and selection metadata:
 
 ## External Placements
 
-External placements describe STEP, WRL, GLB, GLTF, STL, or OBJ model instances:
+External placements describe STEP, WRL, 3MF, GLB, GLTF, STL, or OBJ model
+instances:
 
 ```js
 {
@@ -112,12 +113,47 @@ GLTF/GLB import consumes triangle primitives and ignores unsupported primitive
 modes such as points or lines. Remote `.gltf` files can reference external
 `buffers[].uri` sidecars; when URL-backed model loading is enabled, the loader
 resolves those sidecars relative to the `.gltf` URL and fetches them with the
-same cache, timeout, and auth-header policy.
+same cache, timeout, and auth-header policy. This also works when the main model
+path is project-relative. Resident GLTF JSON uses already attached buffers and
+fetches only missing sidecars when an explicit policy is configured.
+
+Canonical document/session asset resolution attaches safe project-relative
+GLTF BIN, OBJ MTL, and WRL texture companions directly. WRL textures are encoded
+as data URIs before parsing. Unmatched texture URLs become inert unless the host
+supplies an explicit fetch policy, so Three.js cannot perform an implicit
+network request.
 
 Resolved model URLs are not fetched by default. Hosts that want URL-backed model
-loading must provide an explicit fetch policy through `PcbAssemblyModelMeshLoader`
-or a higher-level export service. Use `authHeaders`, `fetchTimeoutMs`, and a
-caller-owned `modelCache` when remote model requests are enabled.
+loading must provide an explicit fetch policy through
+`PcbScene3dController`/`PcbScene3dRuntime` `modelLoaderOptions`,
+`PcbScene3dExternalModels.loadIntoScene({ modelLoaderOptions })`, or
+`PcbAssemblyModelMeshLoader`. Use `authHeaders`, `fetchTimeoutMs`, and a
+caller-owned `modelCache` when remote model requests are enabled. Successful
+STEP/STP, WRL/VRML, and 3MF requests share that cache; rejected requests are
+evicted so callers can retry. Embedded `payloadText`, `text`, `payloadBytes`,
+`bytes`, canonical string/binary `data`, and browser `File`/`Blob` values are
+loaded without enabling network access.
+
+Static `authHeaders` are origin-bound to the main model URL and are not copied
+to cross-origin GLTF buffers or WRL textures. Use
+`authHeadersForUrl(url, { mainUrl, sameOrigin, label })` for an intentional
+per-resource exception. Network scopes default to 128 MiB per resource, 256
+resources, and 512 MiB aggregate across main models and sidecars. Configure
+`maxModelBytes`, `maxModelResources`, and `maxModelTotalBytes` to adjust those
+bounds.
+
+Model caches and ZIP deduplication use exact canonical project paths, retained
+source streams, or asset IDs before falling back to checksums and names. Two
+different directories may therefore contain the same basename without a cache
+collision, while repeated placements of one exact source reuse parsed geometry.
+Canonical/session asset aliases resolve exact case-sensitive paths first. A
+case-insensitive fallback is accepted only when unique, preventing collisions
+between files that differ only by case.
+
+Raw model archives use one unique pattern directory per source. The main file
+keeps its original source basename, and safe relative GLTF buffers/images, OBJ
+resources, and WRL textures are emitted beneath the same directory so their
+references remain usable after extraction.
 
 When `projectBaseUrl` is provided to the CircuitJSON adapter, package-style
 model paths such as `node_modules/package-name/path/to/model.step` are resolved
@@ -167,9 +203,16 @@ model matching, the source toolkit should encode those decisions in the scene
 description.
 
 Through-hole pads can describe offset or slotted drills with `holeOffsetX`,
-`holeOffsetY`, `holeSlotLength`, and `holeRotation`. Board substrate export uses
+`holeOffsetY`, `holeSlotLength`, and board-space `holeRotation`; pad `rotation`
+is not added to the drill angle. Board substrate export uses
 `detail.drillQuality` values of `low`, `medium`, or `high` to choose circular
-drill sampling density.
+drill sampling density. Direct CircuitJSON polygon-plated holes are normalized
+through the shared hole primitive model: polygon extents become the pad's local
+copper size and pill width/height become `holeDiameter` and `holeSlotLength`.
+
+`board.contours` contains every independently extruded board or panel outline.
+The top-level board bounds center all detail, while runtime bodies, outlines,
+solder-mask faces, and exported substrate meshes iterate the contour list.
 
 Rounded SMT pads set `hasRoundedRect`, the side-specific
 `roundedRectShapeTop`/`roundedRectShapeBottom`, and

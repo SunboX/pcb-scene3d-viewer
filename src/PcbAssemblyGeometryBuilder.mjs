@@ -82,30 +82,52 @@ export class PcbAssemblyGeometryBuilder {
      */
     static #buildBoardMeshes(sceneDescription) {
         const board = sceneDescription?.board || {}
-        const width = Math.max(Number(board.widthMil || 0), 1)
-        const height = Math.max(Number(board.heightMil || 0), 1)
-        const thickness = Math.max(Number(board.thicknessMil || 63), 1)
-        const outlinePoints =
-            PcbAssemblyGeometryBuilder.#boardOutlinePoints(board)
-        const outlineMesh = PcbAssemblyBoardSubstrateBuilder.build(
-            'board',
-            outlinePoints,
-            sceneDescription,
-            thickness,
-            BOARD_COLOR
-        )
-        if (outlineMesh) {
-            return [outlineMesh]
-        }
+        const contours = PcbAssemblyGeometryBuilder.#boardContours(board)
+        return contours.map((contour, index) => {
+            const width = Math.max(Number(contour.widthMil || 0), 1)
+            const height = Math.max(Number(contour.heightMil || 0), 1)
+            const thickness = Math.max(
+                Number(contour.thicknessMil || board.thicknessMil || 63),
+                1
+            )
+            const name = contours.length === 1 ? 'board' : `board-${index + 1}`
+            const outlinePoints =
+                PcbAssemblyGeometryBuilder.#boardOutlinePoints(contour)
+            const outlineMesh = PcbAssemblyBoardSubstrateBuilder.build(
+                name,
+                outlinePoints,
+                { ...sceneDescription, board: contour },
+                thickness,
+                BOARD_COLOR
+            )
+            if (outlineMesh) return outlineMesh
 
-        return [
-            PcbAssemblyMeshUtils.box('board', {
+            return PcbAssemblyMeshUtils.box(name, {
+                x: Number(contour.minX || 0) + width / 2,
+                y: Number(contour.minY || 0) + height / 2,
                 width,
                 depth: height,
                 height: thickness,
                 color: BOARD_COLOR
             })
-        ]
+        })
+    }
+
+    /**
+     * Resolves independently exportable board contours.
+     * @param {object} board Aggregate board metadata.
+     * @returns {object[]}
+     */
+    static #boardContours(board) {
+        const contours = Array.isArray(board?.contours)
+            ? board.contours.filter(Boolean)
+            : []
+        if (!contours.length) return [board]
+        return contours.map((contour) => ({
+            ...board,
+            ...contour,
+            contours: []
+        }))
     }
 
     /**

@@ -77,7 +77,7 @@ export class PcbScene3dRuntime {
     /**
      * @param {HTMLElement} viewportNode
      * @param {any} sceneDescription Scene description or CircuitJSON model.
-     * @param {{ setDiagnostics?: (messages: string[]) => void, setSelection?: (selection: any | null) => void, loadRuntimeModules?: () => Promise<{ THREE: any, OrbitControls: any }>, translate?: ((key: string) => string) | null }} [hooks]
+     * @param {{ setDiagnostics?: (messages: string[]) => void, setSelection?: (selection: any | null) => void, loadRuntimeModules?: () => Promise<{ THREE: any, OrbitControls: any }>, translate?: ((key: string) => string) | null, modelLoaderOptions?: object }} [hooks]
      */
     constructor(viewportNode, sceneDescription, hooks = {}) {
         const renderModel =
@@ -398,7 +398,6 @@ export class PcbScene3dRuntime {
             if (component?.renderFallbackBody === false) {
                 return
             }
-
             const isCompanionBase =
                 PcbScene3dExternalCompanionFallback.shouldKeepFallback(
                     this.#sceneDescription,
@@ -628,6 +627,7 @@ export class PcbScene3dRuntime {
             three: this.#three,
             sceneDescription: this.#placementSceneDescription,
             externalModelsGroup,
+            modelLoaderOptions: this.#hooks.modelLoaderOptions,
             modelViewScale: PcbScene3dRuntime.resolveViewScale(
                 this.#presetState.get(),
                 this.#sceneDescription

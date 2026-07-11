@@ -272,6 +272,30 @@ export class PcbAssemblyBoardSubstrateBuilder {
             return null
         }
 
+        if (Number(pad?.holeShape) === 1) {
+            const width = PcbAssemblyBoardSubstrateBuilder.#firstPositive([
+                pad?.holeWidth,
+                pad?.holeGeometry?.width,
+                diameter
+            ])
+            const height = PcbAssemblyBoardSubstrateBuilder.#firstPositive([
+                pad?.holeHeight,
+                pad?.holeGeometry?.height,
+                diameter
+            ])
+            return PcbAssemblyBoardSubstrateBuilder.#rotatedPoints(
+                PcbAssemblyBoardSubstrateBuilder.#rectanglePoints(
+                    x,
+                    y,
+                    width,
+                    height
+                ),
+                x,
+                y,
+                Number(pad?.holeRotation ?? pad?.rotation ?? 0)
+            )
+        }
+
         const slotLength = PcbAssemblyBoardSubstrateBuilder.#firstPositive([
             pad?.holeSlotLength,
             pad?.slotLength,
@@ -294,6 +318,25 @@ export class PcbAssemblyBoardSubstrateBuilder {
         }
 
         return PcbAssemblyMeshUtils.circlePoints(x, y, diameter / 2, pointCount)
+    }
+
+    /**
+     * Builds axis-aligned rectangular aperture points.
+     * @param {number} x Center X.
+     * @param {number} y Center Y.
+     * @param {number} width Width.
+     * @param {number} height Height.
+     * @returns {number[][]} Rectangle points.
+     */
+    static #rectanglePoints(x, y, width, height) {
+        const halfWidth = width / 2
+        const halfHeight = height / 2
+        return [
+            [x - halfWidth, y - halfHeight],
+            [x + halfWidth, y - halfHeight],
+            [x + halfWidth, y + halfHeight],
+            [x - halfWidth, y + halfHeight]
+        ]
     }
 
     /**

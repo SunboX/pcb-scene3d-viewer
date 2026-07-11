@@ -157,6 +157,71 @@ test('PcbScene3dStepLoader caches parsed STEP payloads by model identity', async
     ])
 })
 
+test('PcbScene3dStepLoader distinguishes canonical paths and reuses identical sources', async () => {
+    let importerCalls = 0
+    const loader = new PcbScene3dStepLoader({
+        importerLoader: async () => ({
+            ReadStepFile() {
+                importerCalls += 1
+                return {
+                    success: true,
+                    meshes: [
+                        {
+                            name: 'body',
+                            color: [0.5, 0.5, 0.5],
+                            attributes: {
+                                position: {
+                                    array: [0, 0, 0, 1, 0, 0, 0, 1, 0]
+                                },
+                                normal: { array: [] }
+                            },
+                            index: { array: [0, 1, 2] }
+                        }
+                    ]
+                }
+            }
+        })
+    })
+    const first = {
+        id: 'asset-a',
+        name: 'body.step',
+        format: 'step',
+        data: new Uint8Array([1]),
+        source: { projectRelativePath: 'models/a/body.step' }
+    }
+    const sameSource = {
+        id: 'asset-a-copy',
+        name: 'body.step',
+        format: 'step',
+        data: new Uint8Array([1]),
+        source: { projectRelativePath: 'models/a/body.step' }
+    }
+    const collision = {
+        id: 'asset-b',
+        name: 'body.step',
+        format: 'step',
+        data: new Uint8Array([2]),
+        source: { projectRelativePath: 'models/b/body.step' }
+    }
+    const textSource = {
+        id: 'asset-c',
+        name: 'body.step',
+        format: 'step',
+        text: 'ISO-10303-21;',
+        source: { projectRelativePath: 'models/c/body.step' }
+    }
+
+    const firstResult = await loader.loadModel(first)
+    const repeatedResult = await loader.loadModel(sameSource)
+    const collisionResult = await loader.loadModel(collision)
+    const textResult = await loader.loadModel(textSource)
+
+    assert.equal(firstResult, repeatedResult)
+    assert.notEqual(firstResult, collisionResult)
+    assert.notEqual(collisionResult, textResult)
+    assert.equal(importerCalls, 3)
+})
+
 /**
  * Verifies importer-provided typed arrays and compact face ranges survive
  * normalization so large STEP models do not get expanded back into plain JS

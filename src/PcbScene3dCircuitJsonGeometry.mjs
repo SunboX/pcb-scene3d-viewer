@@ -23,18 +23,68 @@ export class PcbScene3dCircuitJsonGeometry {
      * @returns {object}
      */
     static buildBoard(index, options = {}) {
-        const explicitBoardElement =
-            index.elementsByType.get('pcb_panel')?.[0] ||
-            index.elementsByType.get('pcb_board')?.[0]
-        const boardElement =
-            explicitBoardElement ||
-            PcbScene3dCircuitJsonGeometry.#fauxBoardElement(index, options) ||
-            {}
-        const widthMil = CircuitJsonUnits.mmToMil(
+        const panelElements = index.elementsByType.get('pcb_panel') || []
+        const boardElements = index.elementsByType.get('pcb_board') || []
+        const explicitElements = panelElements.length
+            ? panelElements
+            : boardElements
+        const elements = explicitElements.length
+            ? explicitElements
+            : [
+                  PcbScene3dCircuitJsonGeometry.#fauxBoardElement(
+                      index,
+                      options
+                  ) || {}
+              ]
+        const sourceContours = elements.map((element) =>
+            PcbScene3dCircuitJsonGeometry.#buildBoardContour(
+                index,
+                element,
+                options
+            )
+        )
+        const bounds =
+            PcbScene3dCircuitJsonGeometry.#contourBounds(sourceContours)
+        const centerX = (bounds.minX + bounds.maxX) / 2
+        const centerY = (bounds.minY + bounds.maxY) / 2
+        const contours = sourceContours.map((contour) => ({
+            ...contour,
+            centerX,
+            centerY
+        }))
+        const primary = contours[0]
+
+        return {
+            widthMil: bounds.maxX - bounds.minX,
+            heightMil: bounds.maxY - bounds.minY,
+            thicknessMil: Math.max(
+                ...contours.map((contour) => contour.thicknessMil)
+            ),
+            minX: bounds.minX,
+            minY: bounds.minY,
+            centerX,
+            centerY,
+            segments: primary.segments,
+            cutouts: PcbScene3dCircuitJsonGeometry.#uniqueCutouts(contours),
+            contours,
+            surfaceColor: null,
+            edgeColor: null
+        }
+    }
+
+    /**
+     * Builds one independently renderable board or panel contour.
+     * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
+     * @param {object} boardElement Board or panel element.
+     * @param {{ boardDrillQuality?: string }} options Adapter options.
+     * @returns {object}
+     */
+    static #buildBoardContour(index, boardElement, options) {
+        const declaredWidthMil = CircuitJsonUnits.mmToMil(
             boardElement.width,
             DEFAULT_BOARD_WIDTH_MM
         )
-        const heightMil = CircuitJsonUnits.mmToMil(
+        const declaredHeightMil = CircuitJsonUnits.mmToMil(
             boardElement.height,
             DEFAULT_BOARD_HEIGHT_MM
         )
@@ -43,24 +93,35 @@ export class PcbScene3dCircuitJsonGeometry {
             DEFAULT_BOARD_THICKNESS_MM
         )
         const center = CircuitJsonUnits.pointMmToMil(boardElement.center || {})
-        const minX = center.x - widthMil / 2
-        const minY = center.y - heightMil / 2
+        const fallback = {
+            minX: center.x - declaredWidthMil / 2,
+            minY: center.y - declaredHeightMil / 2,
+            widthMil: declaredWidthMil,
+            heightMil: declaredHeightMil
+        }
         const segments = PcbScene3dCircuitJsonGeometry.#buildBoardSegments(
             boardElement,
-            {
-                minX,
-                minY,
-                widthMil,
-                heightMil
-            }
+            fallback
+        )
+        const bounds = PcbScene3dCircuitJsonGeometry.#segmentBounds(
+            segments,
+            fallback
         )
 
         return {
-            widthMil,
-            heightMil,
+            sourceId: String(
+                boardElement?.pcb_panel_id ||
+                    boardElement?.panel_id ||
+                    boardElement?.pcb_board_id ||
+                    boardElement?.board_id ||
+                    ''
+            ),
+            sourceType: String(boardElement?.type || 'pcb_board'),
+            widthMil: bounds.maxX - bounds.minX,
+            heightMil: bounds.maxY - bounds.minY,
             thicknessMil,
-            minX,
-            minY,
+            minX: bounds.minX,
+            minY: bounds.minY,
             centerX: center.x,
             centerY: center.y,
             segments,
@@ -72,6 +133,78 @@ export class PcbScene3dCircuitJsonGeometry {
             surfaceColor: null,
             edgeColor: null
         }
+    }
+
+    /**
+     * Resolves finite bounds around one contour's ordered segments.
+     * @param {object[]} segments Board segments.
+     * @param {{ minX: number, minY: number, widthMil: number, heightMil: number }} fallback Rectangle fallback.
+     * @returns {{ minX: number, minY: number, maxX: number, maxY: number }}
+     */
+    static #segmentBounds(segments, fallback) {
+        const points = segments.flatMap((segment) => [
+            { x: Number(segment?.x1), y: Number(segment?.y1) },
+            { x: Number(segment?.x2), y: Number(segment?.y2) }
+        ])
+        const finite = points.filter((point) =>
+            Number.isFinite(point.x + point.y)
+        )
+        if (!finite.length) {
+            return {
+                minX: fallback.minX,
+                minY: fallback.minY,
+                maxX: fallback.minX + fallback.widthMil,
+                maxY: fallback.minY + fallback.heightMil
+            }
+        }
+
+        return finite.reduce(
+            (bounds, point) => ({
+                minX: Math.min(bounds.minX, point.x),
+                minY: Math.min(bounds.minY, point.y),
+                maxX: Math.max(bounds.maxX, point.x),
+                maxY: Math.max(bounds.maxY, point.y)
+            }),
+            { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+        )
+    }
+
+    /**
+     * Resolves aggregate bounds around every physical contour.
+     * @param {object[]} contours Board contours.
+     * @returns {{ minX: number, minY: number, maxX: number, maxY: number }}
+     */
+    static #contourBounds(contours) {
+        return contours.reduce(
+            (bounds, contour) => ({
+                minX: Math.min(bounds.minX, contour.minX),
+                minY: Math.min(bounds.minY, contour.minY),
+                maxX: Math.max(bounds.maxX, contour.minX + contour.widthMil),
+                maxY: Math.max(bounds.maxY, contour.minY + contour.heightMil)
+            }),
+            { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+        )
+    }
+
+    /**
+     * Flattens contour cutouts without duplicating global cutout rows.
+     * @param {object[]} contours Board contours.
+     * @returns {object[]}
+     */
+    static #uniqueCutouts(contours) {
+        const seen = new Set()
+        return contours
+            .flatMap((contour) => contour.cutouts || [])
+            .filter((cutout) => {
+                const key =
+                    cutout.sourceId ||
+                    JSON.stringify(
+                        (cutout.points || []).map((point) => [point.x, point.y])
+                    )
+                if (seen.has(key)) return false
+                seen.add(key)
+                return true
+            })
     }
 
     /**
@@ -175,43 +308,61 @@ export class PcbScene3dCircuitJsonGeometry {
     /**
      * Resolves drill opening metadata from circular, pill, and offset fields.
      * @param {object} hole CircuitJSON hole-like element.
-     * @returns {{ center: { x: number, y: number }, diameter: number, slotLength: number, rotationDeg: number }}
+     * @param {object | null} [primitive] Shared normalized hole primitive.
+     * @returns {{ center: { x: number, y: number }, diameter: number, width: number, height: number, shape: 'circle' | 'pill' | 'rect', slotLength: number, rotationDeg: number }}
      */
-    static holeDrillSpec(hole) {
+    static holeDrillSpec(hole, primitive = null) {
         const center = CircuitJsonUnits.pointMmToMil({
             x: Number(hole?.x || 0) + Number(hole?.hole_offset_x || 0),
             y: Number(hole?.y || 0) + Number(hole?.hole_offset_y || 0)
         })
         const width = CircuitJsonUnits.mmToMil(
-            hole?.hole_width || hole?.hole_diameter,
+            primitive?.holeWidth || hole?.hole_width || hole?.hole_diameter,
             0
         )
         const height = CircuitJsonUnits.mmToMil(
-            hole?.hole_height || hole?.hole_diameter || hole?.hole_width,
+            primitive?.holeHeight ||
+                hole?.hole_height ||
+                hole?.hole_diameter ||
+                hole?.hole_width,
             0
         )
         const diameter = PcbScene3dCircuitJsonGeometry.#firstPositive([
-            hole?.hole_diameter
-                ? CircuitJsonUnits.mmToMil(hole.hole_diameter, 0)
-                : 0,
+            primitive?.holeDiameter
+                ? CircuitJsonUnits.mmToMil(primitive.holeDiameter, 0)
+                : hole?.hole_diameter
+                  ? CircuitJsonUnits.mmToMil(hole.hole_diameter, 0)
+                  : 0,
             Math.min(width || Infinity, height || Infinity),
             width,
             height
         ])
+        const shapeText = String(
+            primitive?.holeShape || hole?.hole_shape || ''
+        ).toLowerCase()
+        const isRect =
+            shapeText.includes('rect') || shapeText.includes('square')
         const isPill =
-            String(hole?.hole_shape || '')
-                .toLowerCase()
-                .includes('pill') ||
-            (width > 0 && height > 0 && Math.abs(width - height) > 0.001)
+            !isRect &&
+            (shapeText.includes('pill') ||
+                shapeText.includes('oval') ||
+                (width > 0 && height > 0 && Math.abs(width - height) > 0.001))
+        const shape = isRect ? 'rect' : isPill ? 'pill' : 'circle'
         const slotLength = isPill ? Math.max(width, height, diameter) : 0
         const axisRotation = isPill && height > width ? 90 : 0
 
         return {
             center,
             diameter,
+            width: width || diameter,
+            height: height || diameter,
+            shape,
             slotLength: slotLength > diameter ? slotLength : 0,
             rotationDeg:
-                PcbScene3dCircuitJsonGeometry.#rotationDeg(hole) + axisRotation
+                Number(
+                    primitive?.holeRotation ??
+                        PcbScene3dCircuitJsonGeometry.#rotationDeg(hole)
+                ) + axisRotation
         }
     }
 

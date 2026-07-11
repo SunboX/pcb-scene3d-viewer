@@ -129,7 +129,8 @@ test('PcbAssemblyGeometryBuilder rotates generated header pins with component pl
             type: 'source_component',
             source_component_id: 'source_j1',
             name: 'J1',
-            ftype: 'simple_pin_header'
+            ftype: 'simple_pin_header',
+            pin_count: 4
         },
         {
             type: 'pcb_component',
@@ -137,12 +138,16 @@ test('PcbAssemblyGeometryBuilder rotates generated header pins with component pl
             source_component_id: 'source_j1',
             center: { x: 0, y: 0 },
             layer: 'top',
-            rotation: 90
+            rotation: 90,
+            width: 0,
+            height: 0
         },
         {
             type: 'cad_component',
             cad_component_id: 'cad_j1',
             pcb_component_id: 'pcb_j1',
+            source_component_id: 'source_j1',
+            position: { x: 0, y: 0, z: 0.8 },
             footprinter_string: 'pinrow4_nopinlabels'
         }
     ])

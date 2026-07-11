@@ -1,14 +1,24 @@
 # CircuitJSON Usage
 
-`pcb-scene3d-viewer` can render serialized CircuitJSON element arrays directly.
-Use this path when the host application already has CircuitJSON and does not
-need an Altium, KiCad, or other format-specific scene builder.
+`pcb-scene3d-viewer` can render common CircuitJSON document envelopes, prepared
+document contexts, and serialized element arrays directly. Use this path when
+the host application already has CircuitJSON and does not need an Altium,
+KiCad, Gerber, or other format-specific scene builder.
+
+## Accepted Input Shapes
+
+- `ecad-toolkit.document.v1` results returned by converged toolkit parsers;
+- `CircuitJsonDocumentContext` instances prepared by a host for reuse; or
+- dense serialized CircuitJSON element arrays.
+
+Prepared contexts are the fastest repeated-render path because validation and
+the adapter's `elements` index are built at most once.
 
 ## Direct Controller Input
 
-Pass the CircuitJSON array as the `documentModel`. The controller detects direct
-CircuitJSON input, converts it to the internal render model, and mounts the
-runtime without a `buildScene` callback.
+Pass any accepted CircuitJSON shape as the `documentModel`. The controller
+detects direct CircuitJSON input, converts it to the internal render model, and
+mounts the runtime without a `buildScene` callback.
 
 ```js
 import {
@@ -19,6 +29,7 @@ import {
 const circuitJson = [
     {
         type: 'pcb_board',
+        pcb_board_id: 'board-1',
         width: 50,
         height: 30,
         thickness: 1.6,
@@ -26,14 +37,16 @@ const circuitJson = [
     },
     {
         type: 'source_component',
-        id: 'source-r1',
+        source_component_id: 'source-r1',
         name: 'R1',
-        ftype: 'R_0603'
+        ftype: 'simple_resistor',
+        resistance: '10k'
     },
     {
         type: 'pcb_component',
+        pcb_component_id: 'pcb-r1',
         source_component_id: 'source-r1',
-        layer: 1,
+        layer: 'top',
         center: { x: 20, y: 15 },
         rotation: 90,
         width: 1.6,
@@ -42,7 +55,10 @@ const circuitJson = [
     },
     {
         type: 'pcb_smtpad',
-        layer: 1,
+        pcb_smtpad_id: 'pad-r1-1',
+        pcb_component_id: 'pcb-r1',
+        layer: 'top',
+        shape: 'rect',
         x: 19.2,
         y: 15,
         width: 0.7,
@@ -50,7 +66,10 @@ const circuitJson = [
     },
     {
         type: 'pcb_smtpad',
-        layer: 1,
+        pcb_smtpad_id: 'pad-r1-2',
+        pcb_component_id: 'pcb-r1',
+        layer: 'top',
+        shape: 'rect',
         x: 20.8,
         y: 15,
         width: 0.7,
@@ -58,12 +77,23 @@ const circuitJson = [
     },
     {
         type: 'pcb_trace',
-        layer: 1,
+        pcb_trace_id: 'trace-r1-1',
         route: [
-            { x: 18, y: 15 },
-            { x: 19.2, y: 15 }
-        ],
-        width: 0.25
+            {
+                route_type: 'wire',
+                x: 18,
+                y: 15,
+                width: 0.25,
+                layer: 'top'
+            },
+            {
+                route_type: 'wire',
+                x: 19.2,
+                y: 15,
+                width: 0.25,
+                layer: 'top'
+            }
+        ]
     }
 ]
 
@@ -75,14 +105,14 @@ const controller = new PcbScene3dController(
 )
 ```
 
-The shell renderer does not inspect the CircuitJSON data. It only renders the
-optional DOM controls. The controller performs the CircuitJSON detection and
+The shell renderer uses the shared CircuitJSON context/index to derive its
+board, component, and BOM summary. The controller performs the full render-model
 conversion.
 
 ## Direct Runtime Input
 
-For custom UI shells, pass the same CircuitJSON array directly to
-`PcbScene3dRuntime`.
+For custom UI shells, pass the same document, context, or CircuitJSON array
+directly to `PcbScene3dRuntime`.
 
 ```js
 import { PcbScene3dRuntime } from 'pcb-scene3d-viewer'
@@ -109,9 +139,49 @@ if (PcbScene3dCircuitJsonAdapter.isCircuitJsonModel(circuitJson)) {
 }
 ```
 
+For repeated builds, prepare and retain the shared context:
+
+```js
+import { CircuitJsonDocumentContext } from 'circuitjson-toolkit'
+import { PcbScene3dCircuitJsonAdapter } from 'pcb-scene3d-viewer'
+
+const context = CircuitJsonDocumentContext.prepare(document, {
+    indexes: ['elements']
+})
+const firstScene = PcbScene3dCircuitJsonAdapter.build(context)
+const secondScene = PcbScene3dCircuitJsonAdapter.build(context)
+```
+
+Both builds reuse the same validated model and `elements` index. If the model
+contains CAD model references, its canonical document-asset alias index is also
+built at most once in the same context. Documents without model references do
+not pay that indexing cost.
+
+The viewer exposes the same operation as
+`PcbScene3dCircuitJsonAdapter.prepare(document)`. Controller routing uses this
+proof-aware path before mounting, so a validated toolkit document is not
+validated again. Bare arrays first pass a non-mutating structural predicate and
+are then normalized and validated by the shared CircuitJSON context; supported
+legacy rows are not rejected by an earlier strict viewer precheck.
+
+Canonical CAD rows may retain a `model_asset` path instead of an explicit
+`model_step_url`, `model_glb_url`, or equivalent field. The adapter consumes
+that field directly and resolves matching assets from the canonical document
+or `sessionAssets`; no document pre-transform or resolver wrapper is required.
+Canonical `ToolkitAsset` payloads may expose their immutable `data` through the
+shared accessor-backed contract. The resolver recognizes and lazily
+materializes those trusted assets before its descriptor-safe viewer copy;
+arbitrary accessor-backed session rows remain unread and cannot execute.
+For GLTF, OBJ, and WRL main assets, safe project-relative BIN, MTL, and texture
+references are attached automatically from the same indexed asset sets.
+Session companions take precedence over document companions. Absolute URLs,
+parent traversal, and accessor-backed entries are excluded without executing
+caller accessors.
+`CircuitJsonCadModelAssetResolver.withModelAssetUrls()` remains available when
+a separate consumer specifically needs explicit URL fields.
+
 Hosts that need URL policy control can pass a synchronous `modelUrlResolver`.
-The adapter records the returned metadata on each external model but does not
-fetch the referenced file:
+The adapter records the returned metadata on each external model:
 
 ```js
 const sceneDescription = PcbScene3dCircuitJsonAdapter.build(circuitJson, {
@@ -128,12 +198,20 @@ Hosts can also pass `projectBaseUrl` to resolve relative model URLs without a
 custom resolver. Package-style `node_modules/...` paths resolve to the
 project-origin `/package_files/download` endpoint with package and file-path
 query parameters. Package download file paths are normalized under `dist/` when
-the source path does not already include it. Model fetching remains a separate
-host/export decision.
+the source path does not already include it. Model fetching remains opt-in.
+Pass `modelLoaderOptions` to the controller or runtime hooks with an injected
+`fetch`, or set `allowNetworkModelFetch: true` to use `globalThis.fetch`.
+Canonical document bytes and session `File`/`Blob` assets need no network
+option. Static `authHeaders` remain on the main model origin. Use
+`authHeadersForUrl` for an intentional cross-origin header and
+`maxModelBytes`/`maxModelResources`/`maxModelTotalBytes` to adjust the bounded
+fetch defaults.
 `boardDrillQuality` accepts `low`, `medium`, or `high` and controls generated
 circle sampling for direct CircuitJSON drill/cutout geometry. When a
 CircuitJSON file has components but no board or panel, `drawFauxBoard: true`
 generates a board from component bounds with a 2 mm margin per side.
+The optional shell honors the same flag, so component-only documents show the
+same faux-board scene controls instead of an empty-state message.
 Set `showPcbNotes: true` to render `pcb_note_text`,
 `pcb_fabrication_note_text`, note/fabrication path artwork, and courtyard
 artwork as silkscreen detail. Notes are hidden by default so manufacturing
@@ -145,7 +223,9 @@ does not clutter normal board previews.
 `isDirectCircuitJsonModel(value)` returns `false` for compatibility arrays that
 also carry legacy parser fields such as `pcb`, `schematic`, or `bom`. Those
 arrays continue through the host-provided `buildScene` callback so existing
-parser integrations keep their source-specific conversion behavior.
+parser integrations keep their source-specific conversion behavior. Canonical
+document envelopes and prepared contexts always use the direct CircuitJSON path
+regardless of their original source format.
 
 ## Units And Coordinates
 
@@ -158,6 +238,12 @@ or `pcb_board` element is present, the adapter creates a 25.4 mm by 25.4 mm
 board with a 1.6 mm thickness so incomplete test or preview models still
 render. With `drawFauxBoard: true`, that fallback board is instead sized around
 the PCB component bounds with a minimum 10 mm by 10 mm footprint.
+
+When panels exist, every `pcb_panel` is an independent physical contour and
+child `pcb_board` rows are not duplicated as substrate. Without panels, every
+`pcb_board` is retained. `board.widthMil`, `heightMil`, and center describe the
+aggregate bounds; `board.contours` carries each physical outline, thickness,
+and targeted cutouts for runtime rendering and assembly export.
 
 `cad_component` records with `show_as_bounding_box: true` are exported as
 procedural component bodies. If `size` or `model_size` is present, those
@@ -270,6 +356,34 @@ Drills can use circular, pill, or rotated pill geometry. `hole_offset_x` and
 }
 ```
 
+Polygon-plated slots use the canonical `hole_with_polygon_pad` variant. The
+shared CircuitJSON primitive model derives the copper dimensions in the pad's
+rotation-local coordinate system and preserves the pill drill dimensions:
+
+```js
+{
+    type: 'pcb_plated_hole',
+    shape: 'hole_with_polygon_pad',
+    hole_shape: 'pill',
+    x: 10,
+    y: 8,
+    hole_width: 2.6,
+    hole_height: 0.6,
+    pad_outline: [
+        { x: 8.7, y: 7.7 },
+        { x: 11.3, y: 7.7 },
+        { x: 11.3, y: 8.3 },
+        { x: 8.7, y: 8.3 }
+    ]
+}
+```
+
+This is the same canonical shape emitted for a plated Gerber routed slot; no
+format-specific scene adapter is required. `holeRotation` is board-space, so a
+45-degree or 90-degree routed slot is applied once even when its outer pad uses
+the same rotation. Rectangular outer pads may independently use
+`rect_ccw_rotation`, while rotated pill drills use `hole_ccw_rotation`.
+
 SMT pads can use circular, rectangular, rotated rectangular, or pill geometry.
 Pill pads are normalized as rounded rectangles so their copper keeps the
 expected capsule outline:
@@ -368,7 +482,7 @@ model conversion. Use `PcbScene3dCircuitJsonAdapter.isCircuitJsonModel(value)`
 for a cheap guard when accepting untrusted JSON from users, and catch conversion
 errors around `build(value)` when you need to show a custom diagnostic.
 
-The viewer does not fetch external assets for CircuitJSON input by itself.
-Model URL matching, same-origin checks, proxying, and file loading remain the
-responsibility of source-specific toolkits or host applications that create or
-post-process normalized scene descriptions.
+The viewer never fetches external assets unless the host explicitly enables a
+model loader fetch policy. Model URL matching and same-origin/proxy decisions
+remain host-owned; canonical document bytes and session files are consumed
+directly without an app-side resolver wrapper.

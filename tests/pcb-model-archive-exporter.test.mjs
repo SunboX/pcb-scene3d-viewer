@@ -84,20 +84,27 @@ test('PcbModelArchiveExporter builds a deduplicated archive from resolved model 
     assert.equal(result.exportedEntries.length, 3)
     assert.deepEqual(
         result.exportedEntries.map((entry) => entry.archivePath).sort(),
-        ['CK-6.35-636-6P.step', 'CONN-HEADER.wrl', 'SENSOR-MODULE.glb']
+        [
+            'CK-6.35-636-6P/ck_636_6p.stp',
+            'CONN-HEADER/connector.wrl',
+            'SENSOR-MODULE/sensor.glb'
+        ]
     )
 
     const archive = unzipSync(result.archiveBytes)
     assert.deepEqual(Object.keys(archive).sort(), [
-        'CK-6.35-636-6P.step',
-        'CONN-HEADER.wrl',
-        'SENSOR-MODULE.glb'
+        'CK-6.35-636-6P/ck_636_6p.stp',
+        'CONN-HEADER/connector.wrl',
+        'SENSOR-MODULE/sensor.glb'
     ])
     assert.match(
-        new TextDecoder().decode(archive['CK-6.35-636-6P.step']),
+        new TextDecoder().decode(archive['CK-6.35-636-6P/ck_636_6p.stp']),
         /ISO-10303-21/
     )
-    assert.match(new TextDecoder().decode(archive['CONN-HEADER.wrl']), /#VRML/)
+    assert.match(
+        new TextDecoder().decode(archive['CONN-HEADER/connector.wrl']),
+        /#VRML/
+    )
 })
 
 /**
@@ -145,7 +152,7 @@ test('PcbModelArchiveExporter suffixes archive names when one pattern resolves t
 
     assert.deepEqual(
         result.exportedEntries.map((entry) => entry.archivePath),
-        ['SOIC-8.step', 'SOIC-8--2.step']
+        ['SOIC-8/alpha.step', 'SOIC-8--2/beta.step']
     )
 })
 
@@ -175,7 +182,272 @@ test('PcbModelArchiveExporter sanitizes path separators in pattern names', async
 
     assert.deepEqual(
         result.exportedEntries.map((entry) => entry.archivePath),
-        ['CON-6.35-YKB21-5012SN.step']
+        ['CON-6.35-YKB21-5012SN/5012jp.step']
+    )
+})
+
+test('PcbModelArchiveExporter preserves every canonical payload shape and model extension', async () => {
+    const payloads = [
+        {
+            pattern: 'TEXT',
+            format: 'wrl',
+            model: { text: '#VRML V2.0 utf8' },
+            expected: '#VRML V2.0 utf8'
+        },
+        {
+            pattern: 'DATA',
+            format: 'stl',
+            model: { data: 'solid body\nendsolid body' },
+            expected: 'solid body\nendsolid body'
+        },
+        {
+            pattern: 'BYTES',
+            format: 'obj',
+            model: { bytes: new TextEncoder().encode('v 0 0 0') },
+            expected: 'v 0 0 0'
+        },
+        {
+            pattern: 'PAYLOAD',
+            format: 'gltf',
+            model: {
+                payloadBytes: new TextEncoder().encode(
+                    '{"asset":{"version":"2.0"}}'
+                )
+            },
+            expected: '{"asset":{"version":"2.0"}}'
+        },
+        {
+            pattern: 'FILE',
+            format: 'glb',
+            model: { file: new Blob([new Uint8Array([1, 2, 3])]) },
+            expectedBytes: new Uint8Array([1, 2, 3])
+        },
+        {
+            pattern: 'THREE-MF',
+            format: '3mf',
+            model: { data: new Uint8Array([0x50, 0x4b, 3, 4]) },
+            expectedBytes: new Uint8Array([0x50, 0x4b, 3, 4])
+        }
+    ]
+    const result = await PcbModelArchiveExporter.buildArchive({
+        archiveBaseName: 'payloads',
+        includeStitchedComponents: false,
+        sceneDescription: {
+            components: payloads.map((entry, index) => ({
+                designator: 'X' + (index + 1),
+                pattern: entry.pattern,
+                externalModel: {
+                    format: entry.format,
+                    name: entry.pattern.toLowerCase() + '.' + entry.format,
+                    source: {
+                        projectRelativePath:
+                            'models/' +
+                            entry.pattern.toLowerCase() +
+                            '.' +
+                            entry.format
+                    },
+                    ...entry.model
+                }
+            }))
+        }
+    })
+    const archive = unzipSync(result.archiveBytes)
+
+    assert.deepEqual(Object.keys(archive).sort(), [
+        'BYTES/bytes.obj',
+        'DATA/data.stl',
+        'FILE/file.glb',
+        'PAYLOAD/payload.gltf',
+        'TEXT/text.wrl',
+        'THREE-MF/three-mf.3mf'
+    ])
+    payloads.forEach((entry) => {
+        const bytes =
+            archive[
+                entry.pattern +
+                    '/' +
+                    entry.pattern.toLowerCase() +
+                    '.' +
+                    entry.format
+            ]
+        if (entry.expectedBytes) {
+            assert.deepEqual(bytes, entry.expectedBytes)
+        } else {
+            assert.equal(new TextDecoder().decode(bytes), entry.expected)
+        }
+    })
+})
+
+test('PcbModelArchiveExporter preserves source basenames and safe model companions', async () => {
+    const gltfText = JSON.stringify({
+        asset: { version: '2.0' },
+        buffers: [{ uri: 'buffers/body.bin', byteLength: 3 }]
+    })
+    const objText = 'mtllib materials/body.mtl\nv 0 0 0'
+    const wrlText = 'ImageTexture { url "textures/body.png" }'
+    const result = await PcbModelArchiveExporter.buildArchive({
+        archiveBaseName: 'bundles',
+        includeStitchedComponents: false,
+        sceneDescription: {
+            components: [
+                {
+                    designator: 'U1',
+                    pattern: 'GLTF BODY',
+                    externalModel: {
+                        format: 'gltf',
+                        name: 'display-name.gltf',
+                        source: {
+                            projectRelativePath: 'models/gltf/source-body.gltf'
+                        },
+                        data: gltfText,
+                        externalBuffers: [
+                            {
+                                uri: 'buffers/body.bin',
+                                data: new Uint8Array([1, 2, 3])
+                            },
+                            {
+                                uri: '../unsafe.bin',
+                                data: new Uint8Array([9])
+                            }
+                        ]
+                    }
+                },
+                {
+                    designator: 'U2',
+                    pattern: 'OBJ BODY',
+                    externalModel: {
+                        format: 'obj',
+                        name: 'source-body.obj',
+                        relativePath: 'models/obj/source-body.obj',
+                        data: objText,
+                        resources: [
+                            {
+                                uri: 'materials/body.mtl',
+                                data: 'newmtl body\nKd 0.1 0.2 0.3'
+                            }
+                        ]
+                    }
+                },
+                {
+                    designator: 'U3',
+                    pattern: 'WRL BODY',
+                    externalModel: {
+                        format: 'wrl',
+                        name: 'source-body.wrl',
+                        source: {
+                            projectRelativePath: 'models/wrl/source-body.wrl'
+                        },
+                        data: wrlText,
+                        resources: [
+                            {
+                                uri: 'textures/body.png',
+                                data: new Uint8Array([7, 8, 9])
+                            },
+                            {
+                                uri: 'https://outside.invalid/private.png',
+                                data: new Uint8Array([4])
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    })
+    const archive = unzipSync(result.archiveBytes)
+
+    assert.deepEqual(Object.keys(archive).sort(), [
+        'GLTF BODY/buffers/body.bin',
+        'GLTF BODY/source-body.gltf',
+        'OBJ BODY/materials/body.mtl',
+        'OBJ BODY/source-body.obj',
+        'WRL BODY/source-body.wrl',
+        'WRL BODY/textures/body.png'
+    ])
+    assert.deepEqual(result.exportedEntries[0].companionPaths, [
+        'GLTF BODY/buffers/body.bin'
+    ])
+    assert.equal(
+        new TextDecoder().decode(archive['GLTF BODY/source-body.gltf']),
+        gltfText
+    )
+    assert.deepEqual(
+        archive['WRL BODY/textures/body.png'],
+        new Uint8Array([7, 8, 9])
+    )
+})
+
+test('PcbModelArchiveExporter uses explicit model loading policy for resolved URLs', async () => {
+    const fetchCalls = []
+    const result = await PcbModelArchiveExporter.buildArchive({
+        archiveBaseName: 'remote',
+        includeStitchedComponents: false,
+        modelLoaderOptions: {
+            authHeaders: { Authorization: 'Bearer fake-token' },
+            async fetch(url, options) {
+                fetchCalls.push({ url, options })
+                return {
+                    ok: true,
+                    arrayBuffer: async () => new Uint8Array([9, 8, 7]).buffer
+                }
+            }
+        },
+        sceneDescription: {
+            components: [
+                {
+                    designator: 'U1',
+                    pattern: 'REMOTE',
+                    externalModel: {
+                        format: '3mf',
+                        name: 'body.3mf',
+                        resolvedUrl: 'https://assets.invalid/body.3mf'
+                    }
+                }
+            ]
+        }
+    })
+
+    assert.equal(result.exportedEntries[0].archivePath, 'REMOTE/body.3mf')
+    assert.deepEqual(
+        unzipSync(result.archiveBytes)['REMOTE/body.3mf'],
+        new Uint8Array([9, 8, 7])
+    )
+    assert.equal(fetchCalls[0].url, 'https://assets.invalid/body.3mf')
+    assert.equal(
+        fetchCalls[0].options.headers.Authorization,
+        'Bearer fake-token'
+    )
+})
+
+test('PcbModelArchiveExporter distinguishes same-basename paths and reuses identical sources', async () => {
+    const createModel = (projectRelativePath, text) => ({
+        format: 'obj',
+        name: 'body.obj',
+        source: { projectRelativePath },
+        data: text
+    })
+    const first = createModel('models/a/body.obj', 'v 1 0 0')
+    const second = createModel('models/b/body.obj', 'v 2 0 0')
+    const result = await PcbModelArchiveExporter.buildArchive({
+        archiveBaseName: 'identities',
+        includeStitchedComponents: false,
+        sceneDescription: {
+            components: [
+                { designator: 'U1', pattern: 'BODY', externalModel: first },
+                { designator: 'U2', pattern: 'BODY', externalModel: second },
+                { designator: 'U3', pattern: 'BODY', externalModel: first }
+            ]
+        }
+    })
+    const archive = unzipSync(result.archiveBytes)
+
+    assert.deepEqual(Object.keys(archive), [
+        'BODY/body.obj',
+        'BODY--2/body.obj'
+    ])
+    assert.equal(new TextDecoder().decode(archive['BODY/body.obj']), 'v 1 0 0')
+    assert.equal(
+        new TextDecoder().decode(archive['BODY--2/body.obj']),
+        'v 2 0 0'
     )
 })
 
@@ -268,7 +540,11 @@ test('PcbModelArchiveExporter adds stitched STEP entries for component stacks', 
 
     assert.deepEqual(
         result.exportedEntries.map((entry) => entry.archivePath).sort(),
-        ['XO1--2.step', 'XO1.step', 'stitched-components/XO1.step']
+        [
+            'XO1--2/capacitor.step',
+            'XO1/crystal.step',
+            'stitched-components/XO1.step'
+        ]
     )
 
     const archive = unzipSync(result.archiveBytes)
@@ -399,12 +675,12 @@ test('PcbModelArchiveExporter skips failed stitched entries without dropping raw
 
     assert.deepEqual(
         result.exportedEntries.map((entry) => entry.archivePath),
-        ['XO1.step']
+        ['XO1/crystal.step']
     )
     assert.equal(result.skippedEntries.length, 1)
     assert.equal(result.skippedEntries[0].designator, 'XO1')
     assert.match(result.skippedEntries[0].reason, /mesh conversion unavailable/)
 
     const archive = unzipSync(result.archiveBytes)
-    assert.deepEqual(Object.keys(archive), ['XO1.step'])
+    assert.deepEqual(Object.keys(archive), ['XO1/crystal.step'])
 })

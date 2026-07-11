@@ -15,25 +15,19 @@ import { PcbScene3dText } from './PcbScene3dText.mjs'
 export class PcbScene3dController {
     /** @type {HTMLElement | null} */
     #viewportNode
-
     /** @type {any} */
     #documentModel
-
     /** @type {HTMLElement | null} */
     #rootNode
-
     /** @type {HTMLElement | null} */
     #diagnosticsNode
-
     /** @type {HTMLElement | null} */
     #selectionNode
-
     /** @type {HTMLElement | null} */
     #adjustmentHostNode
 
     /** @type {PcbScene3dAdjustmentControlBinder | null} */
     #adjustmentControls
-
     /** @type {PcbScene3dSelectionVisibilityBinder | null} */
     #visibilityControls
     /** @type {Array<{ node: EventTarget, type: string, listener: (event: any) => void }>} */
@@ -41,19 +35,16 @@ export class PcbScene3dController {
 
     /** @type {Map<string, { component: any | null, externalPlacement: any | null, staticBodyPlacement: any | null }>} */
     #selectionIndex
-
     /** @type {Map<string, { scale: { x: number, y: number, z: number }, rotationDeg: { x: number, y: number, z: number }, offsetMil: { x: number, y: number, z: number } }>} */
     #componentAdjustments
-
     /** @type {string} */
     #selectedComponentKey
-
     /** @type {any | null} */
     #runtime
-
     /** @type {any | null} */
     #sceneDescription
-
+    /** @type {object | undefined} */
+    #modelLoaderOptions
     /** @type {{ prepareScene?: (documentModel: any, sessionAssets?: any[]) => Promise<any>, dispose?: () => void } | null} */
     #scenePrepClient
 
@@ -87,7 +78,7 @@ export class PcbScene3dController {
     /**
      * @param {HTMLElement} viewportNode
      * @param {any} documentModel
-     * @param {{ rootNode?: HTMLElement | null, documentId?: string, onComponentSelectionChange?: ((change: { documentId: string, componentKey: string, source?: string }) => void) | null, sessionAssets?: any[], autoSearchMissingModels?: boolean, circuitJson?: object[], sceneDescription?: any, buildScene?: (documentModel: any, options: { modelRegistry: any }) => any, createModelRegistry?: (documentModel: any, sessionAssets: any[]) => any, createRuntime?: (viewportNode: HTMLElement, sceneDescription: any, hooks: { setDiagnostics: (messages: string[]) => void, setSelection: (selection: any | null) => void, translate?: ((key: string) => string) | null }) => { setPreset?: (preset: string) => void, setToggle?: (toggleName: string, enabled: boolean) => void, dispose?: () => void, whenReady?: () => Promise<void> | void }, scenePrepClient?: { prepareScene?: (documentModel: any, sessionAssets?: any[]) => Promise<any>, dispose?: () => void } | null, exportArchive?: (options: { archiveBaseName?: string, sceneDescription?: any }) => Promise<{ archiveName: string, archiveBytes: Uint8Array, exportedEntries: any[], skippedEntries: any[] }>, downloadArchive?: (archiveName: string, archiveBytes: Uint8Array) => Promise<void> | void, renderAdjustmentControlsInSelection?: boolean, setLoadingVisible?: (visible: boolean) => void, translate?: ((key: string) => string) | null }} [options]
+     * @param {{ rootNode?: HTMLElement | null, documentId?: string, onComponentSelectionChange?: ((change: { documentId: string, componentKey: string, source?: string }) => void) | null, sessionAssets?: any[], autoSearchMissingModels?: boolean, circuitJson?: object[], sceneDescription?: any, modelLoaderOptions?: object, buildScene?: (documentModel: any, options: { modelRegistry: any }) => any, createModelRegistry?: (documentModel: any, sessionAssets: any[]) => any, createRuntime?: (viewportNode: HTMLElement, sceneDescription: any, hooks: { setDiagnostics: (messages: string[]) => void, setSelection: (selection: any | null) => void, translate?: ((key: string) => string) | null, modelLoaderOptions?: object }) => { setPreset?: (preset: string) => void, setToggle?: (toggleName: string, enabled: boolean) => void, dispose?: () => void, whenReady?: () => Promise<void> | void }, scenePrepClient?: { prepareScene?: (documentModel: any, sessionAssets?: any[]) => Promise<any>, dispose?: () => void } | null, exportArchive?: (options: { archiveBaseName?: string, sceneDescription?: any }) => Promise<{ archiveName: string, archiveBytes: Uint8Array, exportedEntries: any[], skippedEntries: any[] }>, downloadArchive?: (archiveName: string, archiveBytes: Uint8Array) => Promise<void> | void, renderAdjustmentControlsInSelection?: boolean, setLoadingVisible?: (visible: boolean) => void, translate?: ((key: string) => string) | null }} [options]
      */
     constructor(viewportNode, documentModel, options = {}) {
         this.#viewportNode = viewportNode
@@ -107,6 +98,7 @@ export class PcbScene3dController {
         this.#listeners = []
         this.#scenePrepClient = options.scenePrepClient || null
         this.#sceneDescription = null
+        this.#modelLoaderOptions = options.modelLoaderOptions
         this.#exportArchive =
             options.exportArchive ||
             ((exportOptions) =>
@@ -188,15 +180,6 @@ export class PcbScene3dController {
         this.#visibilityControls.bindSelectionNode(this.#selectionNode)
         this.#setSelection(null)
         this.#setLoadingVisible(true)
-        const circuitJsonModel = PcbScene3dController.#resolveCircuitJsonModel(
-            options,
-            this.#documentModel
-        )
-        if (circuitJsonModel) {
-            this.#initializePreparedScene(circuitJsonModel, options)
-            return
-        }
-
         if (options.sceneDescription) {
             this.#initializePreparedScene(options.sceneDescription, options)
             return
@@ -204,6 +187,15 @@ export class PcbScene3dController {
 
         if (this.#scenePrepClient?.prepareScene) {
             this.#initializeScene(options)
+            return
+        }
+
+        const circuitJsonModel = PcbScene3dController.#resolveCircuitJsonModel(
+            options,
+            this.#documentModel
+        )
+        if (circuitJsonModel) {
+            this.#initializePreparedScene(circuitJsonModel, options)
             return
         }
 
@@ -427,6 +419,12 @@ export class PcbScene3dController {
      * @returns {any}
      */
     #prepareSceneDescriptionSync(options) {
+        const circuitJsonModel = PcbScene3dController.#resolveCircuitJsonModel(
+            options,
+            this.#documentModel
+        )
+        if (circuitJsonModel) return circuitJsonModel
+
         const buildScene = options.buildScene
         if (typeof buildScene !== 'function') {
             throw new Error(
@@ -450,12 +448,14 @@ export class PcbScene3dController {
     /**
      * Mounts the runtime for one prepared scene description.
      * @param {any} sceneDescription
-     * @param {{ createRuntime?: (viewportNode: HTMLElement, sceneDescription: any, hooks: { setDiagnostics: (messages: string[]) => void, setSelection: (selection: any | null) => void, translate?: ((key: string) => string) | null }) => { setPreset?: (preset: string) => void, setToggle?: (toggleName: string, enabled: boolean) => void, dispose?: () => void, whenReady?: () => Promise<void> | void } }} options
+     * @param {{ modelLoaderOptions?: object, createRuntime?: (viewportNode: HTMLElement, sceneDescription: any, hooks: { setDiagnostics: (messages: string[]) => void, setSelection: (selection: any | null) => void, translate?: ((key: string) => string) | null, modelLoaderOptions?: object }) => { setPreset?: (preset: string) => void, setToggle?: (toggleName: string, enabled: boolean) => void, dispose?: () => void, whenReady?: () => Promise<void> | void } }} options
      * @returns {void}
      */
     #mountScene(sceneDescription, options) {
-        const renderModel =
-            PcbScene3dController.#normalizeSceneDescription(sceneDescription)
+        const renderModel = PcbScene3dController.#normalizeSceneDescription(
+            sceneDescription,
+            options
+        )
         this.#sceneDescription = renderModel
         this.#selectionIndex =
             PcbScene3dSelectionIndexBuilder.build(renderModel)
@@ -472,7 +472,8 @@ export class PcbScene3dController {
             setDiagnostics: (messages) => this.#setDiagnostics(messages),
             setSelection: (selection) =>
                 this.#handleRuntimeSelection(selection),
-            translate: this.#translate
+            translate: this.#translate,
+            modelLoaderOptions: options.modelLoaderOptions
         })
         this.#applyInitialToggles()
         if (!this.#autoSearchMissingModels) {
@@ -621,7 +622,8 @@ export class PcbScene3dController {
                 archiveBaseName: PcbScene3dController.#resolveArchiveBaseName(
                     this.#documentModel
                 ),
-                sceneDescription: this.#sceneDescription
+                sceneDescription: this.#sceneDescription,
+                modelLoaderOptions: this.#modelLoaderOptions
             })
 
             if (this.#isDisposed) {
@@ -908,35 +910,34 @@ export class PcbScene3dController {
         if (
             PcbScene3dCircuitJsonAdapter.isCircuitJsonModel(options.circuitJson)
         ) {
-            return options.circuitJson
+            return PcbScene3dCircuitJsonAdapter.prepare(options.circuitJson)
         }
         if (
             PcbScene3dCircuitJsonAdapter.isDirectCircuitJsonModel(documentModel)
         ) {
-            return documentModel
+            return PcbScene3dCircuitJsonAdapter.prepare(documentModel)
         }
         return null
     }
 
     /**
-     * Converts direct CircuitJSON inputs into the renderer scene model.
      * @param {any} sceneDescription Scene description or CircuitJSON model.
+     * @param {object} options Controller options forwarded to CircuitJSON adaptation.
      * @returns {any}
      */
-    static #normalizeSceneDescription(sceneDescription) {
+    static #normalizeSceneDescription(sceneDescription, options) {
         const normalizedScene =
             PcbScene3dCircuitJsonAdapter.isDirectCircuitJsonModel(
                 sceneDescription
             )
-                ? PcbScene3dCircuitJsonAdapter.build(sceneDescription)
+                ? PcbScene3dCircuitJsonAdapter.build(sceneDescription, options)
                 : sceneDescription
-
         return PcbScene3dExternalPlacementDefaults.apply(normalizedScene)
     }
 
     /**
      * Resolves one archive base name from the mounted document metadata.
-     * @param {{ summary?: { title?: string }, fileName?: string } | null} documentModel
+     * @param {{ summary?: { title?: string }, fileName?: string, source?: { fileName?: string }, document?: { source?: { fileName?: string } } } | null} documentModel
      * @returns {string}
      */
     static #resolveArchiveBaseName(documentModel) {
@@ -945,7 +946,12 @@ export class PcbScene3dController {
             return summaryTitle
         }
 
-        const fileName = String(documentModel?.fileName || '').trim()
+        const fileName = String(
+            documentModel?.source?.fileName ||
+                documentModel?.document?.source?.fileName ||
+                documentModel?.fileName ||
+                ''
+        ).trim()
         if (fileName) {
             return fileName.replace(/\.[^.]+$/, '')
         }

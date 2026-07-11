@@ -34,7 +34,7 @@ const FALLBACK_MESSAGES = {
     'scene3d.mountSide': 'Mount side',
     'scene3d.noMetadataFor': 'No metadata is available for',
     'scene3d.noModelsForExport':
-        'No STEP or WRL models were resolved for export.',
+        'No resolved 3D models were available for export.',
     'scene3d.noPcb': '3D preview is available after loading a PCB document.',
     'scene3d.pattern': 'Pattern',
     'scene3d.picked': 'Picked',

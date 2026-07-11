@@ -320,6 +320,61 @@ test('PcbScene3dBoardSolderMaskFactory skips non-assembly boards', () => {
     assert.equal(group.children.length, 0)
 })
 
+test('PcbScene3dBoardSolderMaskFactory builds both faces for every contour', () => {
+    /** @param {number} minX Minimum X. @param {number} maxX Maximum X. @returns {object[]} Rectangle segments. */
+    const rectangle = (minX, maxX) => [
+        { type: 'line', x1: minX, y1: -50, x2: maxX, y2: -50 },
+        { type: 'line', x1: maxX, y1: -50, x2: maxX, y2: 50 },
+        { type: 'line', x1: maxX, y1: 50, x2: minX, y2: 50 },
+        { type: 'line', x1: minX, y1: 50, x2: minX, y2: -50 }
+    ]
+    const group = PcbScene3dBoardSolderMaskFactory.buildGroup(
+        THREE,
+        {
+            board: {
+                widthMil: 300,
+                heightMil: 100,
+                thicknessMil: 62,
+                centerX: 0,
+                centerY: 0,
+                contours: [
+                    {
+                        widthMil: 100,
+                        heightMil: 100,
+                        thicknessMil: 62,
+                        centerX: 0,
+                        centerY: 0,
+                        segments: rectangle(-150, -50),
+                        cutouts: []
+                    },
+                    {
+                        widthMil: 100,
+                        heightMil: 100,
+                        thicknessMil: 62,
+                        centerX: 0,
+                        centerY: 0,
+                        segments: rectangle(50, 150),
+                        cutouts: []
+                    }
+                ]
+            },
+            boardAssemblyModel: { name: 'assembly.step' },
+            detail: { pads: [], vias: [] }
+        },
+        (x, y) => ({ x, y })
+    )
+
+    assert.deepEqual(
+        group.children.map((child) => child.name),
+        [
+            'board-solder-mask-top-1',
+            'board-solder-mask-bottom-1',
+            'board-solder-mask-top-2',
+            'board-solder-mask-bottom-2'
+        ]
+    )
+})
+
 /**
  * Resolves XY bounds from a mesh after applying its transform scale.
  * @param {{ geometry?: any, scale?: { x?: number, y?: number } }} mesh

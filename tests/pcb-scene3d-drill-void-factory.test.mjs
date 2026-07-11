@@ -75,7 +75,7 @@ test('PcbScene3dDrillVoidFactory colors drill interiors with board solder mask',
     assert.equal(interiors[0].material.color.getHex(), 0x14325e)
 })
 
-test('PcbScene3dDrillVoidFactory skips slotted interiors without capping them', () => {
+test('PcbScene3dDrillVoidFactory skips non-circular interiors without capping them', () => {
     const group = PcbScene3dDrillVoidFactory.buildGroup(
         THREE,
         {
@@ -87,6 +87,15 @@ test('PcbScene3dDrillVoidFactory skips slotted interiors without capping them', 
                     holeShape: 2,
                     holeSlotLength: 24,
                     holeRotation: 90
+                },
+                {
+                    x: 45,
+                    y: 20,
+                    holeDiameter: 10,
+                    holeWidth: 10,
+                    holeHeight: 10,
+                    holeShape: 1,
+                    holeRotation: 30
                 }
             ],
             vias: []
