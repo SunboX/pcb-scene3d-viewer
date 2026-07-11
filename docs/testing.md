@@ -12,6 +12,7 @@ The test suite covers:
   copper, and silkscreen;
 - runtime camera, preset, resizing, selection, and visibility behavior;
 - external STEP/STP, WRL/VRML, STL, OBJ, GLTF/GLB, and 3MF live loading;
+- direct ESM and package-owned worker loading for the installed OCCT importer;
 - model ZIP archive export;
 - optional shell renderer and CSS contract;
 - worker-client request routing.

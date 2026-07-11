@@ -163,6 +163,14 @@ the model, preventing implicit texture networking. STL, OBJ, GLTF, and GLB use
 the shared faceted mesh pipeline so runtime and assembly export preserve the
 same units, material color, opacity, and vertex-color behavior.
 
+STEP imports resolve `occt-import-js.js`, `occt-import-js.wasm`, and
+`occt-import-js-worker.js` from the installed `@sunbox/occt-import-js` package.
+The package worker is persistent and serialized per loader. When Web Workers
+are unavailable, the viewer dynamically imports the ESM factory directly; it
+does not inject a classic script or depend on a global factory. Worker transfer
+uses a loader-owned byte snapshot, and rejected ESM initialization is evicted
+so callers retain their input and can retry transient failures.
+
 Static `authHeaders` are sent only to the main model origin. A host that
 intentionally authorizes another origin can return headers from
 `authHeadersForUrl(url, { mainUrl, sameOrigin, label })`. Each fetch scope

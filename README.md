@@ -24,7 +24,7 @@ browser-based ECAD tools.
 
 ## CircuitJSON 1.1 convergence
 
-Version 1.2.0 accepts the common document and prepared-context shapes returned
+Version 1.2.1 accepts the common document and prepared-context shapes returned
 by CircuitJSON, Gerber, Altium, and KiCad Toolkit 1.1-compatible APIs. The
 adapter requests the shared `elements` index once and reuses it across repeated
 scene builds. `PcbScene3dCircuitJsonAdapter.prepare()` exposes that proof-aware
@@ -56,6 +56,13 @@ headers, timeout, cache, and bounded-resource settings. Static `authHeaders`
 stay on the main model origin; `authHeadersForUrl` is the explicit per-URL
 override. The model ZIP exporter uses the same policy and writes each raw model
 under its original source basename with safe GLTF, OBJ, and WRL companions.
+
+STEP loading uses the installed `@sunbox/occt-import-js` package directly. Its
+package-owned worker is reused for browser imports, while runtimes without Web
+Workers dynamically import the same ESM factory. Hosts only need to serve the
+package `dist/` directory at
+`/node_modules/@sunbox/occt-import-js/dist/`; no copied runtime, global script,
+or host-owned worker is required.
 
 ## Install
 
@@ -116,6 +123,7 @@ const controller = new PcbScene3dController(viewportNode, document)
 
 - [API](docs/api.md)
 - [CircuitJSON usage](docs/circuitjson.md)
+- [1.2.1 release notes](docs/release-notes-v1.2.1.md)
 - [1.2.0 release notes](docs/release-notes-v1.2.0.md)
 - [Model format](docs/model-format.md)
 - [Testing](docs/testing.md)

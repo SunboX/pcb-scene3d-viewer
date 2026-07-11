@@ -262,7 +262,7 @@ test('PcbAssemblyStepWriter tessellates concave board outlines without fill chor
     assert.deepEqual(outsideBoardTriangleCentroids(surface, boardPolygon), [])
 })
 
-test('PcbAssemblyStepWriter output imports through the vendored OCCT STEP reader', () => {
+test('PcbAssemblyStepWriter output imports through the installed OCCT STEP reader', () => {
     const script = `
 import { readFile } from 'node:fs/promises'
 import {

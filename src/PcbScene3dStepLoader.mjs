@@ -1,18 +1,10 @@
 import { PcbScene3dModelIdentity } from './PcbScene3dModelIdentity.mjs'
+import { PcbScene3dOcctImporterLoader } from './PcbScene3dOcctImporterLoader.mjs'
 
 /**
  * Browser-side STEP mesh loader backed by occt-import-js.
  */
 export class PcbScene3dStepLoader {
-    /** @type {(() => Promise<{ ReadStepFile?: (content: Uint8Array, params: Record<string, any> | null) => any }>) | null} */
-    static #browserImporterLoader
-
-    /** @type {Promise<{ ReadStepFile?: (content: Uint8Array, params: Record<string, any> | null) => any }> | null} */
-    static #browserImporterPromise
-
-    /** @type {Promise<void> | null} */
-    static #browserScriptPromise
-
     /** @type {() => Promise<{ ReadStepFile?: (content: Uint8Array, params: Record<string, any> | null) => any }>} */
     #importerLoader
 
@@ -182,7 +174,7 @@ export class PcbScene3dStepLoader {
 
     /**
      * Reads one importer result through the loader-owned persistent worker.
-     * Requests are serialized because the vendored worker does not echo a
+     * Requests are serialized because the package worker does not echo a
      * request id back in its response payload.
      * @param {Uint8Array} content
      * @returns {Promise<any>}
@@ -347,20 +339,20 @@ export class PcbScene3dStepLoader {
             return null
         }
         if (value instanceof Uint8Array) {
-            return value
+            return new Uint8Array(value)
         }
         if (value instanceof ArrayBuffer) {
-            return new Uint8Array(value)
+            return new Uint8Array(value.slice(0))
         }
         if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
             return new Uint8Array(
                 value.buffer,
                 value.byteOffset,
                 value.byteLength
-            )
+            ).slice()
         }
         if (typeof value.arrayBuffer === 'function') {
-            return new Uint8Array(await value.arrayBuffer())
+            return new Uint8Array(await value.arrayBuffer()).slice()
         }
         return null
     }
@@ -599,39 +591,10 @@ export class PcbScene3dStepLoader {
      * @returns {Promise<{ ReadStepFile?: (content: Uint8Array, params: Record<string, any> | null) => any }>}
      */
     static async #loadBrowserImporter() {
-        if (!PcbScene3dStepLoader.#browserImporterLoader) {
-            PcbScene3dStepLoader.#browserImporterLoader = async () => {
-                if (
-                    typeof window === 'undefined' ||
-                    typeof document === 'undefined'
-                ) {
-                    throw new Error(
-                        'Browser STEP importer requires window and document.'
-                    )
-                }
-
-                await PcbScene3dStepLoader.#ensureBrowserScript()
-
-                const factory = globalThis.occtimportjs
-                if (typeof factory !== 'function') {
-                    throw new Error(
-                        'occt-import-js did not register a browser factory.'
-                    )
-                }
-
-                return await factory({
-                    locateFile: (fileName) =>
-                        PcbScene3dStepLoader.#resolveVendorAssetUrl(fileName)
-                })
-            }
-        }
-
-        if (!PcbScene3dStepLoader.#browserImporterPromise) {
-            PcbScene3dStepLoader.#browserImporterPromise =
-                PcbScene3dStepLoader.#browserImporterLoader()
-        }
-
-        return await PcbScene3dStepLoader.#browserImporterPromise
+        return await PcbScene3dOcctImporterLoader.loadCached({
+            resolveAssetUrl: (fileName) =>
+                PcbScene3dStepLoader.#resolveImporterAssetUrl(fileName)
+        })
     }
 
     /**
@@ -645,77 +608,24 @@ export class PcbScene3dStepLoader {
 
         return () =>
             new globalThis.Worker(
-                PcbScene3dStepLoader.#resolveVendorAssetUrl(
+                PcbScene3dStepLoader.#resolveImporterAssetUrl(
                     'occt-import-js-worker.js'
                 )
             )
     }
 
     /**
-     * Ensures the browser importer script has been loaded once.
-     * @returns {Promise<void>}
-     */
-    static async #ensureBrowserScript() {
-        if (PcbScene3dStepLoader.#browserScriptPromise) {
-            return await PcbScene3dStepLoader.#browserScriptPromise
-        }
-
-        PcbScene3dStepLoader.#browserScriptPromise = new Promise(
-            (resolve, reject) => {
-                const existingScript = document.querySelector(
-                    'script[data-occt-import-js]'
-                )
-                if (existingScript) {
-                    existingScript.addEventListener('load', () => resolve(), {
-                        once: true
-                    })
-                    existingScript.addEventListener(
-                        'error',
-                        () =>
-                            reject(
-                                new Error(
-                                    'STEP importer script failed to load.'
-                                )
-                            ),
-                        { once: true }
-                    )
-                    if (typeof globalThis.occtimportjs === 'function') {
-                        resolve()
-                    }
-                    return
-                }
-
-                const script = document.createElement('script')
-                script.async = true
-                script.dataset.occtImportJs = 'true'
-                script.src =
-                    PcbScene3dStepLoader.#resolveVendorAssetUrl(
-                        'occt-import-js.js'
-                    )
-                script.addEventListener('load', () => resolve(), { once: true })
-                script.addEventListener(
-                    'error',
-                    () =>
-                        reject(
-                            new Error('STEP importer script failed to load.')
-                        ),
-                    { once: true }
-                )
-                document.head.append(script)
-            }
-        )
-
-        return await PcbScene3dStepLoader.#browserScriptPromise
-    }
-
-    /**
-     * Resolves one vendored importer asset URL with the current app version.
+     * Resolves one installed importer asset URL with the current app version.
      * @param {string} fileName
      * @returns {string}
      */
-    static #resolveVendorAssetUrl(fileName) {
+    static #resolveImporterAssetUrl(fileName) {
         const versionKey = new URL(import.meta.url).searchParams.get('v') || ''
         const suffix = versionKey ? '?v=' + encodeURIComponent(versionKey) : ''
-        return '/vendor/occt-import-js/dist/' + String(fileName || '') + suffix
+        return (
+            '/node_modules/@sunbox/occt-import-js/dist/' +
+            String(fileName || '') +
+            suffix
+        )
     }
 }

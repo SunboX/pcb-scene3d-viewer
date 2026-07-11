@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { PcbScene3dOcctImporterLoader } from '../src/PcbScene3dOcctImporterLoader.mjs'
 import { PcbScene3dStepLoader } from '../src/PcbScene3dStepLoader.mjs'
 
 /**
@@ -15,10 +16,17 @@ class FakeStepWorker {
     /** @type {number} */
     terminateCalls
 
-    constructor() {
+    /** @type {boolean} */
+    #failNextPost
+
+    /**
+     * @param {{ failNextPost?: boolean }} [options]
+     */
+    constructor(options = {}) {
         this.#listeners = new Map()
         this.postedMessages = []
         this.terminateCalls = 0
+        this.#failNextPost = options.failNextPost === true
     }
 
     /**
@@ -44,13 +52,21 @@ class FakeStepWorker {
     }
 
     /**
-     * @param {{ buffer?: ArrayBuffer }} message
+     * @param {{ buffer?: Uint8Array }} message
+     * @param {Transferable[]} [transfer]
      * @returns {void}
      */
-    postMessage(message) {
-        this.postedMessages.push(message)
+    postMessage(message, transfer = []) {
+        const workerMessage = structuredClone(message, { transfer })
+        this.postedMessages.push(workerMessage)
         queueMicrotask(() => {
-            const byteLength = Number(message?.buffer?.byteLength || 0)
+            if (this.#failNextPost) {
+                this.#failNextPost = false
+                this.#emitError('Synthetic STEP worker failure.')
+                return
+            }
+
+            const byteLength = Number(workerMessage?.buffer?.byteLength || 0)
             this.#emitMessage({
                 success: true,
                 meshes: [
@@ -88,7 +104,84 @@ class FakeStepWorker {
             listener({ data })
         )
     }
+
+    /**
+     * @param {string} message
+     * @returns {void}
+     */
+    #emitError(message) {
+        ;[...(this.#listeners.get('error') || [])].forEach((listener) =>
+            listener({ message })
+        )
+    }
 }
+
+test('PcbScene3dOcctImporterLoader loads the package ESM factory directly', async () => {
+    const loadedUrls = []
+    const factoryOptions = []
+    const importer = { ReadStepFile() {} }
+    const result = await PcbScene3dOcctImporterLoader.load({
+        resolveAssetUrl: (fileName) =>
+            '/node_modules/@sunbox/occt-import-js/dist/' + fileName + '?v=12',
+        loadModule: async (url) => {
+            loadedUrls.push(url)
+            return {
+                default: async (options) => {
+                    factoryOptions.push(options)
+                    return importer
+                }
+            }
+        }
+    })
+
+    assert.equal(result, importer)
+    assert.deepEqual(loadedUrls, [
+        '/node_modules/@sunbox/occt-import-js/dist/occt-import-js.js?v=12'
+    ])
+    assert.equal(
+        factoryOptions[0].locateFile('occt-import-js.wasm'),
+        '/node_modules/@sunbox/occt-import-js/dist/occt-import-js.wasm?v=12'
+    )
+    assert.equal(Object.hasOwn(globalThis, 'occtimportjs'), false)
+})
+
+test('PcbScene3dOcctImporterLoader rejects modules without a factory', async () => {
+    await assert.rejects(
+        PcbScene3dOcctImporterLoader.load({
+            resolveAssetUrl: (fileName) => fileName,
+            loadModule: async () => ({})
+        }),
+        /did not export a factory/u
+    )
+})
+
+test('PcbScene3dOcctImporterLoader retries a rejected cached import', async () => {
+    let loadCalls = 0
+    const options = {
+        resolveAssetUrl: (fileName) => '/retryable-occt/' + fileName,
+        loadModule: async () => {
+            loadCalls += 1
+            if (loadCalls === 1) {
+                throw new Error('Transient module failure.')
+            }
+            return {
+                default: async () => ({ ReadStepFile() {} })
+            }
+        }
+    }
+
+    await assert.rejects(
+        PcbScene3dOcctImporterLoader.loadCached(options),
+        /Transient module failure/u
+    )
+    const importer = await PcbScene3dOcctImporterLoader.loadCached(options)
+    const cachedImporter =
+        await PcbScene3dOcctImporterLoader.loadCached(options)
+
+    assert.equal(typeof importer.ReadStepFile, 'function')
+    assert.equal(cachedImporter, importer)
+    assert.equal(loadCalls, 2)
+})
 
 /**
  * Verifies repeated STEP loads reuse the cached importer result.
@@ -398,7 +491,7 @@ test('PcbScene3dStepLoader preserves session STEP model origins', async () => {
 })
 
 /**
- * Verifies browser runtimes use the vendored OCCT worker by default so STEP
+ * Verifies browser runtimes use the installed OCCT worker by default so STEP
  * imports do not execute WASM on the main thread.
  */
 test('PcbScene3dStepLoader uses a browser STEP worker by default', async () => {
@@ -440,7 +533,7 @@ test('PcbScene3dStepLoader uses a browser STEP worker by default', async () => {
         assert.equal(createdWorkerUrls.length, 1)
         assert.match(
             createdWorkerUrls[0],
-            /\/vendor\/occt-import-js\/dist\/occt-import-js-worker\.js/
+            /\/node_modules\/@sunbox\/occt-import-js\/dist\/occt-import-js-worker\.js/
         )
         assert.equal(load.meshPayloads.length, 1)
     } finally {
@@ -485,6 +578,37 @@ test('PcbScene3dStepLoader reuses one STEP worker across distinct model loads', 
     assert.equal(secondLoad.meshPayloads.length, 1)
 
     loader.dispose?.()
+})
+
+test('PcbScene3dStepLoader preserves caller bytes across worker failure and retry', async () => {
+    const sourceBytes = new Uint8Array([1, 2, 3, 4])
+    let workerCreations = 0
+    const loader = new PcbScene3dStepLoader({
+        stepWorkerFactory: () => {
+            workerCreations += 1
+            return new FakeStepWorker({ failNextPost: workerCreations === 1 })
+        }
+    })
+    const model = {
+        origin: 'session',
+        name: 'retryable.step',
+        format: 'step',
+        payloadBytes: sourceBytes,
+        relativePath: 'parts/retryable.step'
+    }
+
+    await assert.rejects(
+        loader.loadModel(model),
+        /Synthetic STEP worker failure/u
+    )
+    assert.deepEqual(sourceBytes, new Uint8Array([1, 2, 3, 4]))
+    assert.equal(sourceBytes.byteLength, 4)
+
+    const retried = await loader.loadModel(model)
+    assert.equal(retried.meshPayloads.length, 1)
+    assert.equal(workerCreations, 2)
+
+    loader.dispose()
 })
 
 /**

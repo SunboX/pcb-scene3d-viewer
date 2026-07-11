@@ -27,10 +27,13 @@ required by the applicable license:
 For applications with an "About", "Licenses", or "Legal Notices" screen,
 include a reasonable reference to this project and its original author there.
 
-Vendored and third-party components retain their own notices and license terms.
-In particular, preserve the notices in:
+Third-party package dependencies retain their own notices and license terms.
+In particular, distributions that include `@sunbox/occt-import-js` and Open
+CASCADE Technology must preserve the notices shipped by that installed package
+in:
 
-- `src/vendor/occt-import-js/dist/license.occt-import-js.txt`;
-- `src/vendor/occt-import-js/dist/license.occt.txt`.
+- `node_modules/@sunbox/occt-import-js/dist/license.occt-import-js.txt`;
+- `node_modules/@sunbox/occt-import-js/dist/license.occt.txt`;
+- `node_modules/@sunbox/occt-import-js/dist/OCCT_LGPL_EXCEPTION.txt`.
 
 Package-manager dependencies retain their own licenses.
