@@ -14,6 +14,10 @@ KiCad, Gerber, or other format-specific scene builder.
 Prepared contexts are the fastest repeated-render path because validation and
 the adapter's `elements` index are built at most once.
 
+Canonical document envelopes and prepared contexts retain `source.format` as
+the normalized scene's `sourceFormat`. Dense element arrays have no canonical
+source metadata and therefore use `circuitjson`.
+
 ## Direct Controller Input
 
 Pass any accepted CircuitJSON shape as the `documentModel`. The controller
@@ -403,13 +407,15 @@ expected capsule outline:
 
 SMT pads, plated holes, and vias honor `is_covered_with_solder_mask` and
 `covered_with_solder_mask` when present. `true` keeps the copper under solder
-mask, while `false` exposes the copper on the applicable board side. For vias,
-covered values map to tenting metadata on both sides.
+mask, while `false` exposes the copper on the applicable board side. Standard
+vias also honor `is_tented`; omitted via tenting defaults to covered on both
+sides, while `is_tented: false` retains an explicit opening.
 
 Copper pours can use rectangular, polygon, or B-Rep geometry. Rectangular pours
 support `rotation` or `ccw_rotation`; polygon and B-Rep point coordinates are
-converted from millimeters to mils. `covered_with_solder_mask: true` renders the
-zone under solder mask, while false or omitted values expose the copper:
+converted from millimeters to mils. Omitted or true
+`covered_with_solder_mask` renders the zone under solder mask, while an
+explicit false value exposes the copper:
 
 ```js
 {
@@ -449,6 +455,11 @@ one track segment:
     width: 0.2
 }
 ```
+
+Trace-level or route-entry `covered_with_solder_mask` values control the
+rendered opening. Omitted values default to covered; an explicit false value
+remains exposed. A route-entry value takes precedence over its trace-level
+value.
 
 Route entries with `route_type: 'via'` produce via primitives when their
 `from_layer`, `to_layer`, or `layer` touches the top or bottom surface. Adjacent

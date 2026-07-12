@@ -108,6 +108,14 @@ Methods:
   and courtyard artwork as silkscreen detail. `showPcbPaste: true` renders
   direct solder-paste artwork as a separate top/bottom overlay.
 
+For canonical document and prepared-context inputs, the returned scene's
+`sourceFormat` is the exact canonical `source.format`. Dense element arrays,
+which do not carry source metadata, retain the `circuitjson` fallback. Routed
+traces and copper pours default to covered when their coverage property is
+omitted; an explicit `covered_with_solder_mask: false` remains an exposed
+opening. Standard vias default to tented and honor `is_tented: false` as an
+explicit opening.
+
 `PcbScene3dController` and `PcbScene3dRuntime` call this adapter automatically
 when they receive direct CircuitJSON input. See
 [CircuitJSON usage](circuitjson.md) for supported elements, units, and examples.

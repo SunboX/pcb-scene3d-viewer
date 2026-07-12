@@ -131,7 +131,7 @@ export class PcbScene3dCircuitJsonAdapter {
         )
 
         return {
-            sourceFormat: 'circuitjson',
+            sourceFormat: context.source?.format || 'circuitjson',
             coordinateSystem: 'circuitjson-mm',
             board,
             components,

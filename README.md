@@ -24,7 +24,7 @@ browser-based ECAD tools.
 
 ## CircuitJSON 1.1 convergence
 
-Version 1.2.1 accepts the common document and prepared-context shapes returned
+Version 1.2.2 accepts the common document and prepared-context shapes returned
 by CircuitJSON, Gerber, Altium, and KiCad Toolkit 1.1-compatible APIs. The
 adapter requests the shared `elements` index once and reuses it across repeated
 scene builds. `PcbScene3dCircuitJsonAdapter.prepare()` exposes that proof-aware
@@ -46,6 +46,13 @@ first.
 Legal rectangular and square CircuitJSON drill apertures retain their exact
 width, height, and board-space rotation through substrate, pad, and assembly
 export meshes.
+
+Canonical documents retain their exact `source.format` as the scene
+`sourceFormat`; raw element arrays continue to use `circuitjson`. Routed traces
+and copper pours with no authored solder-mask coverage value remain covered,
+while `covered_with_solder_mask: false` keeps an explicit opening exposed.
+Standard vias likewise default to tented and honor `is_tented: false` as an
+explicit opening.
 
 The live runtime loads STEP/STP, WRL/VRML, STL, OBJ, GLTF/GLB, and 3MF from
 canonical text/bytes or browser files. Referenced GLTF buffers, OBJ material
@@ -123,6 +130,7 @@ const controller = new PcbScene3dController(viewportNode, document)
 
 - [API](docs/api.md)
 - [CircuitJSON usage](docs/circuitjson.md)
+- [1.2.2 release notes](docs/release-notes-v1.2.2.md)
 - [1.2.1 release notes](docs/release-notes-v1.2.1.md)
 - [1.2.0 release notes](docs/release-notes-v1.2.0.md)
 - [Model format](docs/model-format.md)
