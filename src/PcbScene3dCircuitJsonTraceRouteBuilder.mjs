@@ -85,7 +85,11 @@ export class PcbScene3dCircuitJsonTraceRouteBuilder {
                 0.1524
             ),
             layerId: PcbScene3dCircuitJsonLayer.layerId(side),
-            solderMaskOpening: true
+            solderMaskOpening:
+                PcbScene3dCircuitJsonTraceRouteBuilder.#solderMaskOpening(
+                    entry,
+                    trace
+                )
         }
     }
 
@@ -199,7 +203,12 @@ export class PcbScene3dCircuitJsonTraceRouteBuilder {
                 0.1524
             ),
             layerId: PcbScene3dCircuitJsonLayer.layerId(side),
-            solderMaskOpening: true
+            solderMaskOpening:
+                PcbScene3dCircuitJsonTraceRouteBuilder.#solderMaskOpening(
+                    start,
+                    end,
+                    trace
+                )
         }
     }
 
@@ -303,17 +312,48 @@ export class PcbScene3dCircuitJsonTraceRouteBuilder {
      * @returns {boolean}
      */
     static #isSolderMaskCovered(via) {
-        const value =
-            via?.is_covered_with_solder_mask ?? via?.covered_with_solder_mask
-        if (typeof value === 'boolean') {
-            return value
+        if (typeof via?.is_tented === 'boolean') {
+            return via.is_tented
         }
-
         return (
-            String(value || '')
-                .trim()
-                .toLowerCase() === 'true'
+            PcbScene3dCircuitJsonTraceRouteBuilder.#solderMaskCoveredValue(
+                via
+            ) ?? true
         )
+    }
+
+    /**
+     * Resolves whether trace-like copper has an explicitly authored opening.
+     * @param {...object} elements Route entries followed by their trace.
+     * @returns {boolean}
+     */
+    static #solderMaskOpening(...elements) {
+        for (const element of elements) {
+            const covered =
+                PcbScene3dCircuitJsonTraceRouteBuilder.#solderMaskCoveredValue(
+                    element
+                )
+            if (covered !== null) return !covered
+        }
+        return false
+    }
+
+    /**
+     * Reads one explicit solder-mask coverage value.
+     * @param {object} element CircuitJSON copper element.
+     * @returns {boolean | null}
+     */
+    static #solderMaskCoveredValue(element) {
+        const value =
+            element?.is_covered_with_solder_mask ??
+            element?.covered_with_solder_mask
+        if (typeof value === 'boolean') return value
+        if (value === undefined || value === null || value === '') return null
+
+        const text = String(value).trim().toLowerCase()
+        if (text === 'true') return true
+        if (text === 'false') return false
+        return null
     }
 
     /**

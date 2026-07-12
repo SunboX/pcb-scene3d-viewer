@@ -257,7 +257,12 @@ export class PcbScene3dCircuitJsonCopperPourBuilder {
      */
     static #isCoveredWithMask(pour) {
         const value = pour?.covered_with_solder_mask
-        return value === true || String(value).toLowerCase() === 'true'
+        if (typeof value === 'boolean') return value
+        if (value === undefined || value === null || value === '') return true
+
+        const text = String(value).trim().toLowerCase()
+        if (text === 'false') return false
+        return true
     }
 
     /**

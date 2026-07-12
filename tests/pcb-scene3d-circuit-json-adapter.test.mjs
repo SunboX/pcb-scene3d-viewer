@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as THREE from 'three'
 
 import { PcbScene3dCircuitJsonAdapter } from '../src/PcbScene3dCircuitJsonAdapter.mjs'
+import { PcbScene3dCopperDetailGroupBuilder } from '../src/PcbScene3dCopperDetailGroupBuilder.mjs'
+import { createCanonicalKicadMaskDocument } from './helpers/PcbScene3dCircuitJsonMaskFixture.mjs'
+import { findObjectByName } from './helpers/PcbScene3dCopperTestGeometry.mjs'
 
 /**
  * Builds a small serialized CircuitJSON PCB sample.
@@ -902,4 +906,48 @@ test('PcbScene3dCircuitJsonAdapter maps richer CAD placement hints', () => {
     assert.equal(placement.modelTransform.boardNormalDirection, 'z-')
     assert.equal(Math.round(placement.modelTransform.targetSizeMil.x), 157)
     assert.equal(placement.bodyOpacity, 0.5)
+})
+
+test('PcbScene3dCircuitJsonAdapter retains canonical KiCad source identity', () => {
+    const scene = PcbScene3dCircuitJsonAdapter.build(
+        createCanonicalKicadMaskDocument()
+    )
+
+    assert.equal(scene.sourceFormat, 'kicad')
+})
+
+test('PcbScene3dCircuitJsonAdapter defaults copper to covered and preserves openings', () => {
+    const { detail } = PcbScene3dCircuitJsonAdapter.build(
+        createCanonicalKicadMaskDocument()
+    )
+
+    assert.deepEqual(
+        detail.tracks.map((track) => track.solderMaskOpening),
+        [false, true]
+    )
+    assert.deepEqual(
+        detail.polygons.map((pour) => pour.solderMaskOpening),
+        [false, true]
+    )
+    assert.deepEqual(
+        detail.vias.map((via) => via.isTentingTop),
+        [true, false]
+    )
+})
+
+test('canonical covered copper uses the solder-mask material palette', () => {
+    const scene = PcbScene3dCircuitJsonAdapter.build(
+        createCanonicalKicadMaskDocument()
+    )
+    const group = PcbScene3dCopperDetailGroupBuilder.build(
+        THREE,
+        scene,
+        scene.board.thicknessMil / 2,
+        (x, y) => ({ x, y })
+    )
+    const trackMesh = findObjectByName(group, 'mask-covered-copper-tracks')
+    const fillMesh = findObjectByName(group, 'mask-covered-copper-fills')
+
+    assert.equal(trackMesh?.material.color.getHex(), 0x247330)
+    assert.equal(fillMesh?.material.color.getHex(), 0x296d2d)
 })

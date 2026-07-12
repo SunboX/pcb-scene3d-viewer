@@ -186,7 +186,7 @@ test('PcbScene3dController mounts a canonical document envelope without buildSce
     await Promise.resolve()
 
     assert.equal(mountedScenes.length, 1)
-    assert.equal(mountedScenes[0].sourceFormat, 'circuitjson')
+    assert.equal(mountedScenes[0].sourceFormat, 'gerber')
     controller.dispose()
 })
 
