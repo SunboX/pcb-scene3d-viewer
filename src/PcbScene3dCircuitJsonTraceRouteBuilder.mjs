@@ -1,5 +1,6 @@
 import { CircuitJsonUnits } from 'circuitjson-toolkit'
 import { PcbScene3dCircuitJsonLayer } from './PcbScene3dCircuitJsonLayer.mjs'
+import { PcbScene3dViaLayerSpan } from './PcbScene3dViaLayerSpan.mjs'
 
 /**
  * Converts CircuitJSON trace routes into scene copper tracks and vias.
@@ -114,7 +115,8 @@ export class PcbScene3dCircuitJsonTraceRouteBuilder {
                     0
                 ),
                 isTentingTop: isTented,
-                isTentingBottom: isTented
+                isTentingBottom: isTented,
+                ...PcbScene3dViaLayerSpan.fields(via)
             }
         })
     }
@@ -172,7 +174,8 @@ export class PcbScene3dCircuitJsonTraceRouteBuilder {
             diameter,
             holeDiameter,
             isTentingTop: isTented,
-            isTentingBottom: isTented
+            isTentingBottom: isTented,
+            ...PcbScene3dViaLayerSpan.fields(via)
         }
     }
 
@@ -290,11 +293,7 @@ export class PcbScene3dCircuitJsonTraceRouteBuilder {
      * @returns {boolean}
      */
     static #touchesSurface(via) {
-        return Boolean(
-            PcbScene3dCircuitJsonLayer.surfaceSide(via?.from_layer) ||
-            PcbScene3dCircuitJsonLayer.surfaceSide(via?.to_layer) ||
-            PcbScene3dCircuitJsonLayer.surfaceSide(via?.layer)
-        )
+        return PcbScene3dViaLayerSpan.surfaceSides(via).length > 0
     }
 
     /**

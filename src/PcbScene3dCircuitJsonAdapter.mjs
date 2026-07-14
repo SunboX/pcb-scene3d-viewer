@@ -7,7 +7,8 @@ import { PcbScene3dCircuitJsonGeometry } from './PcbScene3dCircuitJsonGeometry.m
 import { PcbScene3dCircuitJsonDrillDetail } from './PcbScene3dCircuitJsonDrillDetail.mjs'
 import { PcbScene3dCircuitJsonModelTransform } from './PcbScene3dCircuitJsonModelTransform.mjs'
 import { PcbScene3dCircuitJsonCopperPourBuilder } from './PcbScene3dCircuitJsonCopperPourBuilder.mjs'
-import { PcbScene3dCircuitJsonSilkscreenBuilder } from './PcbScene3dCircuitJsonSilkscreenBuilder.mjs'
+import { PcbScene3dCircuitJsonCopperTextBuilder } from './PcbScene3dCircuitJsonCopperTextBuilder.mjs'
+import { PcbScene3dCircuitJsonSilkscreenDetailBuilder } from './PcbScene3dCircuitJsonSilkscreenDetailBuilder.mjs'
 import { PcbScene3dFootprintBodyBuilder } from './PcbScene3dFootprintBodyBuilder.mjs'
 import { PcbScene3dCircuitJsonLayer } from './PcbScene3dCircuitJsonLayer.mjs'
 import { PcbScene3dCircuitJsonInput } from './PcbScene3dCircuitJsonInput.mjs'
@@ -18,6 +19,7 @@ import { PcbScene3dCircuitJsonSolderPasteBuilder } from './PcbScene3dCircuitJson
 import { CircuitJsonCadModelAssetResolver } from './CircuitJsonCadModelAssetResolver.mjs'
 import { PcbScene3dDescriptorSafeRecord } from './PcbScene3dDescriptorSafeRecord.mjs'
 import { PcbScene3dCircuitJsonModelAsset } from './PcbScene3dCircuitJsonModelAsset.mjs'
+import { PcbScene3dCircuitJsonPadCorner } from './PcbScene3dCircuitJsonPadCorner.mjs'
 
 const DEFAULT_COMPONENT_HEIGHT_MIL = 60
 const RECTANGULAR_PAD_SHAPE = 2
@@ -682,27 +684,34 @@ export class PcbScene3dCircuitJsonAdapter {
             index,
             options
         )
+        const pads = [
+            ...PcbScene3dCircuitJsonAdapter.#buildSmtPads(index),
+            ...PcbScene3dCircuitJsonAdapter.#buildPlatedHoles(index),
+            ...PcbScene3dCircuitJsonAdapter.#buildNonPlatedHoles(index)
+        ]
+        const vias = PcbScene3dCircuitJsonTraceRouteBuilder.buildVias(index)
+        const tracks = [
+            ...PcbScene3dCircuitJsonTraceRouteBuilder.buildTracks(index),
+            ...PcbScene3dCircuitJsonThermalSpokeBuilder.build(index)
+        ]
+        const polygons = PcbScene3dCircuitJsonCopperPourBuilder.build(index)
+        const copperTexts = PcbScene3dCircuitJsonCopperTextBuilder.build(index)
+        const silkscreen = PcbScene3dCircuitJsonSilkscreenDetailBuilder.build(
+            index,
+            { pads, vias, tracks, polygons, copperTexts },
+            options
+        )
 
         return {
-            pads: [
-                ...PcbScene3dCircuitJsonAdapter.#buildSmtPads(index),
-                ...PcbScene3dCircuitJsonAdapter.#buildPlatedHoles(index),
-                ...PcbScene3dCircuitJsonAdapter.#buildNonPlatedHoles(index)
-            ],
-            tracks: [
-                ...PcbScene3dCircuitJsonTraceRouteBuilder.buildTracks(index),
-                ...PcbScene3dCircuitJsonThermalSpokeBuilder.build(index)
-            ],
+            pads,
+            tracks,
             arcs: [],
             fills: [],
-            vias: PcbScene3dCircuitJsonTraceRouteBuilder.buildVias(index),
-            polygons: PcbScene3dCircuitJsonCopperPourBuilder.build(index),
-            copperTexts: [],
+            vias,
+            polygons,
+            copperTexts,
             embeddedFonts: [],
-            silkscreen: PcbScene3dCircuitJsonSilkscreenBuilder.build(
-                index,
-                options
-            ),
+            silkscreen,
             ...(paste ? { paste } : {}),
             drillQuality: PcbScene3dCircuitJsonGeometry.normalizeDrillQuality(
                 options?.boardDrillQuality
@@ -745,11 +754,7 @@ export class PcbScene3dCircuitJsonAdapter {
                 holeDiameter: 0,
                 hasTopSolderMaskOpening: !isBottom && exposesCopper,
                 hasBottomSolderMaskOpening: isBottom && exposesCopper,
-                ...PcbScene3dCircuitJsonAdapter.#roundedPadMetadata(
-                    pad,
-                    size,
-                    isBottom
-                )
+                ...PcbScene3dCircuitJsonPadCorner.metadata(pad, size, isBottom)
             }
             return padDetail
         })
@@ -768,7 +773,7 @@ export class PcbScene3dCircuitJsonAdapter {
                     y: Number(hole?.y || 0)
                 })
                 const size =
-                    PcbScene3dCircuitJsonAdapter.#platedHoleOuterSize(geometry)
+                    PcbScene3dCircuitJsonGeometry.platedHoleOuterSize(geometry)
                 const center = CircuitJsonUnits.pointMmToMil({
                     x: hole?.x,
                     y: hole?.y
@@ -796,6 +801,11 @@ export class PcbScene3dCircuitJsonAdapter {
                     sizeMidY: size.height,
                     sizeBottomX: size.width,
                     sizeBottomY: size.height,
+                    ...PcbScene3dCircuitJsonPadCorner.metadata(
+                        geometry,
+                        size,
+                        null
+                    ),
                     ...PcbScene3dCircuitJsonDrillDetail.fields(drill),
                     holeOffsetX: drill.center.x - center.x,
                     holeOffsetY: drill.center.y - center.y,
@@ -852,68 +862,6 @@ export class PcbScene3dCircuitJsonAdapter {
             height: CircuitJsonUnits.mmToMil(pad?.height, 1)
         }
     }
-
-    /**
-     * Builds rounded-rectangle metadata for pill-shaped SMT pads.
-     * @param {object} pad Pad element.
-     * @param {{ width: number, height: number }} size Pad copper size.
-     * @param {boolean} isBottom True when the pad is on the bottom side.
-     * @returns {object}
-     */
-    static #roundedPadMetadata(pad, size, isBottom) {
-        if (!String(pad?.shape || '').endsWith('pill')) {
-            return {}
-        }
-
-        const cornerRadius =
-            PcbScene3dCircuitJsonAdapter.#roundedPadCornerRadiusPercent(
-                pad,
-                size
-            )
-        return {
-            hasRoundedRect: true,
-            roundedRectShapeTop: isBottom ? null : RECTANGULAR_PAD_SHAPE,
-            roundedRectShapeBottom: isBottom ? RECTANGULAR_PAD_SHAPE : null,
-            cornerRadiusTop: isBottom ? null : cornerRadius,
-            cornerRadiusBottom: isBottom ? cornerRadius : null
-        }
-    }
-
-    /**
-     * Resolves a pill-pad corner radius as a percent of the shortest side.
-     * @param {object} pad Pad element.
-     * @param {{ width: number, height: number }} size Pad copper size.
-     * @returns {number}
-     */
-    static #roundedPadCornerRadiusPercent(pad, size) {
-        const width = CircuitJsonUnits.optionalLength(pad?.width)
-        const height = CircuitJsonUnits.optionalLength(pad?.height)
-        const radius = CircuitJsonUnits.optionalLength(pad?.radius)
-        if (width > 0 && height > 0 && radius > 0) {
-            return Math.min((radius / Math.min(width, height)) * 100, 50)
-        }
-
-        const shortestSide = Math.min(Number(size.width), Number(size.height))
-        const radiusMil = CircuitJsonUnits.mmToMil(pad?.radius, 0)
-        if (shortestSide > 0 && radiusMil > 0) {
-            return Math.min((radiusMil / shortestSide) * 100, 50)
-        }
-
-        return 50
-    }
-
-    /**
-     * Resolves plated-hole copper size from CircuitJSON fields.
-     * @param {object} geometry Shared drilled-primitive geometry.
-     * @returns {{ width: number, height: number }}
-     */
-    static #platedHoleOuterSize(geometry) {
-        return {
-            width: CircuitJsonUnits.mmToMil(geometry?.width, 1),
-            height: CircuitJsonUnits.mmToMil(geometry?.height, 1)
-        }
-    }
-
     /**
      * Resolves the viewer pad shape code.
      * @param {object} pad CircuitJSON pad element.

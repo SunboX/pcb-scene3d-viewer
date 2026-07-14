@@ -100,7 +100,7 @@ export class PcbScene3dCopperFactory {
     /**
      * Builds top and bottom copper detail that is covered by solder mask.
      * @param {any} THREE
-     * @param {{ tracks?: any[], arcs?: any[], fills?: any[], polygons?: any[] }} detail Mask-covered detail.
+     * @param {{ tracks?: any[], arcs?: any[], fills?: any[], polygons?: any[], copperTexts?: any[] }} detail Mask-covered detail.
      * @param {number} topZ
      * @param {number} bottomZ
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
@@ -146,7 +146,8 @@ export class PcbScene3dCopperFactory {
                 fills: PcbScene3dCopperLayerFilter.fills(
                     [...(detail?.fills || []), ...(detail?.polygons || [])],
                     'top'
-                )
+                ),
+                copperTexts: detail?.copperTexts || []
             },
             Math.abs(Number(topZ || 0)),
             normalizeBoardPoint,
@@ -166,7 +167,8 @@ export class PcbScene3dCopperFactory {
                 fills: PcbScene3dCopperLayerFilter.fills(
                     [...(detail?.fills || []), ...(detail?.polygons || [])],
                     'bottom'
-                )
+                ),
+                copperTexts: detail?.copperTexts || []
             },
             Math.abs(Number(bottomZ || 0)),
             normalizeBoardPoint,
@@ -267,7 +269,7 @@ export class PcbScene3dCopperFactory {
     /**
      * Builds one side of the mask-covered copper relief.
      * @param {any} THREE
-     * @param {{ tracks?: any[], arcs?: any[], fills?: any[] }} detail Mask-covered detail.
+     * @param {{ tracks?: any[], arcs?: any[], fills?: any[], copperTexts?: any[] }} detail Mask-covered detail.
      * @param {number} z
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {boolean} mirrorY
@@ -353,10 +355,27 @@ export class PcbScene3dCopperFactory {
                 coverageContext
             }
         )
+        const textGroup = PcbScene3dCopperTextFactory.buildGroup(
+            THREE,
+            detail?.copperTexts || [],
+            z,
+            normalizeBoardPoint,
+            {
+                glyphYUp: PcbScene3dCopperFactory.#usesYUpGlyphs(options),
+                side: mirrorY ? 'bottom' : 'top',
+                mirrorY,
+                materialColor: PcbScene3dMaskCoveredCopperMaterial.resolveColor(
+                    options?.solderMaskColor
+                ),
+                drillCutouts: occlusionCutouts
+            }
+        )
+        const textMesh = textGroup.children[0] || null
         return PcbScene3dMaskCoveredCopperSideGroupBuilder.build(THREE, {
             trackMesh,
             arcMesh,
             fillMesh,
+            textMesh,
             z,
             mirrorY
         })

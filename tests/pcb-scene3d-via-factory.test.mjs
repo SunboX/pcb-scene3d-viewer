@@ -89,6 +89,77 @@ test('PcbScene3dViaFactory uses supplied material for masked via annuli', () => 
     assert.equal(group.children[0].material, material)
 })
 
+test('PcbScene3dViaFactory respects blind, buried, and through via spans', () => {
+    const boardThickness = 64
+    const group = PcbScene3dViaFactory.buildGroup(
+        THREE,
+        [
+            {
+                x: -30,
+                y: 0,
+                diameter: 24,
+                holeDiameter: 10,
+                layers: ['top', 'inner2']
+            },
+            {
+                x: -10,
+                y: 0,
+                diameter: 24,
+                holeDiameter: 10,
+                fromLayer: 'inner2',
+                toLayer: 'bottom'
+            },
+            {
+                x: 10,
+                y: 0,
+                diameter: 24,
+                holeDiameter: 10,
+                layers: ['inner1', 'inner3']
+            },
+            {
+                x: 30,
+                y: 0,
+                diameter: 24,
+                holeDiameter: 10,
+                from_layer: 'top',
+                to_layer: 'bottom'
+            }
+        ],
+        boardThickness,
+        (x, y) => ({ x, y })
+    )
+    const topBlind = group.children.find((mesh) => mesh.position.x === -30)
+    const bottomBlind = group.children.find((mesh) => mesh.position.x === -10)
+    const buried = group.children.find((mesh) => mesh.position.x === 10)
+    const through = group.children.find((mesh) => mesh.position.x === 30)
+    const topBounds = worldZBounds(topBlind)
+    const bottomBounds = worldZBounds(bottomBlind)
+    const throughBounds = worldZBounds(through)
+
+    assert.equal(group.children.length, 3)
+    assert.ok(topBlind)
+    assert.ok(bottomBlind)
+    assert.equal(buried, undefined)
+    assert.ok(through)
+    assert.ok(topBounds.min >= boardThickness / 2 - 1.1)
+    assert.ok(topBounds.max <= boardThickness / 2 + 1.1)
+    assert.ok(bottomBounds.min >= -boardThickness / 2 - 1.1)
+    assert.ok(bottomBounds.max <= -boardThickness / 2 + 1.1)
+    assert.ok(throughBounds.min < -boardThickness / 2)
+    assert.ok(throughBounds.max > boardThickness / 2)
+})
+
+/**
+ * Resolves world-space Z bounds for one mesh.
+ * @param {THREE.Mesh} mesh Mesh to inspect.
+ * @returns {{ min: number, max: number }}
+ */
+function worldZBounds(mesh) {
+    mesh.updateMatrixWorld(true)
+    const bounds = new THREE.Box3().setFromObject(mesh)
+    return { min: bounds.min.z, max: bounds.max.z }
+}
+
 /**
  * Counts side-wall triangles that lie on a circular drill contour.
  * @param {any} geometry

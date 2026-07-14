@@ -1,6 +1,8 @@
 import { PcbScene3dModelIdentity } from './PcbScene3dModelIdentity.mjs'
 import { PcbScene3dModelFetchPolicy } from './PcbScene3dModelFetchPolicy.mjs'
 
+const CONTENT_UNAVAILABLE_ERROR = 'ERR_MODEL_CONTENT_UNAVAILABLE'
+
 /**
  * Reads external-model payloads through one explicit local/network policy.
  */
@@ -21,6 +23,35 @@ export class PcbScene3dModelContent {
      */
     static canFetch(options) {
         return PcbScene3dModelFetchPolicy.canFetch(options)
+    }
+
+    /**
+     * Creates a typed missing-content error for deferred model references.
+     * @param {string} [label] Human-readable format label.
+     * @returns {Error}
+     */
+    static unavailableError(label = 'Model') {
+        const error = new Error(label + ' model content is not available.')
+        Object.defineProperty(error, 'code', {
+            configurable: false,
+            enumerable: true,
+            value: CONTENT_UNAVAILABLE_ERROR,
+            writable: false
+        })
+        return error
+    }
+
+    /**
+     * Returns whether a failure is the typed missing-content condition.
+     * @param {unknown} error Candidate failure.
+     * @returns {boolean}
+     */
+    static isUnavailableError(error) {
+        try {
+            return error?.code === CONTENT_UNAVAILABLE_ERROR
+        } catch {
+            return false
+        }
     }
 
     /**
@@ -155,7 +186,7 @@ export class PcbScene3dModelContent {
                 ''
         ).trim()
         if (!url || !PcbScene3dModelFetchPolicy.canFetch(options)) {
-            throw new Error(label + ' model content is not available.')
+            throw PcbScene3dModelContent.unavailableError(label)
         }
 
         const cache =

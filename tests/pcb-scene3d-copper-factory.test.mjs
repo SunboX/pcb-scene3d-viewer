@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as THREE from 'three'
 import { PcbScene3dCopperFactory } from '../src/PcbScene3dCopperFactory.mjs'
+import { PcbScene3dCopperTextFactory } from '../src/PcbScene3dCopperTextFactory.mjs'
 import {
     countTrianglesCoveringPoint,
     createCircularCutout,
@@ -832,4 +833,33 @@ test('PcbScene3dCopperFactory orients KiCad y-up copper text glyphs', () => {
 
     assert.ok(bounds.minY > 60)
     assert.ok(bounds.maxY > 140)
+})
+
+test('PcbScene3dCopperTextFactory rotates left-anchored mirrored text in its local frame', () => {
+    const anchor = { x: 100, y: 100 }
+    const group = PcbScene3dCopperTextFactory.buildGroup(
+        THREE,
+        [
+            {
+                ...anchor,
+                value: 'MARK',
+                sizeX: 30,
+                sizeY: 30,
+                thickness: 5,
+                hAlign: 'left',
+                vAlign: 'center',
+                rotation: 30,
+                mirrored: true
+            }
+        ],
+        7,
+        (x, y) => ({ x, y }),
+        { filterSide: false }
+    )
+    const textMesh = findObjectByName(group, 'copper-text')
+    const bounds = resolveBounds(textMesh.geometry.attributes.position.array)
+
+    assert.ok(bounds.minX < anchor.x)
+    assert.ok((bounds.minY + bounds.maxY) / 2 < anchor.y)
+    assert.ok(bounds.maxY < anchor.y + 15)
 })

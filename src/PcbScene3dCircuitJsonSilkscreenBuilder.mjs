@@ -1,6 +1,7 @@
 import { CircuitJsonUnits } from 'circuitjson-toolkit'
 import { PcbScene3dCircuitJsonLayer } from './PcbScene3dCircuitJsonLayer.mjs'
 import { PcbScene3dCircuitJsonDocumentationArtworkBuilder } from './PcbScene3dCircuitJsonDocumentationArtworkBuilder.mjs'
+import { PcbScene3dCircuitJsonSourceLayer } from './PcbScene3dCircuitJsonSourceLayer.mjs'
 
 const CURVE_SEGMENTS = 32
 const CAP_SEGMENTS = 16
@@ -21,6 +22,12 @@ export class PcbScene3dCircuitJsonSilkscreenBuilder {
 
         PcbScene3dCircuitJsonSilkscreenBuilder.#appendLines(index, top, bottom)
         PcbScene3dCircuitJsonSilkscreenBuilder.#appendPaths(index, top, bottom)
+        PcbScene3dCircuitJsonDocumentationArtworkBuilder.append(
+            index,
+            top,
+            bottom,
+            { sourceLayerFilter: 'silkscreen' }
+        )
         PcbScene3dCircuitJsonSilkscreenBuilder.#appendCircles(
             index,
             top,
@@ -36,18 +43,32 @@ export class PcbScene3dCircuitJsonSilkscreenBuilder {
             top,
             bottom
         )
+        PcbScene3dCircuitJsonSilkscreenBuilder.#appendTexts(
+            (index.elementsByType.get('pcb_note_text') || []).filter(
+                PcbScene3dCircuitJsonSourceLayer.isSilkscreen
+            ),
+            top,
+            bottom
+        )
         if (options?.showPcbNotes === true) {
             PcbScene3dCircuitJsonDocumentationArtworkBuilder.append(
                 index,
                 top,
-                bottom
+                bottom,
+                { sourceLayerFilter: 'non-silkscreen' }
             )
             PcbScene3dCircuitJsonSilkscreenBuilder.#appendTexts(
                 [
                     ...(index.elementsByType.get('pcb_note_text') || []),
                     ...(index.elementsByType.get('pcb_fabrication_note_text') ||
                         [])
-                ],
+                ].filter(
+                    (text) =>
+                        !PcbScene3dCircuitJsonSourceLayer.isSilkscreen(text) &&
+                        !PcbScene3dCircuitJsonSourceLayer.isCopperOrSolderMask(
+                            text
+                        )
+                ),
                 top,
                 bottom
             )
@@ -92,32 +113,105 @@ export class PcbScene3dCircuitJsonSilkscreenBuilder {
      */
     static #appendPaths(index, top, bottom) {
         ;(index.elementsByType.get('pcb_silkscreen_path') || []).forEach(
-            (path) => {
+            (path, pathIndex) => {
                 const target =
                     PcbScene3dCircuitJsonSilkscreenBuilder.#sideDetail(
                         path?.layer,
                         top,
                         bottom
                     )
-                const route = PcbScene3dCircuitJsonSilkscreenBuilder.#array(
-                    path?.route
+                PcbScene3dCircuitJsonSilkscreenBuilder.#appendPath(
+                    target,
+                    path,
+                    PcbScene3dCircuitJsonSilkscreenBuilder.#sourceId(
+                        path,
+                        ['pcb_silkscreen_path_id', 'silkscreen_path_id'],
+                        'pcb_silkscreen_path',
+                        pathIndex
+                    )
                 )
-                for (let index = 0; index < route.length - 1; index += 1) {
-                    const start = route[index]
-                    const end = route[index + 1]
-                    target.tracks.push({
-                        x1: CircuitJsonUnits.mmToMil(start?.x, 0),
-                        y1: CircuitJsonUnits.mmToMil(start?.y, 0),
-                        x2: CircuitJsonUnits.mmToMil(end?.x, 0),
-                        y2: CircuitJsonUnits.mmToMil(end?.y, 0),
-                        width: CircuitJsonUnits.mmToMil(
-                            path?.stroke_width,
-                            0.12
-                        )
-                    })
-                }
             }
         )
+    }
+
+    /**
+     * Appends one filled polygon or stroke path to a side detail container.
+     * @param {object} target Side-specific silkscreen detail.
+     * @param {object} path CircuitJSON path element.
+     * @param {string} sourceId Stable source ID.
+     * @returns {void}
+     */
+    static #appendPath(target, path, sourceId) {
+        const points = PcbScene3dCircuitJsonSilkscreenBuilder.#pathPoints(path)
+        if (points.length < 2) {
+            return
+        }
+
+        const fillPoints =
+            PcbScene3dCircuitJsonSilkscreenBuilder.#distinctPathPoints(points)
+        if (path?.fill === true && fillPoints.length >= 3) {
+            target.fills.push({
+                sourceId,
+                points: fillPoints
+            })
+            return
+        }
+
+        const width =
+            PcbScene3dCircuitJsonSilkscreenBuilder.#pathStrokeWidth(path)
+        for (let index = 0; index < points.length - 1; index += 1) {
+            const start = points[index]
+            const end = points[index + 1]
+            target.tracks.push({
+                sourceId,
+                x1: start.x,
+                y1: start.y,
+                x2: end.x,
+                y2: end.y,
+                width
+            })
+        }
+    }
+
+    /**
+     * Converts one path route into valid millimeter-to-mil points.
+     * @param {object} path CircuitJSON path element.
+     * @returns {{ x: number, y: number }[]}
+     */
+    static #pathPoints(path) {
+        return PcbScene3dCircuitJsonSilkscreenBuilder.#array(
+            path?.route || path?.points
+        )
+            .map((point) =>
+                PcbScene3dCircuitJsonSilkscreenBuilder.#point(point)
+            )
+            .filter(Boolean)
+    }
+
+    /**
+     * Removes a duplicate closing point from one polygon route.
+     * @param {{ x: number, y: number }[]} points Route points.
+     * @returns {{ x: number, y: number }[]}
+     */
+    static #distinctPathPoints(points) {
+        if (points.length < 2) return points
+        const first = points[0]
+        const last = points[points.length - 1]
+        return first.x === last.x && first.y === last.y
+            ? points.slice(0, -1)
+            : points
+    }
+
+    /**
+     * Resolves a positive stroke width with the standard silkscreen fallback.
+     * @param {object} path CircuitJSON path element.
+     * @returns {number}
+     */
+    static #pathStrokeWidth(path) {
+        const width = Number(path?.stroke_width ?? path?.strokeWidth)
+        return Number.isFinite(width) && width > 0
+            ? CircuitJsonUnits.mmToMil(width, 0)
+            : CircuitJsonUnits.mmToMil(0.12, 0)
     }
 
     /**
@@ -246,6 +340,7 @@ export class PcbScene3dCircuitJsonSilkscreenBuilder {
      */
     static #appendTexts(texts, top, bottom) {
         texts.forEach((text) => {
+            if (text?.is_hidden === true || text?.isHidden === true) return
             const target = PcbScene3dCircuitJsonSilkscreenBuilder.#sideDetail(
                 text?.layer,
                 top,
@@ -265,8 +360,22 @@ export class PcbScene3dCircuitJsonSilkscreenBuilder {
     static #textPrimitive(text) {
         const position =
             PcbScene3dCircuitJsonSilkscreenBuilder.#textPosition(text)
-        const size = CircuitJsonUnits.mmToMil(
-            text?.font_size ?? text?.fontSize ?? text?.height ?? text?.size,
+        const sizeX = CircuitJsonUnits.mmToMil(
+            text?.font_width ??
+                text?.fontWidth ??
+                text?.font_size ??
+                text?.fontSize ??
+                text?.height ??
+                text?.size,
+            1
+        )
+        const sizeY = CircuitJsonUnits.mmToMil(
+            text?.font_height ??
+                text?.fontHeight ??
+                text?.font_size ??
+                text?.fontSize ??
+                text?.height ??
+                text?.size,
             1
         )
         const strokeWidth = CircuitJsonUnits.mmToMil(
@@ -283,13 +392,17 @@ export class PcbScene3dCircuitJsonSilkscreenBuilder {
             x: position.x,
             y: position.y,
             rotation: Number(text?.ccw_rotation ?? text?.rotation ?? 0),
-            sizeX: size,
-            sizeY: size,
+            sizeX,
+            sizeY,
             width: strokeWidth,
             strokeWidth,
             thickness: strokeWidth,
             hAlign: alignment.hAlign,
-            vAlign: alignment.vAlign
+            vAlign: alignment.vAlign,
+            mirrored:
+                text?.is_mirrored === true ||
+                text?.is_mirrored_from_top_view === true ||
+                text?.mirrored === true
         }
     }
 
@@ -315,7 +428,9 @@ export class PcbScene3dCircuitJsonSilkscreenBuilder {
      * @returns {{ hAlign: 'left' | 'center' | 'right', vAlign: 'top' | 'center' | 'bottom' }}
      */
     static #textAlignment(text) {
-        const value = String(text?.anchor_alignment || '')
+        const value = String(
+            text?.source_anchor_alignment || text?.anchor_alignment || ''
+        )
             .trim()
             .toLowerCase()
             .replaceAll('-', '_')

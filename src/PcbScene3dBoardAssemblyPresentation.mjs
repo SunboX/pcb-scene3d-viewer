@@ -35,8 +35,7 @@ export class PcbScene3dBoardAssemblyPresentation {
                 board,
                 options
             )
-        const edgeColor =
-            PcbScene3dBoardAssemblyPresentation.#resolveEdgeColor(board)
+        const edgeColor = PcbScene3dBoardMaterialPalette.resolveEdgeColor(board)
         const importedSurfaceColor =
             PcbScene3dBoardAssemblyPresentation.#resolveImportedSurfaceColor(
                 meshRecords
@@ -424,15 +423,6 @@ export class PcbScene3dBoardAssemblyPresentation {
             hasBoardAssemblyModel: true,
             sourceFormat: options?.sourceFormat
         })
-    }
-
-    /**
-     * Resolves the app-level substrate edge color for board assembly meshes.
-     * @param {{ edgeColor?: number } | null | undefined} board Board dimensions.
-     * @returns {number}
-     */
-    static #resolveEdgeColor(board) {
-        return Number.isInteger(board?.edgeColor) ? board.edgeColor : 0xc9ca78
     }
 
     /**

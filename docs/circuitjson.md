@@ -430,10 +430,12 @@ explicit false value exposes the copper:
 }
 ```
 
-Silkscreen text uses `anchor_position` when available, falling back to `x` and
-`y`. Common `anchor_alignment` values such as `center`, `bottom_left`, or
-`top_right` are normalized into horizontal and vertical alignment metadata for
-stroke text rendering.
+Silkscreen and copper text use `anchor_position` when available, falling back
+to `x` and `y`. Independent `font_width` and `font_height`, `stroke_width`,
+`source_anchor_alignment`, source layer/type provenance, mirroring, and hidden
+state are honored when present. Filled silkscreen shapes retain their fill and
+drill/copper cutouts, and bottom-side artwork is mirrored around its authored
+anchor instead of being repositioned as top-side text.
 
 Component model metadata can be supplied on `cad_component` elements with
 `model_3mf_url`, `model_step_url`, `model_wrl_url`, `model_glb_url`,

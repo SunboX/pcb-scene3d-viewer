@@ -93,7 +93,11 @@ export class PcbScene3dCopperDetailFilter {
                 detail.polygons,
                 defaultCovered
             ),
-            copperTexts: [],
+            copperTexts:
+                PcbScene3dCopperDetailFilter.#filterMaskCoveredPrimitives(
+                    detail.copperTexts,
+                    defaultCovered
+                ),
             vias: []
         }
     }

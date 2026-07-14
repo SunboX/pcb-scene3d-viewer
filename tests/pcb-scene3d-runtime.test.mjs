@@ -741,7 +741,7 @@ test('PcbScene3dRuntime shows front-right KiCad anchors on the right in isometri
     assert.ok(screenPoint.x > 0)
 })
 
-test('PcbScene3dRuntime uses board face, edge, and plated-hole copper materials', async () => {
+test('PcbScene3dRuntime uses board face, default FR-4 edge, and plated-hole copper materials', async () => {
     const originalWindow = globalThis.window
     const originalDocument = globalThis.document
     const originalLoadIntoScene = PcbScene3dExternalModels.loadIntoScene
@@ -768,8 +768,7 @@ test('PcbScene3dRuntime uses board face, edge, and plated-hole copper materials'
                 centerY: 0,
                 thicknessMil: 62,
                 segments: [],
-                surfaceColor: 0x17396b,
-                edgeColor: 0xf7f9d1
+                surfaceColor: 0x17396b
             },
             components: [],
             detail: {
@@ -793,7 +792,7 @@ test('PcbScene3dRuntime uses board face, edge, and plated-hole copper materials'
         assert.ok(Array.isArray(boardMesh?.material))
         assert.equal(boardMesh.material.length, 3)
         assert.equal(boardMesh.material[0].options.color, 0x14325e)
-        assert.equal(boardMesh.material[1].options.color, 0xf7f9d1)
+        assert.equal(boardMesh.material[1].options.color, 0xc9ca78)
         assert.equal(boardMesh.material[2].options.color, 0xd9a61d)
         assert.equal(boardMesh.material[0].options.side, 'DoubleSide')
         assert.equal(boardMesh.material[1].options.side, 'DoubleSide')

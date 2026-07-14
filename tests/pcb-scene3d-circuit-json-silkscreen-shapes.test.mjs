@@ -2,6 +2,85 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { PcbScene3dCircuitJsonAdapter } from '../src/PcbScene3dCircuitJsonAdapter.mjs'
+import { PcbScene3dCircuitJsonSourceLayer } from '../src/PcbScene3dCircuitJsonSourceLayer.mjs'
+
+test('PcbScene3dCircuitJsonSourceLayer classifies only outer copper and solder-mask source layers', () => {
+    assert.equal(
+        PcbScene3dCircuitJsonSourceLayer.isOuterCopper({
+            source_layer: 'F.Cu'
+        }),
+        true
+    )
+    assert.equal(
+        PcbScene3dCircuitJsonSourceLayer.isOuterCopper({
+            sourceLayer: { layer: 'B.Cu' }
+        }),
+        true
+    )
+    assert.equal(
+        PcbScene3dCircuitJsonSourceLayer.isOuterCopper({
+            source_layer: 'In1.Cu'
+        }),
+        false
+    )
+    assert.equal(
+        PcbScene3dCircuitJsonSourceLayer.isSolderMask({
+            source_layer: { name: 'F.Mask' }
+        }),
+        true
+    )
+    assert.equal(
+        PcbScene3dCircuitJsonSourceLayer.isCopperOrSolderMask({
+            source_layer: 'B.Mask'
+        }),
+        true
+    )
+    assert.equal(
+        PcbScene3dCircuitJsonSourceLayer.isCopperOrSolderMask({
+            source_layer: 'F.Fab'
+        }),
+        false
+    )
+})
+
+test('PcbScene3dCircuitJsonAdapter keeps copper and mask text out of optional documentation', () => {
+    const text = (id, sourceLayer, layer = 'top') => ({
+        type: 'pcb_fabrication_note_text',
+        pcb_fabrication_note_text_id: id,
+        text: id,
+        anchor_position: { x: 0, y: 0 },
+        font_size: 1,
+        layer,
+        source_layer: sourceLayer
+    })
+    const scene = PcbScene3dCircuitJsonAdapter.build(
+        [
+            {
+                type: 'pcb_board',
+                pcb_board_id: 'board_1',
+                center: { x: 0, y: 0 },
+                width: 20,
+                height: 10,
+                thickness: 1.6
+            },
+            text('outer_copper_top', 'F.Cu'),
+            text('outer_copper_bottom', 'B.Cu', 'bottom'),
+            text('solder_mask_top', 'F.Mask'),
+            text('solder_mask_bottom', 'B.Mask', 'bottom'),
+            text('assembly_note', 'F.Fab'),
+            text('drawing_note', 'Dwgs.User', 'bottom')
+        ],
+        { showPcbNotes: true }
+    )
+    const visibleTextIds = [
+        ...scene.detail.silkscreen.top.texts,
+        ...scene.detail.silkscreen.bottom.texts
+    ]
+        .map((entry) => entry.sourceId)
+        .sort()
+
+    assert.deepEqual(visibleTextIds, ['assembly_note', 'drawing_note'])
+})
 
 test('PcbScene3dCircuitJsonAdapter maps silkscreen circles to full-circle arcs', () => {
     const renderModel = PcbScene3dCircuitJsonAdapter.build([
@@ -233,6 +312,261 @@ test('PcbScene3dCircuitJsonAdapter maps note and fabrication artwork only when n
     assert.equal(fabText.value, 'FAB')
     assert.equal(Math.round(fabText.x), 50)
     assert.equal(Math.round(fabText.y), 100)
+})
+
+test('PcbScene3dCircuitJsonAdapter restores source-identified filled silkscreen paths without showing notes', () => {
+    const circuitJson = [
+        {
+            type: 'pcb_board',
+            pcb_board_id: 'board_1',
+            center: { x: 0, y: 0 },
+            width: 20,
+            height: 10,
+            thickness: 1.6
+        },
+        {
+            type: 'pcb_note_path',
+            pcb_note_path_id: 'board_silk_fill',
+            layer: 'top',
+            source_layer: 'F.SilkS',
+            source_type: 'gr_poly',
+            fill: true,
+            route: [
+                { x: 0, y: 0 },
+                { x: 2.54, y: 0 },
+                { x: 1.27, y: 2.54 },
+                { x: 0, y: 0 }
+            ],
+            stroke_width: -0.000001
+        },
+        {
+            type: 'pcb_silkscreen_path',
+            pcb_silkscreen_path_id: 'owned_silk_fill',
+            pcb_component_id: 'component_1',
+            layer: 'bottom',
+            source_layer: 'B.SilkS',
+            source_type: 'fp_poly',
+            fill: true,
+            route: [
+                { x: -2.54, y: 0 },
+                { x: -1.27, y: 1.27 },
+                { x: -3.81, y: 1.27 },
+                { x: -2.54, y: 0 }
+            ],
+            stroke_width: 0.12
+        },
+        {
+            type: 'pcb_note_path',
+            pcb_note_path_id: 'ordinary_note',
+            layer: 'top',
+            route: [
+                { x: 5.08, y: 0 },
+                { x: 7.62, y: 0 }
+            ],
+            stroke_width: 0.12
+        },
+        {
+            type: 'pcb_note_path',
+            pcb_note_path_id: 'fabrication_fill',
+            layer: 'top',
+            source_layer: 'F.Fab',
+            fill: true,
+            route: [
+                { x: 0, y: -1.27 },
+                { x: 1.27, y: -1.27 },
+                { x: 0, y: -2.54 },
+                { x: 0, y: -1.27 }
+            ],
+            stroke_width: 0.12
+        }
+    ]
+    const defaultScene = PcbScene3dCircuitJsonAdapter.build(circuitJson)
+    const notesScene = PcbScene3dCircuitJsonAdapter.build(circuitJson, {
+        showPcbNotes: true
+    })
+    const topFill = defaultScene.detail.silkscreen.top.fills[0]
+    const bottomFill = defaultScene.detail.silkscreen.bottom.fills[0]
+
+    assert.equal(defaultScene.detail.silkscreen.top.fills.length, 1)
+    assert.equal(defaultScene.detail.silkscreen.bottom.fills.length, 1)
+    assert.equal(topFill.sourceId, 'board_silk_fill')
+    assert.equal(bottomFill.sourceId, 'owned_silk_fill')
+    assert.deepEqual(topFill.points, [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 50, y: 100 }
+    ])
+    assert.equal(defaultScene.detail.silkscreen.top.tracks.length, 0)
+    assert.equal(defaultScene.detail.silkscreen.bottom.tracks.length, 0)
+    assert.equal(
+        notesScene.detail.silkscreen.top.fills.filter(
+            (fill) => fill.sourceId === 'board_silk_fill'
+        ).length,
+        1
+    )
+    assert.equal(
+        notesScene.detail.silkscreen.top.fills.filter(
+            (fill) => fill.sourceId === 'fabrication_fill'
+        ).length,
+        1
+    )
+    assert.equal(
+        tracksBySource(
+            notesScene.detail.silkscreen.top.tracks,
+            'board_silk_fill'
+        ).length,
+        0
+    )
+    assert.equal(
+        tracksBySource(notesScene.detail.silkscreen.top.tracks, 'ordinary_note')
+            .length,
+        1
+    )
+})
+
+test('PcbScene3dCircuitJsonAdapter restores source-identified note silk primitives exactly once', () => {
+    const circuitJson = [
+        {
+            type: 'pcb_board',
+            pcb_board_id: 'board_1',
+            center: { x: 0, y: 0 },
+            width: 20,
+            height: 10,
+            thickness: 1.6
+        },
+        {
+            type: 'pcb_note_line',
+            pcb_note_line_id: 'source_silk_line',
+            layer: 'top',
+            source_layer: 'F.SilkS',
+            x1: 0,
+            y1: 0,
+            x2: 2.54,
+            y2: 0,
+            stroke_width: 0.254
+        },
+        {
+            type: 'pcb_note_rect',
+            pcb_note_rect_id: 'source_silk_rect',
+            layer: 'bottom',
+            source_layer: 'B.SilkS',
+            center: { x: 0, y: 0 },
+            width: 5.08,
+            height: 2.54,
+            ccw_rotation: 90,
+            stroke_width: 0.127,
+            fill: true
+        },
+        {
+            type: 'pcb_note_text',
+            pcb_note_text_id: 'source_silk_text',
+            layer: 'bottom',
+            source_layer: 'B.SilkS',
+            text: 'BOARD MARK',
+            anchor_position: { x: 2.54, y: 1.27 },
+            ccw_rotation: 30,
+            font_size: 1.27,
+            font_width: 0.635,
+            font_height: 1.27,
+            stroke_width: 0.127,
+            anchor_alignment: 'center',
+            source_anchor_alignment: 'center_left',
+            is_mirrored_from_top_view: true
+        },
+        {
+            type: 'pcb_note_line',
+            pcb_note_line_id: 'ordinary_note_line',
+            layer: 'top',
+            source_layer: 'Dwgs.User',
+            x1: 0,
+            y1: 2.54,
+            x2: 2.54,
+            y2: 2.54,
+            stroke_width: 0.127
+        },
+        {
+            type: 'pcb_note_text',
+            pcb_note_text_id: 'ordinary_note_text',
+            layer: 'top',
+            source_layer: 'F.Fab',
+            text: 'ASSEMBLY',
+            anchor_position: { x: 0, y: 0 },
+            font_size: 1
+        }
+    ]
+    const defaultScene = PcbScene3dCircuitJsonAdapter.build(circuitJson)
+    const notesScene = PcbScene3dCircuitJsonAdapter.build(circuitJson, {
+        showPcbNotes: true
+    })
+    const defaultLineTracks = tracksBySource(
+        defaultScene.detail.silkscreen.top.tracks,
+        'source_silk_line'
+    )
+    const defaultRectTracks = tracksBySource(
+        defaultScene.detail.silkscreen.bottom.tracks,
+        'source_silk_rect'
+    )
+    const defaultRectFills = defaultScene.detail.silkscreen.bottom.fills.filter(
+        (fill) => fill.sourceId === 'source_silk_rect'
+    )
+    const defaultText = defaultScene.detail.silkscreen.bottom.texts.find(
+        (text) => text.sourceId === 'source_silk_text'
+    )
+
+    assert.equal(defaultLineTracks.length, 1)
+    assert.equal(defaultRectTracks.length, 0)
+    assert.equal(defaultRectFills.length, 1)
+    assert.equal(defaultRectFills[0].points.length, 4)
+    assert.equal(defaultScene.detail.silkscreen.top.texts.length, 0)
+    assert.equal(defaultScene.detail.silkscreen.bottom.texts.length, 1)
+    assert.equal(defaultText.value, 'BOARD MARK')
+    assert.equal(defaultText.x, 100)
+    assert.equal(defaultText.y, 50)
+    assert.equal(defaultText.rotation, 30)
+    assert.equal(defaultText.sizeX, 25)
+    assert.equal(defaultText.sizeY, 50)
+    assert.equal(defaultText.strokeWidth, 5)
+    assert.equal(defaultText.hAlign, 'left')
+    assert.equal(defaultText.vAlign, 'center')
+    assert.equal(defaultText.mirrored, true)
+    assert.equal(
+        tracksBySource(
+            defaultScene.detail.silkscreen.top.tracks,
+            'ordinary_note_line'
+        ).length,
+        0
+    )
+    assert.equal(
+        notesScene.detail.silkscreen.top.tracks.filter(
+            (track) => track.sourceId === 'source_silk_line'
+        ).length,
+        1
+    )
+    assert.equal(
+        notesScene.detail.silkscreen.bottom.fills.filter(
+            (fill) => fill.sourceId === 'source_silk_rect'
+        ).length,
+        1
+    )
+    assert.equal(
+        notesScene.detail.silkscreen.bottom.texts.filter(
+            (text) => text.sourceId === 'source_silk_text'
+        ).length,
+        1
+    )
+    assert.equal(
+        tracksBySource(
+            notesScene.detail.silkscreen.top.tracks,
+            'ordinary_note_line'
+        ).length,
+        1
+    )
+    assert.equal(
+        notesScene.detail.silkscreen.top.texts.some(
+            (text) => text.sourceId === 'ordinary_note_text'
+        ),
+        true
+    )
 })
 
 test('PcbScene3dCircuitJsonAdapter maps courtyard artwork only when notes are enabled', () => {

@@ -334,7 +334,7 @@ export class PcbAssemblyModelMeshLoader {
             if (bytes) return new TextDecoder().decode(bytes)
         }
 
-        throw new Error('WRL model content is not available.')
+        throw PcbScene3dModelContent.unavailableError('WRL')
     }
 
     /**

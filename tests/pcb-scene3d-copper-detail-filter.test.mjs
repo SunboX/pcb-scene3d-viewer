@@ -430,7 +430,10 @@ test('PcbScene3dCopperDetailFilter exposes Gerber mask-covered traces separately
         covered.polygons.map((polygon) => polygon.id),
         ['covered-zone']
     )
-    assert.deepEqual(covered.copperTexts, [])
+    assert.deepEqual(
+        covered.copperTexts.map((text) => text.id),
+        ['covered-text']
+    )
     assert.deepEqual(covered.vias, [])
 })
 

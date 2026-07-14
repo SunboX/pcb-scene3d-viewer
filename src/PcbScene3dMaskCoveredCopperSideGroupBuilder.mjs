@@ -16,7 +16,7 @@ export class PcbScene3dMaskCoveredCopperSideGroupBuilder {
     /**
      * Builds one side group from prepared mask-covered copper meshes.
      * @param {any} THREE Three.js namespace.
-     * @param {{ trackMesh?: any | null, arcMesh?: any | null, fillMesh?: any | null, z?: number, mirrorY?: boolean }} options
+     * @param {{ trackMesh?: any | null, arcMesh?: any | null, fillMesh?: any | null, textMesh?: any | null, z?: number, mirrorY?: boolean }} options
      * @returns {any}
      */
     static build(
@@ -25,6 +25,7 @@ export class PcbScene3dMaskCoveredCopperSideGroupBuilder {
             trackMesh = null,
             arcMesh = null,
             fillMesh = null,
+            textMesh = null,
             z = 0,
             mirrorY = false
         } = {}
@@ -85,6 +86,20 @@ export class PcbScene3dMaskCoveredCopperSideGroupBuilder {
                 renderOrder:
                     PcbScene3dMaskCoveredCopperSideGroupBuilder
                         .#FILL_RENDER_ORDER
+            }
+        )
+        PcbScene3dMaskCoveredCopperSideGroupBuilder.#addCompressedMesh(
+            group,
+            textMesh,
+            'mask-covered-copper-text',
+            z,
+            {
+                copperBlend:
+                    PcbScene3dMaskCoveredCopperSideGroupBuilder
+                        .#TRACK_COPPER_BLEND,
+                renderOrder:
+                    PcbScene3dMaskCoveredCopperSideGroupBuilder
+                        .#TRACK_RENDER_ORDER
             }
         )
 

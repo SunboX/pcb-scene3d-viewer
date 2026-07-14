@@ -3,6 +3,7 @@
  */
 export class PcbScene3dBoardMaterialPalette {
     static #DEFAULT_SURFACE_COLOR = 0x2a5f27
+    static #DEFAULT_EDGE_COLOR = 0xc9ca78
     static #BOARD_SURFACE_DARKEN_RATIO = 0.88
 
     /**
@@ -37,6 +38,17 @@ export class PcbScene3dBoardMaterialPalette {
             PcbScene3dBoardMaterialPalette.resolveSurfaceColor(board, options),
             PcbScene3dBoardMaterialPalette.#BOARD_SURFACE_DARKEN_RATIO
         )
+    }
+
+    /**
+     * Resolves the visible substrate-core color for board edge faces.
+     * @param {{ edgeColor?: number } | null | undefined} board Board metadata.
+     * @returns {number}
+     */
+    static resolveEdgeColor(board) {
+        return Number.isInteger(board?.edgeColor)
+            ? board.edgeColor
+            : PcbScene3dBoardMaterialPalette.#DEFAULT_EDGE_COLOR
     }
 
     /**

@@ -1,4 +1,5 @@
 import { PcbScene3dDrillPathFactory } from './PcbScene3dDrillPathFactory.mjs'
+import { PcbScene3dViaLayerSpan } from './PcbScene3dViaLayerSpan.mjs'
 
 /**
  * Builds annular via barrels for the interactive 3D PCB scene.
@@ -7,11 +8,12 @@ export class PcbScene3dViaFactory {
     static #PAD_BARREL_OUTER_RADIUS_SCALE = 0.98
     static #PAD_BARREL_MIN_WALL_MIL = 1.2
     static #PAD_BARREL_WALL_FRACTION = 0.09
+    static #SURFACE_COPPER_DEPTH_MIL = 2
 
     /**
      * Builds the via mesh group for one scene.
      * @param {any} THREE
-     * @param {{ diameter?: number, holeDiameter?: number, x?: number, y?: number, barrelOnly?: boolean }[]} vias
+     * @param {{ diameter?: number, holeDiameter?: number, x?: number, y?: number, barrelOnly?: boolean, layers?: unknown[], fromLayer?: unknown, toLayer?: unknown, from_layer?: unknown, to_layer?: unknown }[]} vias
      * @param {number} thicknessMil
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {{ material?: any }} [options]
@@ -29,18 +31,26 @@ export class PcbScene3dViaFactory {
         const geometryCache = new Map()
 
         ;(vias || []).forEach((via) => {
+            const renderMode = PcbScene3dViaLayerSpan.renderMode(via)
+            if (!renderMode) return
+
             const geometry = PcbScene3dViaFactory.#resolveGeometry(
                 THREE,
                 geometryCache,
                 via,
-                thicknessMil
+                thicknessMil,
+                renderMode
             )
             const mesh = new THREE.Mesh(geometry, material)
             const point = normalizeBoardPoint(
                 Number(via?.x || 0),
                 Number(via?.y || 0)
             )
-            mesh.position.set(point.x, point.y, 0)
+            mesh.position.set(
+                point.x,
+                point.y,
+                PcbScene3dViaFactory.#centerZ(renderMode, thicknessMil)
+            )
             if (geometry.type === 'CylinderGeometry') {
                 mesh.rotation.x = Math.PI / 2
             }
@@ -74,12 +84,22 @@ export class PcbScene3dViaFactory {
      * @param {Map<string, any>} geometryCache
      * @param {{ diameter?: number, holeDiameter?: number, barrelOnly?: boolean }} via
      * @param {number} thicknessMil
+     * @param {'through' | 'top' | 'bottom'} renderMode Via geometry mode.
      * @returns {any}
      */
-    static #resolveGeometry(THREE, geometryCache, via, thicknessMil) {
+    static #resolveGeometry(
+        THREE,
+        geometryCache,
+        via,
+        thicknessMil,
+        renderMode
+    ) {
         const outerRadius = Math.max(Number(via?.diameter || 0) / 2, 1.2)
         const holeDiameter = Math.max(Number(via?.holeDiameter || 0), 0)
-        const depth = thicknessMil + 2
+        const depth = PcbScene3dViaFactory.#geometryDepth(
+            renderMode,
+            thicknessMil
+        )
         const isBarrelOnly = Boolean(via?.barrelOnly)
         const cacheKey = [
             isBarrelOnly ? 'barrel' : 'annulus',
@@ -129,6 +149,32 @@ export class PcbScene3dViaFactory {
 
         geometryCache.set(cacheKey, geometry)
         return geometry
+    }
+
+    /**
+     * Resolves copper geometry depth without extending blind vias through-board.
+     * @param {'through' | 'top' | 'bottom'} renderMode Via geometry mode.
+     * @param {number} thicknessMil Board thickness in mil.
+     * @returns {number}
+     */
+    static #geometryDepth(renderMode, thicknessMil) {
+        if (renderMode !== 'through') {
+            return PcbScene3dViaFactory.#SURFACE_COPPER_DEPTH_MIL
+        }
+        return Math.max(Number(thicknessMil) || 0, 0) + 2
+    }
+
+    /**
+     * Resolves the world-space Z center for one via geometry mode.
+     * @param {'through' | 'top' | 'bottom'} renderMode Via geometry mode.
+     * @param {number} thicknessMil Board thickness in mil.
+     * @returns {number}
+     */
+    static #centerZ(renderMode, thicknessMil) {
+        const halfThickness = Math.max(Number(thicknessMil) || 0, 0) / 2
+        if (renderMode === 'top') return halfThickness
+        if (renderMode === 'bottom') return -halfThickness
+        return 0
     }
 
     /**

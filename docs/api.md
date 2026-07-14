@@ -68,6 +68,24 @@ controller only and are forwarded to the runtime through
 
 ## CircuitJSON Input
 
+### `PcbScene3dBoardMaterialPalette`
+
+The `pcb-scene3d-viewer/scene3d` subpath exports the shared board-material
+resolver used by both runtime meshes and assembly export.
+
+- `resolveSurfaceColor(board, options?)` returns the authored or fallback
+  solder-mask face color.
+- `resolveBoardSurfaceColor(board, options?)` returns the display-darkened
+  solder-mask face color.
+- `resolveEdgeColor(board)` returns an authored `edgeColor` or the light FR-4
+  substrate fallback `0xc9ca78`.
+- `isGeneratedSurfaceVisible(options?)` and
+  `isGeneratedBodyVisible(options?)` expose the generated-board visibility
+  decision.
+
+Runtime and exported board edges call the same resolver, so a missing edge
+color cannot produce different substrate materials in the two paths.
+
 ### `PcbScene3dCircuitJsonAdapter`
 
 Converts a common CircuitJSON `DocumentResult`, prepared

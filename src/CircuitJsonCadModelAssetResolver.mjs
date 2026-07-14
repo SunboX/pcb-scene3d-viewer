@@ -352,7 +352,7 @@ export class CircuitJsonCadModelAssetResolver {
      * Finds the earliest indexed asset matching one CAD model URL.
      * @param {string} url Model URL.
      * @param {object} context Resolver context.
-     * @param {Map<string, object>} assetIndex Asset alias index.
+     * @param {{ exact: Map<string, object | symbol>, folded: Map<string, object | symbol> }} assetIndex Asset alias index.
      * @returns {object | null}
      */
     static #matchingIndexedEntry(url, context, assetIndex) {
@@ -363,7 +363,11 @@ export class CircuitJsonCadModelAssetResolver {
         let match = null
         for (const candidate of candidates) {
             const indexed = assetIndex.exact.get(candidate)
-            if (indexed && (!match || indexed.index < match.index)) {
+            if (
+                indexed &&
+                indexed !== AMBIGUOUS_ASSET &&
+                (!match || indexed.index < match.index)
+            ) {
                 match = indexed
             }
         }
@@ -554,12 +558,13 @@ export class CircuitJsonCadModelAssetResolver {
 
     /**
      * Resolves an exact alias or one unambiguous case-insensitive fallback.
-     * @param {{ exact: Map<string, object>, folded: Map<string, object | symbol> }} index Asset index.
+     * @param {{ exact: Map<string, object | symbol>, folded: Map<string, object | symbol> }} index Asset index.
      * @param {string} key Exact normalized key.
      * @returns {object | null} Indexed asset entry.
      */
     static #indexedAsset(index, key) {
         const exact = index.exact.get(key)
+        if (exact === AMBIGUOUS_ASSET) return null
         if (exact) return exact
         const folded = index.folded.get(key.toLowerCase())
         return folded && folded !== AMBIGUOUS_ASSET ? folded : null
@@ -606,10 +611,10 @@ export class CircuitJsonCadModelAssetResolver {
     }
 
     /**
-     * Builds one descriptor-safe, first-match-preserving asset alias index.
+     * Builds one descriptor-safe asset alias index with collision rejection.
      * @param {object[]} assets Asset rows.
      * @param {boolean} [canonical] Whether rows use the canonical toolkit asset contract.
-     * @returns {{ exact: Map<string, object>, folded: Map<string, object | symbol> }}
+     * @returns {{ exact: Map<string, object | symbol>, folded: Map<string, object | symbol> }}
      */
     static #assetIndex(assets, canonical = false) {
         const exact = new Map()
@@ -625,7 +630,12 @@ export class CircuitJsonCadModelAssetResolver {
             for (const alias of CircuitJsonCadModelAssetResolver.#assetAliases(
                 asset
             )) {
-                if (!exact.has(alias)) exact.set(alias, entry)
+                const exactPrevious = exact.get(alias)
+                if (!exactPrevious) {
+                    exact.set(alias, entry)
+                } else if (exactPrevious !== entry) {
+                    exact.set(alias, AMBIGUOUS_ASSET)
+                }
                 const foldedAlias = alias.toLowerCase()
                 const previous = folded.get(foldedAlias)
                 if (!previous) {
@@ -719,6 +729,9 @@ export class CircuitJsonCadModelAssetResolver {
             asset,
             'source'
         )
+        const explicitAliases = CircuitJsonCadModelAssetResolver.#denseArray(
+            CircuitJsonCadModelAssetResolver.#ownData(asset, 'aliases')
+        ).filter((value) => typeof value === 'string')
         return new Set(
             [
                 CircuitJsonCadModelAssetResolver.#ownData(
@@ -742,7 +755,8 @@ export class CircuitJsonCadModelAssetResolver {
                     'relativePath'
                 ),
                 CircuitJsonCadModelAssetResolver.#ownData(source, 'url'),
-                CircuitJsonCadModelAssetResolver.#ownData(source, 'uri')
+                CircuitJsonCadModelAssetResolver.#ownData(source, 'uri'),
+                ...explicitAliases
             ]
                 .map((value) => CircuitJsonCadModelAssetResolver.#key(value))
                 .filter(Boolean)
@@ -866,10 +880,10 @@ export class CircuitJsonCadModelAssetResolver {
      */
     static #key(value) {
         if (typeof value !== 'string' && typeof value !== 'number') return ''
-        return String(value || '')
+        const key = String(value || '')
             .trim()
             .split(/[?#]/u)[0]
-            .replace(/^https?:\/\/[^/]+\//iu, '')
-            .replace(/^\/+/u, '')
+            .replaceAll('\\', '/')
+        return /^https?:\/\//iu.test(key) ? key : key.replace(/^\/+/u, '')
     }
 }

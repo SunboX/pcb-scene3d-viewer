@@ -1,4 +1,5 @@
 import { PcbScene3dModelIdentity } from './PcbScene3dModelIdentity.mjs'
+import { PcbScene3dModelContent } from './PcbScene3dModelContent.mjs'
 import { PcbScene3dOcctImporterLoader } from './PcbScene3dOcctImporterLoader.mjs'
 
 /**
@@ -326,7 +327,7 @@ export class PcbScene3dStepLoader {
             }
         }
 
-        throw new Error('STEP model content is not available.')
+        throw PcbScene3dModelContent.unavailableError('STEP')
     }
 
     /**

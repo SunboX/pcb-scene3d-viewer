@@ -76,6 +76,23 @@ test('PcbScene3dBoardMaterialPalette falls back to procedural mask color', () =>
     )
 })
 
+test('PcbScene3dBoardMaterialPalette uses the FR-4 substrate edge when no edge color is authored', () => {
+    assert.equal(PcbScene3dBoardMaterialPalette.resolveEdgeColor({}), 0xc9ca78)
+    assert.equal(
+        PcbScene3dBoardMaterialPalette.resolveEdgeColor({ edgeColor: null }),
+        0xc9ca78
+    )
+})
+
+test('PcbScene3dBoardMaterialPalette keeps an authored substrate edge color', () => {
+    assert.equal(
+        PcbScene3dBoardMaterialPalette.resolveEdgeColor({
+            edgeColor: 0xf7f9d1
+        }),
+        0xf7f9d1
+    )
+})
+
 test('PcbScene3dBoardMaterialPalette shows generated face with board assembly', () => {
     assert.equal(
         PcbScene3dBoardMaterialPalette.isGeneratedSurfaceVisible({

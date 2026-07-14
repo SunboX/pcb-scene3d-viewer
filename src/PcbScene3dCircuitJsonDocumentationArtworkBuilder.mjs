@@ -1,5 +1,6 @@
 import { CircuitJsonUnits } from 'circuitjson-toolkit'
 import { PcbScene3dCircuitJsonLayer } from './PcbScene3dCircuitJsonLayer.mjs'
+import { PcbScene3dCircuitJsonSourceLayer } from './PcbScene3dCircuitJsonSourceLayer.mjs'
 
 const CIRCLE_SEGMENTS = 32
 
@@ -12,33 +13,39 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
      * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
      * @param {object} top Top-side silkscreen detail.
      * @param {object} bottom Bottom-side silkscreen detail.
+     * @param {{ sourceLayerFilter?: 'all' | 'silkscreen' | 'non-silkscreen' }} [options] Source-layer filter.
      * @returns {void}
      */
-    static append(index, top, bottom) {
+    static append(index, top, bottom, options = {}) {
         PcbScene3dCircuitJsonDocumentationArtworkBuilder.#appendRectOutlines(
             index,
             top,
-            bottom
+            bottom,
+            options
         )
         PcbScene3dCircuitJsonDocumentationArtworkBuilder.#appendCircleOutlines(
             index,
             top,
-            bottom
+            bottom,
+            options
         )
         PcbScene3dCircuitJsonDocumentationArtworkBuilder.#appendPointOutlines(
             index,
             top,
-            bottom
+            bottom,
+            options
         )
         PcbScene3dCircuitJsonDocumentationArtworkBuilder.#appendLines(
             index,
             top,
-            bottom
+            bottom,
+            options
         )
         PcbScene3dCircuitJsonDocumentationArtworkBuilder.#appendPaths(
             index,
             top,
-            bottom
+            bottom,
+            options
         )
     }
 
@@ -47,14 +54,23 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
      * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
      * @param {object} top Top-side silkscreen detail.
      * @param {object} bottom Bottom-side silkscreen detail.
+     * @param {{ sourceLayerFilter?: string }} options Source-layer filter.
      * @returns {void}
      */
-    static #appendRectOutlines(index, top, bottom) {
+    static #appendRectOutlines(index, top, bottom, options) {
         const specs = [
             {
                 type: 'pcb_note_rect',
                 fallbackPrefix: 'pcb_note_rect',
                 idFields: ['pcb_note_rect_id', 'note_rect_id']
+            },
+            {
+                type: 'pcb_fabrication_note_rect',
+                fallbackPrefix: 'pcb_fabrication_note_rect',
+                idFields: [
+                    'pcb_fabrication_note_rect_id',
+                    'fabrication_note_rect_id'
+                ]
             },
             {
                 type: 'pcb_courtyard_rect',
@@ -66,6 +82,14 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
         specs.forEach((spec) => {
             ;(index.elementsByType.get(spec.type) || []).forEach(
                 (element, elementIndex) => {
+                    if (
+                        !PcbScene3dCircuitJsonDocumentationArtworkBuilder.#matchesSourceLayer(
+                            element,
+                            options
+                        )
+                    ) {
+                        return
+                    }
                     const points =
                         PcbScene3dCircuitJsonDocumentationArtworkBuilder.#rectanglePoints(
                             element
@@ -88,11 +112,20 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
      * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
      * @param {object} top Top-side silkscreen detail.
      * @param {object} bottom Bottom-side silkscreen detail.
+     * @param {{ sourceLayerFilter?: string }} options Source-layer filter.
      * @returns {void}
      */
-    static #appendCircleOutlines(index, top, bottom) {
+    static #appendCircleOutlines(index, top, bottom, options) {
         ;(index.elementsByType.get('pcb_courtyard_circle') || []).forEach(
             (circle, circleIndex) => {
+                if (
+                    !PcbScene3dCircuitJsonDocumentationArtworkBuilder.#matchesSourceLayer(
+                        circle,
+                        options
+                    )
+                ) {
+                    return
+                }
                 const points =
                     PcbScene3dCircuitJsonDocumentationArtworkBuilder.#circlePoints(
                         circle
@@ -120,11 +153,20 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
      * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
      * @param {object} top Top-side silkscreen detail.
      * @param {object} bottom Bottom-side silkscreen detail.
+     * @param {{ sourceLayerFilter?: string }} options Source-layer filter.
      * @returns {void}
      */
-    static #appendPointOutlines(index, top, bottom) {
+    static #appendPointOutlines(index, top, bottom, options) {
         ;(index.elementsByType.get('pcb_courtyard_outline') || []).forEach(
             (outline, outlineIndex) => {
+                if (
+                    !PcbScene3dCircuitJsonDocumentationArtworkBuilder.#matchesSourceLayer(
+                        outline,
+                        options
+                    )
+                ) {
+                    return
+                }
                 const points =
                     PcbScene3dCircuitJsonDocumentationArtworkBuilder.#pointList(
                         outline?.outline || outline?.points
@@ -152,11 +194,20 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
      * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
      * @param {object} top Top-side silkscreen detail.
      * @param {object} bottom Bottom-side silkscreen detail.
+     * @param {{ sourceLayerFilter?: string }} options Source-layer filter.
      * @returns {void}
      */
-    static #appendLines(index, top, bottom) {
+    static #appendLines(index, top, bottom, options) {
         ;(index.elementsByType.get('pcb_note_line') || []).forEach(
             (line, lineIndex) => {
+                if (
+                    !PcbScene3dCircuitJsonDocumentationArtworkBuilder.#matchesSourceLayer(
+                        line,
+                        options
+                    )
+                ) {
+                    return
+                }
                 const start =
                     PcbScene3dCircuitJsonDocumentationArtworkBuilder.#lineStart(
                         line
@@ -200,9 +251,10 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
      * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
      * @param {object} top Top-side silkscreen detail.
      * @param {object} bottom Bottom-side silkscreen detail.
+     * @param {{ sourceLayerFilter?: string }} options Source-layer filter.
      * @returns {void}
      */
-    static #appendPaths(index, top, bottom) {
+    static #appendPaths(index, top, bottom, options) {
         const specs = [
             {
                 type: 'pcb_note_path',
@@ -222,6 +274,14 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
         specs.forEach((spec) => {
             ;(index.elementsByType.get(spec.type) || []).forEach(
                 (path, pathIndex) => {
+                    if (
+                        !PcbScene3dCircuitJsonDocumentationArtworkBuilder.#matchesSourceLayer(
+                            path,
+                            options
+                        )
+                    ) {
+                        return
+                    }
                     const target =
                         PcbScene3dCircuitJsonDocumentationArtworkBuilder.#sideDetail(
                             path?.layer,
@@ -232,6 +292,12 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
                         PcbScene3dCircuitJsonDocumentationArtworkBuilder.#array(
                             path?.route || path?.points
                         )
+                            .map((point) =>
+                                PcbScene3dCircuitJsonDocumentationArtworkBuilder.#point(
+                                    point
+                                )
+                            )
+                            .filter(Boolean)
                     const sourceId =
                         PcbScene3dCircuitJsonDocumentationArtworkBuilder.#sourceId(
                             path,
@@ -239,18 +305,17 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
                             spec.fallbackPrefix,
                             pathIndex
                         )
+                    const fillPoints =
+                        PcbScene3dCircuitJsonDocumentationArtworkBuilder.#distinctClosingPoint(
+                            route
+                        )
+                    if (path?.fill === true && fillPoints.length >= 3) {
+                        target.fills.push({ sourceId, points: fillPoints })
+                        return
+                    }
                     for (let index = 0; index < route.length - 1; index += 1) {
-                        const start =
-                            PcbScene3dCircuitJsonDocumentationArtworkBuilder.#point(
-                                route[index]
-                            )
-                        const end =
-                            PcbScene3dCircuitJsonDocumentationArtworkBuilder.#point(
-                                route[index + 1]
-                            )
-                        if (!start || !end) {
-                            continue
-                        }
+                        const start = route[index]
+                        const end = route[index + 1]
                         target.tracks.push({
                             sourceId,
                             x1: start.x,
@@ -299,6 +364,11 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
             PcbScene3dCircuitJsonDocumentationArtworkBuilder.#strokeWidth(
                 element
             )
+
+        if (element?.fill === true) {
+            target.fills.push({ sourceId, points })
+            return
+        }
 
         for (let index = 0; index < points.length; index += 1) {
             const start = points[index]
@@ -563,6 +633,37 @@ export class PcbScene3dCircuitJsonDocumentationArtworkBuilder {
             element?.stroke_width ?? element?.strokeWidth,
             0.12
         )
+    }
+
+    /**
+     * Applies the requested source-layer classification filter.
+     * @param {object} element CircuitJSON element.
+     * @param {{ sourceLayerFilter?: string }} options Source-layer filter.
+     * @returns {boolean}
+     */
+    static #matchesSourceLayer(element, options) {
+        const filter = String(options?.sourceLayerFilter || 'all')
+        if (filter === 'silkscreen') {
+            return PcbScene3dCircuitJsonSourceLayer.isSilkscreen(element)
+        }
+        if (filter === 'non-silkscreen') {
+            return !PcbScene3dCircuitJsonSourceLayer.isSilkscreen(element)
+        }
+        return true
+    }
+
+    /**
+     * Removes a duplicate closing point while preserving route order.
+     * @param {{ x: number, y: number }[]} points Route points.
+     * @returns {{ x: number, y: number }[]}
+     */
+    static #distinctClosingPoint(points) {
+        if (points.length < 2) return points
+        const first = points[0]
+        const last = points[points.length - 1]
+        return first.x === last.x && first.y === last.y
+            ? points.slice(0, -1)
+            : points
     }
 
     /**

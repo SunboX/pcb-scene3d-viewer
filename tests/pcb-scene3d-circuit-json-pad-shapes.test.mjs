@@ -21,6 +21,26 @@ function createBoard() {
 }
 
 /**
+ * Builds filled silkscreen artwork on both board faces.
+ * @returns {object[]}
+ */
+function createFilledSilkscreenArtwork() {
+    return ['top', 'bottom'].map((layer) => ({
+        type: 'pcb_silkscreen_path',
+        pcb_silkscreen_path_id: `silk_fill_${layer}`,
+        layer,
+        fill: true,
+        route: [
+            { x: 0, y: 0 },
+            { x: 10, y: 0 },
+            { x: 10, y: 10 },
+            { x: 0, y: 10 },
+            { x: 0, y: 0 }
+        ]
+    }))
+}
+
+/**
  * Builds a rotated rectangular outline around one center.
  * @param {{ x: number, y: number }} center Rectangle center.
  * @param {number} width Rectangle width.
@@ -68,6 +88,165 @@ test('PcbScene3dCircuitJsonAdapter maps pill SMT pads to rounded rectangles', ()
     assert.equal(pad.cornerRadiusTop, 50)
     assert.equal(surface.kind, 'rounded-rect')
     assert.equal(Math.round(surface.cornerRadius), 20)
+})
+
+test('PcbScene3dCircuitJsonAdapter maps rounded plated copper around a circular drill', () => {
+    const renderModel = PcbScene3dCircuitJsonAdapter.build([
+        createBoard(),
+        {
+            type: 'pcb_plated_hole',
+            pcb_plated_hole_id: 'rounded_plated_pad',
+            shape: 'circular_hole_with_rect_pad',
+            pad_shape: 'rect',
+            rect_pad_width: 3.048,
+            rect_pad_height: 1.524,
+            rect_ccw_rotation: 90,
+            rect_border_radius: 0.762,
+            hole_shape: 'circle',
+            hole_diameter: 1.016,
+            x: 2,
+            y: 3,
+            layers: ['top', 'bottom']
+        }
+    ])
+    const [pad] = renderModel.detail.pads
+    const topSurface = PcbScene3dPadFactory.resolvePadSurfaceSpec(pad, 'top')
+    const bottomSurface = PcbScene3dPadFactory.resolvePadSurfaceSpec(
+        pad,
+        'bottom'
+    )
+
+    assert.equal(pad.rotation, 90)
+    assert.equal(pad.sizeTopX, 120)
+    assert.equal(pad.sizeTopY, 60)
+    assert.equal(pad.holeDiameter, 40)
+    assert.equal(pad.hasRoundedRect, true)
+    assert.equal(pad.roundedRectShapeTop, 2)
+    assert.equal(pad.roundedRectShapeBottom, 2)
+    assert.equal(pad.cornerRadiusTop, 50)
+    assert.equal(pad.cornerRadiusBottom, 50)
+    assert.equal(topSurface.kind, 'rounded-rect')
+    assert.equal(topSurface.cornerRadius, 30)
+    assert.equal(bottomSurface.kind, 'rounded-rect')
+    assert.equal(bottomSurface.cornerRadius, 30)
+})
+
+test('PcbScene3dCircuitJsonAdapter clips filled silkscreen around rotated rounded plated pads', () => {
+    const renderModel = PcbScene3dCircuitJsonAdapter.build([
+        createBoard(),
+        ...createFilledSilkscreenArtwork(),
+        {
+            type: 'pcb_plated_hole',
+            pcb_plated_hole_id: 'rotated_rounded_plated_pad',
+            shape: 'circular_hole_with_rect_pad',
+            pad_shape: 'rect',
+            rect_pad_width: 3.048,
+            rect_pad_height: 1.524,
+            rect_ccw_rotation: 90,
+            rect_border_radius: 0.762,
+            hole_shape: 'circle',
+            hole_diameter: 1.016,
+            x: 2,
+            y: 3,
+            layers: ['top', 'bottom']
+        }
+    ])
+    const [topCutout] = renderModel.detail.silkscreen.top.copperCutouts
+    const [bottomCutout] = renderModel.detail.silkscreen.bottom.copperCutouts
+    const bounds = (points) => ({
+        width:
+            Math.max(...points.map((point) => point.x)) -
+            Math.min(...points.map((point) => point.x)),
+        height:
+            Math.max(...points.map((point) => point.y)) -
+            Math.min(...points.map((point) => point.y))
+    })
+
+    assert.ok(topCutout.length >= 12)
+    assert.deepEqual(bottomCutout, topCutout)
+    assert.ok(Math.abs(bounds(topCutout).width - 60) < 0.001)
+    assert.ok(Math.abs(bounds(topCutout).height - 120) < 0.001)
+})
+
+test('PcbScene3dCircuitJsonAdapter derives side-specific silkscreen cutouts from mask openings', () => {
+    const renderModel = PcbScene3dCircuitJsonAdapter.build([
+        createBoard(),
+        ...createFilledSilkscreenArtwork(),
+        {
+            type: 'pcb_smtpad',
+            pcb_smtpad_id: 'open_top_pad',
+            x: 1,
+            y: 1,
+            layer: 'top',
+            shape: 'rect',
+            width: 1.2,
+            height: 0.8,
+            is_covered_with_solder_mask: false
+        },
+        {
+            type: 'pcb_smtpad',
+            pcb_smtpad_id: 'open_bottom_pad',
+            x: 3,
+            y: 1,
+            layer: 'bottom',
+            shape: 'rect',
+            width: 1.2,
+            height: 0.8,
+            is_covered_with_solder_mask: false
+        },
+        {
+            type: 'pcb_plated_hole',
+            pcb_plated_hole_id: 'open_plated_pad',
+            shape: 'circle',
+            outer_diameter: 1.8,
+            hole_diameter: 0.8,
+            x: 5,
+            y: 1,
+            is_covered_with_solder_mask: false,
+            layers: ['top', 'bottom']
+        },
+        {
+            type: 'pcb_plated_hole',
+            pcb_plated_hole_id: 'covered_plated_pad',
+            shape: 'circle',
+            outer_diameter: 1.8,
+            hole_diameter: 0.8,
+            x: 7,
+            y: 1,
+            is_covered_with_solder_mask: true,
+            layers: ['top', 'bottom']
+        }
+    ])
+    const topSilkscreen = renderModel.detail.silkscreen.top
+    const bottomSilkscreen = renderModel.detail.silkscreen.bottom
+
+    assert.equal(topSilkscreen.copperCutouts.length, 2)
+    assert.equal(bottomSilkscreen.copperCutouts.length, 2)
+    assert.equal(topSilkscreen.drillCutouts.length, 2)
+    assert.deepEqual(bottomSilkscreen.drillCutouts, topSilkscreen.drillCutouts)
+})
+
+test('PcbScene3dCircuitJsonAdapter skips cutout polygons on empty silkscreen faces', () => {
+    const renderModel = PcbScene3dCircuitJsonAdapter.build([
+        createBoard(),
+        createFilledSilkscreenArtwork()[0],
+        {
+            type: 'pcb_plated_hole',
+            pcb_plated_hole_id: 'top_artwork_plated_pad',
+            shape: 'circle',
+            outer_diameter: 1.8,
+            hole_diameter: 0.8,
+            x: 5,
+            y: 1,
+            is_covered_with_solder_mask: false,
+            layers: ['top', 'bottom']
+        }
+    ])
+
+    assert.equal(renderModel.detail.silkscreen.top.copperCutouts.length, 1)
+    assert.equal(renderModel.detail.silkscreen.top.drillCutouts.length, 1)
+    assert.equal(renderModel.detail.silkscreen.bottom.copperCutouts.length, 0)
+    assert.equal(renderModel.detail.silkscreen.bottom.drillCutouts.length, 0)
 })
 
 test('PcbScene3dCircuitJsonAdapter preserves polygon-plated pill slot geometry', () => {

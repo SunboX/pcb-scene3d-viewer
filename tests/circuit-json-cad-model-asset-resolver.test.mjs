@@ -519,6 +519,147 @@ test('CircuitJsonCadModelAssetResolver indexes asset aliases without invoking ac
     assert.equal(getterCalls, 0)
 })
 
+test('CircuitJsonCadModelAssetResolver resolves explicit aliases without basename guessing', () => {
+    const first = {
+        relativePath: 'download/a/Fake_Body.step',
+        aliases: ['${KICAD9_3DMODEL_DIR}/Library_A/Fake_Body.wrl'],
+        data: new Uint8Array([1])
+    }
+    const second = {
+        relativePath: 'download/b/Fake_Body.step',
+        aliases: ['${KICAD9_3DMODEL_DIR}/Library_B/Fake_Body.wrl'],
+        data: new Uint8Array([2])
+    }
+    const options = CircuitJsonCadModelAssetResolver.withSessionAssetResolver({
+        sessionAssets: [first, second],
+        modelUrlResolver: (url) => `fallback:${url}`
+    })
+
+    assert.equal(
+        options.modelUrlResolver(
+            '${KICAD9_3DMODEL_DIR}/Library_A/Fake_Body.wrl',
+            {}
+        ),
+        first
+    )
+    assert.equal(
+        options.modelUrlResolver(
+            '${KICAD9_3DMODEL_DIR}/Library_B/Fake_Body.wrl',
+            {}
+        ),
+        second
+    )
+    assert.equal(
+        options.modelUrlResolver('Fake_Body.wrl', {}),
+        'fallback:Fake_Body.wrl'
+    )
+})
+
+test('CircuitJsonCadModelAssetResolver rejects duplicate exact aliases as ambiguous', () => {
+    const first = {
+        relativePath: 'downloads/first/body.step',
+        aliases: ['${MODEL_ROOT}/Shared/body.wrl'],
+        data: new Uint8Array([1])
+    }
+    const second = {
+        relativePath: 'downloads/second/body.step',
+        aliases: ['${MODEL_ROOT}/Shared/body.wrl'],
+        data: new Uint8Array([2])
+    }
+    const options = CircuitJsonCadModelAssetResolver.withSessionAssetResolver({
+        sessionAssets: [first, second],
+        modelUrlResolver: (url) => `fallback:${url}`
+    })
+
+    assert.equal(
+        options.modelUrlResolver('${MODEL_ROOT}/Shared/body.wrl', {}),
+        'fallback:${MODEL_ROOT}/Shared/body.wrl'
+    )
+})
+
+test('CircuitJsonCadModelAssetResolver preserves URL origins in exact identity', () => {
+    const first = {
+        sourceUrl: 'https://assets-a.invalid/models/body.step',
+        data: new Uint8Array([1])
+    }
+    const second = {
+        sourceUrl: 'https://assets-b.invalid/models/body.step',
+        data: new Uint8Array([2])
+    }
+    const options = CircuitJsonCadModelAssetResolver.withSessionAssetResolver({
+        sessionAssets: [first, second]
+    })
+
+    assert.equal(
+        options.modelUrlResolver(
+            'https://assets-a.invalid/models/body.step?cache=1',
+            {}
+        ),
+        first
+    )
+    assert.equal(
+        options.modelUrlResolver(
+            'https://assets-b.invalid/models/body.step#mesh',
+            {}
+        ),
+        second
+    )
+})
+
+test('CircuitJsonCadModelAssetResolver ignores accessor-backed explicit aliases', () => {
+    let getterCalls = 0
+    const asset = {
+        relativePath: 'download/Fake_Body.step',
+        data: new Uint8Array([1])
+    }
+    Object.defineProperty(asset, 'aliases', {
+        enumerable: true,
+        get() {
+            getterCalls += 1
+            return ['models/Fake_Body.wrl']
+        }
+    })
+    const options = CircuitJsonCadModelAssetResolver.withSessionAssetResolver({
+        sessionAssets: [asset],
+        modelUrlResolver: (url) => `fallback:${url}`
+    })
+
+    assert.equal(
+        options.modelUrlResolver('models/Fake_Body.wrl', {}),
+        'fallback:models/Fake_Body.wrl'
+    )
+    assert.equal(getterCalls, 0)
+})
+
+test('CircuitJsonCadModelAssetResolver ignores accessor-backed alias entries', () => {
+    let getterCalls = 0
+    const aliases = []
+    Object.defineProperty(aliases, '0', {
+        enumerable: true,
+        get() {
+            getterCalls += 1
+            return 'models/Fake_Body.wrl'
+        }
+    })
+    aliases.length = 1
+    const options = CircuitJsonCadModelAssetResolver.withSessionAssetResolver({
+        sessionAssets: [
+            {
+                relativePath: 'download/Fake_Body.step',
+                aliases,
+                data: new Uint8Array([1])
+            }
+        ],
+        modelUrlResolver: (url) => `fallback:${url}`
+    })
+
+    assert.equal(
+        options.modelUrlResolver('models/Fake_Body.wrl', {}),
+        'fallback:models/Fake_Body.wrl'
+    )
+    assert.equal(getterCalls, 0)
+})
+
 test('CircuitJsonCadModelAssetResolver ignores accessor-backed session arrays', () => {
     let getterCalls = 0
     const sessionAssets = []

@@ -1,6 +1,7 @@
 import { PcbScene3dStrokeFont } from './PcbScene3dStrokeFont.mjs'
 import { PcbScene3dCutoutGeometryFilter } from './PcbScene3dCutoutGeometryFilter.mjs'
 import { PcbScene3dStrokeGeometryBuilder } from './PcbScene3dStrokeGeometryBuilder.mjs'
+import { PcbScene3dStrokeCutoutBuilder } from './PcbScene3dStrokeCutoutBuilder.mjs'
 
 /**
  * Builds KiCad copper text as widened stroke meshes for the 3D PCB scene.
@@ -10,6 +11,33 @@ export class PcbScene3dCopperTextFactory {
     static #TEXT_LINE_SPACING_RATIO = 1.61
     static #FIRST_LINE_HEIGHT_RATIO = 1.17
     static #STROKE_BASELINE_FUDGE_RATIO = 0.052
+
+    /**
+     * Builds exact round-capped stroke polygons for one copper text primitive.
+     * @param {object} text Copper text primitive.
+     * @param {{ glyphYUp?: boolean, alignmentStrokeWidth?: number }} [options] Text geometry options. `alignmentStrokeWidth` keeps paired text with different stroke widths on one source-authored anchor.
+     * @returns {{ x: number, y: number }[][]}
+     */
+    static strokeCutouts(text, options = {}) {
+        const width = PcbScene3dCopperTextFactory.#textStrokeWidth(text)
+        return PcbScene3dCopperTextFactory.#textStrokes(
+            text,
+            Boolean(options?.glyphYUp),
+            options?.alignmentStrokeWidth
+        ).flatMap((stroke) => {
+            const cutouts = []
+            for (let index = 1; index < stroke.length; index += 1) {
+                const cutout = PcbScene3dStrokeCutoutBuilder.build(
+                    stroke[index - 1],
+                    stroke[index],
+                    width,
+                    { minWidth: 1 }
+                )
+                if (cutout.length >= 3) cutouts.push(cutout)
+            }
+            return cutouts
+        })
+    }
 
     /**
      * Builds one side-specific copper text group.
@@ -171,9 +199,10 @@ export class PcbScene3dCopperTextFactory {
      * Builds all KiCad stroke-font point lists for one text primitive.
      * @param {object} text
      * @param {boolean} glyphYUp
+     * @param {number | undefined} alignmentStrokeWidth Stroke width used only for anchor adjustment.
      * @returns {{ x: number, y: number }[][]}
      */
-    static #textStrokes(text, glyphYUp) {
+    static #textStrokes(text, glyphYUp, alignmentStrokeWidth) {
         const lines = String(text?.value ?? text?.text ?? '').split('\n')
         const lineSpacing = PcbScene3dCopperTextFactory.#textLineSpacing(text)
 
@@ -184,7 +213,8 @@ export class PcbScene3dCopperTextFactory {
                 index,
                 lines.length,
                 lineSpacing,
-                glyphYUp
+                glyphYUp,
+                alignmentStrokeWidth
             )
         )
     }
@@ -197,6 +227,7 @@ export class PcbScene3dCopperTextFactory {
      * @param {number} lineCount
      * @param {number} lineSpacing
      * @param {boolean} glyphYUp
+     * @param {number | undefined} alignmentStrokeWidth Stroke width used only for anchor adjustment.
      * @returns {{ x: number, y: number }[][]}
      */
     static #textLineStrokes(
@@ -205,7 +236,8 @@ export class PcbScene3dCopperTextFactory {
         index,
         lineCount,
         lineSpacing,
-        glyphYUp
+        glyphYUp,
+        alignmentStrokeWidth
     ) {
         const sizeX = PcbScene3dCopperTextFactory.#textWidth(text)
         const sizeY = PcbScene3dCopperTextFactory.#textHeight(text)
@@ -215,12 +247,17 @@ export class PcbScene3dCopperTextFactory {
             sizeX,
             sizeY
         })
-        const x = PcbScene3dCopperTextFactory.#textLineX(text, layout.width)
+        const x = PcbScene3dCopperTextFactory.#textLineX(
+            text,
+            layout.width,
+            alignmentStrokeWidth
+        )
         const y = PcbScene3dCopperTextFactory.#textLineY(
             text,
             index,
             lineCount,
-            lineSpacing
+            lineSpacing,
+            alignmentStrokeWidth
         )
 
         return layout.strokes.map((stroke) =>
@@ -293,11 +330,14 @@ export class PcbScene3dCopperTextFactory {
      * Resolves line origin from KiCad horizontal justification.
      * @param {object} text
      * @param {number} lineWidth
+     * @param {number | undefined} alignmentStrokeWidth Stroke width used only for anchor adjustment.
      * @returns {number}
      */
-    static #textLineX(text, lineWidth) {
-        const fudge =
-            PcbScene3dCopperTextFactory.#textStrokeHorizontalFudge(text)
+    static #textLineX(text, lineWidth, alignmentStrokeWidth) {
+        const fudge = PcbScene3dCopperTextFactory.#textStrokeHorizontalFudge(
+            text,
+            alignmentStrokeWidth
+        )
 
         if (text?.hAlign === 'left') {
             return Number(text?.x || 0) + fudge
@@ -316,9 +356,16 @@ export class PcbScene3dCopperTextFactory {
      * @param {number} index
      * @param {number} lineCount
      * @param {number} lineSpacing
+     * @param {number | undefined} alignmentStrokeWidth Stroke width used only for anchor adjustment.
      * @returns {number}
      */
-    static #textLineY(text, index, lineCount, lineSpacing) {
+    static #textLineY(
+        text,
+        index,
+        lineCount,
+        lineSpacing,
+        alignmentStrokeWidth
+    ) {
         const height = PcbScene3dCopperTextFactory.#textHeight(text)
         const blockHeight =
             height * PcbScene3dCopperTextFactory.#FIRST_LINE_HEIGHT_RATIO +
@@ -326,7 +373,10 @@ export class PcbScene3dCopperTextFactory {
         let baseline =
             Number(text?.y || 0) +
             height -
-            PcbScene3dCopperTextFactory.#textStrokeBaselineFudge(text)
+            PcbScene3dCopperTextFactory.#textStrokeBaselineFudge(
+                text,
+                alignmentStrokeWidth
+            )
 
         if (text?.vAlign === 'bottom') {
             baseline -= blockHeight
@@ -354,22 +404,44 @@ export class PcbScene3dCopperTextFactory {
     /**
      * Resolves KiCad's small horizontal text adjustment.
      * @param {object} text
+     * @param {number | undefined} alignmentStrokeWidth Stroke width used only for anchor adjustment.
      * @returns {number}
      */
-    static #textStrokeHorizontalFudge(text) {
-        return PcbScene3dCopperTextFactory.#textStrokeWidth(text) / 1.52
+    static #textStrokeHorizontalFudge(text, alignmentStrokeWidth) {
+        return (
+            PcbScene3dCopperTextFactory.#alignmentStrokeWidth(
+                text,
+                alignmentStrokeWidth
+            ) / 1.52
+        )
     }
 
     /**
      * Resolves KiCad's small baseline text adjustment.
      * @param {object} text
+     * @param {number | undefined} alignmentStrokeWidth Stroke width used only for anchor adjustment.
      * @returns {number}
      */
-    static #textStrokeBaselineFudge(text) {
+    static #textStrokeBaselineFudge(text, alignmentStrokeWidth) {
         return (
-            PcbScene3dCopperTextFactory.#textStrokeWidth(text) *
-            PcbScene3dCopperTextFactory.#STROKE_BASELINE_FUDGE_RATIO
+            PcbScene3dCopperTextFactory.#alignmentStrokeWidth(
+                text,
+                alignmentStrokeWidth
+            ) * PcbScene3dCopperTextFactory.#STROKE_BASELINE_FUDGE_RATIO
         )
+    }
+
+    /**
+     * Resolves the stroke width used for source-anchor alignment adjustments.
+     * @param {object} text Copper text primitive.
+     * @param {number | undefined} alignmentStrokeWidth Optional paired-text reference width.
+     * @returns {number}
+     */
+    static #alignmentStrokeWidth(text, alignmentStrokeWidth) {
+        const candidate = Number(alignmentStrokeWidth)
+        return Number.isFinite(candidate) && candidate > 0
+            ? candidate
+            : PcbScene3dCopperTextFactory.#textStrokeWidth(text)
     }
 
     /**
@@ -389,15 +461,15 @@ export class PcbScene3dCopperTextFactory {
             : point
 
         if (text?.mirrored) {
-            const rotated = PcbScene3dCopperTextFactory.#rotatePoint(
+            const mirroredPoint = PcbScene3dCopperTextFactory.#mirrorPointX(
                 sourcePoint,
+                origin
+            )
+            return PcbScene3dCopperTextFactory.#rotatePoint(
+                mirroredPoint,
                 origin,
                 Number(text?.rotation || 0)
             )
-            return {
-                x: origin.x - (rotated.x - origin.x),
-                y: rotated.y
-            }
         }
 
         return PcbScene3dCopperTextFactory.#rotatePoint(
@@ -405,6 +477,19 @@ export class PcbScene3dCopperTextFactory {
             origin,
             -Number(text?.rotation || 0)
         )
+    }
+
+    /**
+     * Mirrors one stroke-font point across the text anchor's local Y axis.
+     * @param {{ x: number, y: number }} point
+     * @param {{ x: number, y: number }} origin
+     * @returns {{ x: number, y: number }}
+     */
+    static #mirrorPointX(point, origin) {
+        return {
+            x: origin.x - (Number(point?.x || 0) - origin.x),
+            y: Number(point?.y || 0)
+        }
     }
 
     /**

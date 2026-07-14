@@ -84,6 +84,15 @@ export class PcbScene3dExternalModels {
                         await PcbScene3dExternalModels.#yieldToMainThread()
                     }
                 } catch (error) {
+                    if (
+                        PcbScene3dExternalModels.#isDeferredContentError(
+                            placement,
+                            error,
+                            modelLoaderOptions
+                        )
+                    ) {
+                        continue
+                    }
                     diagnostics.push(
                         'Could not load external model for ' +
                             String(placement?.designator || 'component') +
@@ -99,6 +108,23 @@ export class PcbScene3dExternalModels {
         }
 
         return diagnostics
+    }
+
+    /**
+     * Returns whether a failure represents an intentionally deferred model.
+     * @param {object} placement External-model placement.
+     * @param {unknown} error Model loading failure.
+     * @param {object} modelLoaderOptions Scoped model loading options.
+     * @returns {boolean}
+     */
+    static #isDeferredContentError(placement, error, modelLoaderOptions) {
+        const model = placement?.externalModel
+        return Boolean(
+            model &&
+            PcbScene3dModelContent.isUnavailableError(error) &&
+            !PcbScene3dModelContent.hasLocal(model) &&
+            !PcbScene3dModelContent.canFetch(modelLoaderOptions)
+        )
     }
 
     /**

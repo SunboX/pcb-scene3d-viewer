@@ -1,3 +1,5 @@
+import { PcbScene3dModelContent } from './PcbScene3dModelContent.mjs'
+
 const MM_TO_MIL = 1000 / 25.4
 const GLB_MAGIC = 0x46546c67
 const GLB_VERSION = 2
@@ -887,7 +889,7 @@ export class PcbAssemblyGltfModelMeshParser {
             return bytes
         }
 
-        throw new Error(label + ' model content is not available.')
+        throw PcbScene3dModelContent.unavailableError(label)
     }
 
     /**

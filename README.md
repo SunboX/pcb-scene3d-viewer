@@ -22,6 +22,12 @@ factories, model loading, component picking, view presets, archive export,
 GLTF/GLB assembly writing, and optional DOM shell can be reused by other
 browser-based ECAD tools.
 
+Version 1.3.0 renders the CircuitJSON 1.2 fidelity contract directly: exact
+oval and rounded pads, filled and mirrored silkscreen, copper text and cutouts,
+surface-aware blind/buried vias, collision-safe model assets, and a consistent
+light FR-4 substrate edge. See the
+[1.3.0 release notes](docs/release-notes-v1.3.0.md).
+
 ## CircuitJSON 1.1 convergence
 
 Version 1.2.2 accepts the common document and prepared-context shapes returned
@@ -131,6 +137,7 @@ const controller = new PcbScene3dController(viewportNode, document)
 - [API](docs/api.md)
 - [CircuitJSON usage](docs/circuitjson.md)
 - [1.2.2 release notes](docs/release-notes-v1.2.2.md)
+- [1.3.0 release notes](docs/release-notes-v1.3.0.md)
 - [1.2.1 release notes](docs/release-notes-v1.2.1.md)
 - [1.2.0 release notes](docs/release-notes-v1.2.0.md)
 - [Model format](docs/model-format.md)

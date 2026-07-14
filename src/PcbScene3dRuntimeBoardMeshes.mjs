@@ -124,10 +124,8 @@ export class PcbScene3dRuntimeBoardMeshes {
             metalness: 0.08,
             visible: generatedBodyVisible
         }
-        const edgeColor = Number(board.edgeColor)
-        const resolvedEdgeColor = Number.isInteger(edgeColor)
-            ? edgeColor
-            : 0xc9ca78
+        const resolvedEdgeColor =
+            PcbScene3dBoardMaterialPalette.resolveEdgeColor(board)
         const surfaceColor = hasBoardAssemblyModel
             ? resolvedEdgeColor
             : PcbScene3dBoardMaterialPalette.resolveBoardSurfaceColor(board, {

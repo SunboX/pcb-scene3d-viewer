@@ -17,6 +17,18 @@ const DRILL_QUALITY_POINTS = {
  */
 export class PcbScene3dCircuitJsonGeometry {
     /**
+     * Resolves plated-hole copper dimensions in viewer mils.
+     * @param {object} geometry Shared drilled-primitive geometry.
+     * @returns {{ width: number, height: number }}
+     */
+    static platedHoleOuterSize(geometry) {
+        return {
+            width: CircuitJsonUnits.mmToMil(geometry?.width, 1),
+            height: CircuitJsonUnits.mmToMil(geometry?.height, 1)
+        }
+    }
+
+    /**
      * Builds the render-model board from a `pcb_panel` or `pcb_board` element.
      * @param {{ elementsByType: Map<string, object[]> }} index CircuitJSON index.
      * @param {{ boardDrillQuality?: string }} options Adapter options.
