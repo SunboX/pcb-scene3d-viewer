@@ -28,6 +28,12 @@ surface-aware blind/buried vias, collision-safe model assets, and a consistent
 light FR-4 substrate edge. See the
 [1.3.0 release notes](docs/release-notes-v1.3.0.md).
 
+Version 1.3.1 renders side-specific tented Gerber vias without recoloring the
+plated drill wall. Covered surfaces receive a solder-mask ring above the copper
+annulus, mixed top/bottom states remain independent, and fully open Gerber vias
+retain the exposed-copper path. See the
+[1.3.1 release notes](docs/release-notes-v1.3.1.md).
+
 ## CircuitJSON 1.1 convergence
 
 Version 1.2.2 accepts the common document and prepared-context shapes returned
@@ -136,6 +142,7 @@ const controller = new PcbScene3dController(viewportNode, document)
 
 - [API](docs/api.md)
 - [CircuitJSON usage](docs/circuitjson.md)
+- [1.3.1 release notes](docs/release-notes-v1.3.1.md)
 - [1.2.2 release notes](docs/release-notes-v1.2.2.md)
 - [1.3.0 release notes](docs/release-notes-v1.3.0.md)
 - [1.2.1 release notes](docs/release-notes-v1.2.1.md)

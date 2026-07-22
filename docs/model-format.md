@@ -220,3 +220,9 @@ Rounded SMT pads set `hasRoundedRect`, the side-specific
 Route-derived vias use the same `detail.vias` shape as standalone vias, and
 surface route segments use `layerId: 1` for top copper or `layerId: 32` for
 bottom copper.
+
+Via surfaces can set `isTentingTop` and `isTentingBottom` independently. A
+truthy field adds a solder-mask ring on that board surface while the plated
+through-hole barrel remains copper. A mixed via therefore renders one covered
+annulus and one exposed annulus; a via with both fields explicitly false stays
+on the exposed-copper path. The source toolkit owns this classification.

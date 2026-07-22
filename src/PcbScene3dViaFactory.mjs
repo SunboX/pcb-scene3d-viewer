@@ -9,6 +9,7 @@ export class PcbScene3dViaFactory {
     static #PAD_BARREL_MIN_WALL_MIL = 1.2
     static #PAD_BARREL_WALL_FRACTION = 0.09
     static #SURFACE_COPPER_DEPTH_MIL = 2
+    static #SURFACE_MASK_Z_OFFSET_MIL = 1.3
 
     /**
      * Builds the via mesh group for one scene.
@@ -16,7 +17,7 @@ export class PcbScene3dViaFactory {
      * @param {{ diameter?: number, holeDiameter?: number, x?: number, y?: number, barrelOnly?: boolean, layers?: unknown[], fromLayer?: unknown, toLayer?: unknown, from_layer?: unknown, to_layer?: unknown }[]} vias
      * @param {number} thicknessMil
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
-     * @param {{ material?: any }} [options]
+     * @param {{ material?: any, surfaceMaterial?: any }} [options]
      * @returns {any}
      */
     static buildGroup(
@@ -27,8 +28,12 @@ export class PcbScene3dViaFactory {
         options = {}
     ) {
         const group = new THREE.Group()
-        const material = PcbScene3dViaFactory.#resolveMaterial(THREE, options)
+        const copperMaterial = PcbScene3dViaFactory.#resolveMaterial(
+            THREE,
+            options
+        )
         const geometryCache = new Map()
+        const surfaceGeometryCache = new Map()
 
         ;(vias || []).forEach((via) => {
             const renderMode = PcbScene3dViaLayerSpan.renderMode(via)
@@ -41,7 +46,7 @@ export class PcbScene3dViaFactory {
                 thicknessMil,
                 renderMode
             )
-            const mesh = new THREE.Mesh(geometry, material)
+            const mesh = new THREE.Mesh(geometry, copperMaterial)
             const point = normalizeBoardPoint(
                 Number(via?.x || 0),
                 Number(via?.y || 0)
@@ -55,6 +60,16 @@ export class PcbScene3dViaFactory {
                 mesh.rotation.x = Math.PI / 2
             }
             group.add(mesh)
+            PcbScene3dViaFactory.#appendMaskSurfaceMeshes(
+                THREE,
+                group,
+                surfaceGeometryCache,
+                via,
+                renderMode,
+                thicknessMil,
+                point,
+                options?.surfaceMaterial
+            )
         })
 
         return group
@@ -76,6 +91,130 @@ export class PcbScene3dViaFactory {
                 side: THREE.DoubleSide
             })
         )
+    }
+
+    /**
+     * Adds side-specific solder-mask rings above the copper via surface.
+     * @param {any} THREE Three.js namespace.
+     * @param {any} group Output group.
+     * @param {Map<string, any>} geometryCache Surface geometry cache.
+     * @param {object} via Via primitive.
+     * @param {'through' | 'top' | 'bottom'} renderMode Via geometry mode.
+     * @param {number} thicknessMil Board thickness in mil.
+     * @param {{ x: number, y: number }} point Normalized board point.
+     * @param {any | undefined} material Solder-mask material.
+     * @returns {void}
+     */
+    static #appendMaskSurfaceMeshes(
+        THREE,
+        group,
+        geometryCache,
+        via,
+        renderMode,
+        thicknessMil,
+        point,
+        material
+    ) {
+        if (!material) {
+            return
+        }
+
+        const geometry = PcbScene3dViaFactory.#resolveSurfaceGeometry(
+            THREE,
+            geometryCache,
+            via
+        )
+        if (!geometry) {
+            return
+        }
+
+        for (const side of ['top', 'bottom']) {
+            if (
+                !PcbScene3dViaFactory.#renderModeTouchesSide(
+                    renderMode,
+                    side
+                ) ||
+                !PcbScene3dViaFactory.#isSideTented(via, side)
+            ) {
+                continue
+            }
+
+            const mesh = new THREE.Mesh(geometry, material)
+            mesh.position.set(
+                point.x,
+                point.y,
+                PcbScene3dViaFactory.#surfaceZ(side, thicknessMil)
+            )
+            group.add(mesh)
+        }
+    }
+
+    /**
+     * Resolves one reusable annular surface geometry.
+     * @param {any} THREE Three.js namespace.
+     * @param {Map<string, any>} geometryCache Surface geometry cache.
+     * @param {object} via Via primitive.
+     * @returns {any | null}
+     */
+    static #resolveSurfaceGeometry(THREE, geometryCache, via) {
+        const diameter = Number(via?.diameter || 0)
+        const holeDiameter = Number(via?.holeDiameter || 0)
+        if (diameter <= 0 || holeDiameter < 0 || diameter <= holeDiameter) {
+            return null
+        }
+
+        const key = `${diameter.toFixed(4)}:${holeDiameter.toFixed(4)}`
+        const cached = geometryCache.get(key)
+        if (cached) {
+            return cached
+        }
+
+        const shape = PcbScene3dViaFactory.#buildCircleShape(
+            THREE,
+            diameter / 2
+        )
+        if (holeDiameter > 0) {
+            shape.holes.push(
+                PcbScene3dViaFactory.#buildCirclePath(THREE, holeDiameter / 2)
+            )
+        }
+        const geometry = new THREE.ShapeGeometry(shape, 24)
+        geometryCache.set(key, geometry)
+        return geometry
+    }
+
+    /**
+     * Checks whether one rendered via span reaches a board side.
+     * @param {'through' | 'top' | 'bottom'} renderMode Via geometry mode.
+     * @param {'top' | 'bottom'} side Board side.
+     * @returns {boolean}
+     */
+    static #renderModeTouchesSide(renderMode, side) {
+        return renderMode === 'through' || renderMode === side
+    }
+
+    /**
+     * Checks whether one via surface is tented on a board side.
+     * @param {object} via Via primitive.
+     * @param {'top' | 'bottom'} side Board side.
+     * @returns {boolean}
+     */
+    static #isSideTented(via, side) {
+        const fieldName = side === 'bottom' ? 'isTentingBottom' : 'isTentingTop'
+        return via?.[fieldName] !== false
+    }
+
+    /**
+     * Resolves the solder-mask surface Z above the exposed copper stack.
+     * @param {'top' | 'bottom'} side Board side.
+     * @param {number} thicknessMil Board thickness in mil.
+     * @returns {number}
+     */
+    static #surfaceZ(side, thicknessMil) {
+        const distance =
+            Math.max(Number(thicknessMil) || 0, 0) / 2 +
+            PcbScene3dViaFactory.#SURFACE_MASK_Z_OFFSET_MIL
+        return side === 'bottom' ? -distance : distance
     }
 
     /**

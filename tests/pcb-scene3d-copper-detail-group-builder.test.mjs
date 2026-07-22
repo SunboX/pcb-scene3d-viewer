@@ -544,7 +544,8 @@ test('PcbScene3dCopperDetailGroupBuilder renders KiCad default vias as mask-cove
     ) => {
         viaCalls.push({
             ids: vias.map((via) => via.id),
-            material: options.material
+            material: options.material,
+            surfaceMaterial: options.surfaceMaterial
         })
         const group = new FakeGroup()
         group.add(new FakeGroup())
@@ -581,8 +582,10 @@ test('PcbScene3dCopperDetailGroupBuilder renders KiCad default vias as mask-cove
             viaCalls.map((call) => call.ids),
             [['default-covered-via', 'explicit-tented-via'], ['open-via']]
         )
-        assert.equal(viaCalls[0].material, coveredMaterial)
+        assert.equal(viaCalls[0].material, undefined)
+        assert.equal(viaCalls[0].surfaceMaterial, coveredMaterial)
         assert.equal(viaCalls[1].material, undefined)
+        assert.equal(viaCalls[1].surfaceMaterial, undefined)
     } finally {
         PcbScene3dMaskCoveredCopperMaterial.build = originalBuildCoveredMaterial
         PcbScene3dViaFactory.buildGroup = originalBuildViaGroup

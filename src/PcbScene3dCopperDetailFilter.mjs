@@ -266,24 +266,37 @@ export class PcbScene3dCopperDetailFilter {
      * @returns {any[]}
      */
     static #filterExposedVias(vias, sceneDescription) {
+        if (PcbScene3dCopperDetailFilter.#isGerberScene(sceneDescription)) {
+            return (vias || []).filter(
+                (via) =>
+                    via?.isTentingTop === false &&
+                    via?.isTentingBottom === false
+            )
+        }
+
         return (vias || []).filter((via) =>
             PcbScene3dCopperDetailFilter.#isViaExplicitlyOpen(via)
         )
     }
 
     /**
-     * Keeps KiCad via annuli that are covered by solder mask.
+     * Keeps KiCad and Gerber via annuli that are covered by solder mask.
      * @param {any[] | undefined} vias Via list.
      * @param {object} sceneDescription 3D scene description.
      * @returns {any[]}
      */
     static #filterMaskCoveredVias(vias, sceneDescription) {
-        if (!PcbScene3dCopperDetailFilter.#isKiCadScene(sceneDescription)) {
+        if (
+            !PcbScene3dCopperDetailFilter.#isKiCadScene(sceneDescription) &&
+            !PcbScene3dCopperDetailFilter.#isGerberScene(sceneDescription)
+        ) {
             return []
         }
 
-        return (vias || []).filter(
-            (via) => !PcbScene3dCopperDetailFilter.#isViaExplicitlyOpen(via)
+        return (vias || []).filter((via) =>
+            PcbScene3dCopperDetailFilter.#isGerberScene(sceneDescription)
+                ? PcbScene3dCopperDetailFilter.#isViaExplicitlyTented(via)
+                : !PcbScene3dCopperDetailFilter.#isViaExplicitlyOpen(via)
         )
     }
 
@@ -294,6 +307,15 @@ export class PcbScene3dCopperDetailFilter {
      */
     static #isViaExplicitlyOpen(via) {
         return via?.isTentingTop === false || via?.isTentingBottom === false
+    }
+
+    /**
+     * Checks whether one via explicitly carries mask on either board side.
+     * @param {object} via Via primitive.
+     * @returns {boolean}
+     */
+    static #isViaExplicitlyTented(via) {
+        return via?.isTentingTop === true || via?.isTentingBottom === true
     }
 
     /**
@@ -484,6 +506,19 @@ export class PcbScene3dCopperDetailFilter {
                 .trim()
                 .toLowerCase() === 'kicad' ||
             sceneDescription?.coordinateSystem === 'kicad-3d-y-up'
+        )
+    }
+
+    /**
+     * Checks whether one scene was built from Gerber fabrication artwork.
+     * @param {object} sceneDescription Scene description.
+     * @returns {boolean}
+     */
+    static #isGerberScene(sceneDescription) {
+        return (
+            String(sceneDescription?.sourceFormat || '')
+                .trim()
+                .toLowerCase() === 'gerber'
         )
     }
 

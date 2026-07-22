@@ -352,8 +352,21 @@ test('PcbScene3dCopperDetailFilter hides Gerber copper covered by solder mask', 
                 { id: 'open-text', solderMaskOpening: true }
             ],
             vias: [
-                { id: 'tented-via', isTentingTop: true },
-                { id: 'open-via', isTentingTop: false }
+                {
+                    id: 'tented-via',
+                    isTentingTop: true,
+                    isTentingBottom: true
+                },
+                {
+                    id: 'mixed-via',
+                    isTentingTop: true,
+                    isTentingBottom: false
+                },
+                {
+                    id: 'open-via',
+                    isTentingTop: false,
+                    isTentingBottom: false
+                }
             ]
         }
     }
@@ -380,6 +393,12 @@ test('PcbScene3dCopperDetailFilter hides Gerber copper covered by solder mask', 
             sceneDescription
         ).map((via) => via.id || 'pad-barrel'),
         ['open-via', 'pad-barrel']
+    )
+    assert.deepEqual(
+        PcbScene3dCopperDetailFilter.resolveCoveredStandaloneVias(
+            sceneDescription
+        ).map((via) => via.id),
+        ['tented-via', 'mixed-via']
     )
 })
 

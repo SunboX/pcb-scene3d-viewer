@@ -130,7 +130,7 @@ export class PcbScene3dCopperDetailGroupBuilder {
             sceneDescription?.board?.thicknessMil,
             normalizePoint,
             {
-                material: PcbScene3dMaskCoveredCopperMaterial.build(
+                surfaceMaterial: PcbScene3dMaskCoveredCopperMaterial.build(
                     THREE,
                     PcbScene3dCopperDetailGroupBuilder.#coveredCopperMaterialOptions(
                         sceneDescription

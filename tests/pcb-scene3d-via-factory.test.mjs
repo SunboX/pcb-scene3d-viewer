@@ -89,6 +89,40 @@ test('PcbScene3dViaFactory uses supplied material for masked via annuli', () => 
     assert.equal(group.children[0].material, material)
 })
 
+test('PcbScene3dViaFactory masks via faces while preserving copper drill walls', () => {
+    const copperMaterial = new THREE.MeshStandardMaterial({ color: 0xcaa24e })
+    const surfaceMaterial = new THREE.MeshStandardMaterial({ color: 0x2f6b2b })
+    const group = PcbScene3dViaFactory.buildGroup(
+        THREE,
+        [
+            {
+                x: 20,
+                y: 30,
+                diameter: 60,
+                holeDiameter: 40,
+                barrelOnly: true,
+                isTentingTop: true,
+                isTentingBottom: false
+            }
+        ],
+        63,
+        (x, y) => ({ x, y }),
+        { material: copperMaterial, surfaceMaterial }
+    )
+    const barrelMesh = group.children.find(
+        (mesh) => mesh.geometry.type === 'ExtrudeGeometry'
+    )
+    const surfaceMeshes = group.children.filter(
+        (mesh) => mesh.geometry.type === 'ShapeGeometry'
+    )
+
+    assert.equal(barrelMesh.material, copperMaterial)
+    assert.equal(surfaceMeshes.length, 1)
+    assert.equal(surfaceMeshes[0].material, surfaceMaterial)
+    assert.ok(surfaceMeshes[0].position.z > 0)
+    assert.equal(surfaceMeshes[0].geometry.parameters.shapes.holes.length, 1)
+})
+
 test('PcbScene3dViaFactory respects blind, buried, and through via spans', () => {
     const boardThickness = 64
     const group = PcbScene3dViaFactory.buildGroup(
