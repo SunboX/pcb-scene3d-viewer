@@ -127,10 +127,17 @@ export class PcbScene3dCopperFillAreaClipper {
             options
         )
         const coverage =
-            PcbScene3dCopperFillAreaClipper.#resolveTriangleCoverage(
-                triangle,
-                areas
+            PcbScene3dCopperFillAreaClipper.#shouldSubdividePartialTriangles(
+                options
             )
+                ? PcbScene3dCopperFillAreaClipper.#resolveTriangleCoverage(
+                      triangle,
+                      areas
+                  )
+                : PcbScene3dCopperFillAreaClipper.#resolveNonSubdividingCoverage(
+                      triangle,
+                      areas
+                  )
 
         if (coverage === 'none') {
             PcbScene3dCopperFillAreaClipper.#appendTriangle(positions, triangle)
@@ -192,6 +199,39 @@ export class PcbScene3dCopperFillAreaClipper {
      */
     static #shouldSubdividePartialTriangles(options) {
         return options?.subdividePartialTriangles !== false
+    }
+
+    /**
+     * Resolves coverage when partial triangles are kept without subdivision.
+     * Partial and uncovered triangles have the same observable keep result in
+     * this mode, so the first uncovered sample can return without querying area
+     * boundaries. Fully sampled triangles still require the exact boundary
+     * predicate to distinguish complete coverage from a crossing.
+     * @param {{ x: number, y: number }[]} triangle Triangle points.
+     * @param {object[]} areas Filled copper areas.
+     * @returns {'none' | 'full'}
+     */
+    static #resolveNonSubdividingCoverage(triangle, areas) {
+        const samples = [
+            triangle[0],
+            triangle[1],
+            triangle[2],
+            PcbScene3dCopperFillAreaClipper.#centroid(triangle)
+        ]
+        for (const point of samples) {
+            if (
+                !PcbScene3dCopperFillAreaClipper.#isPointInAnyArea(point, areas)
+            ) {
+                return 'none'
+            }
+        }
+
+        return PcbScene3dCopperFillAreaClipper.#triangleCrossesAnyBoundary(
+            triangle,
+            areas
+        )
+            ? 'none'
+            : 'full'
     }
 
     /**

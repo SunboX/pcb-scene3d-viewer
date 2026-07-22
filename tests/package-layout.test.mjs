@@ -40,6 +40,7 @@ test('required project files exist', async () => {
         'docs/release-notes-v1.2.1.md',
         'docs/release-notes-v1.3.0.md',
         'docs/release-notes-v1.3.1.md',
+        'docs/release-notes-v1.3.2.md',
         'docs/testing.md',
         'spec/library-scope.md',
         'scripts/benchmark-context-model-assets.mjs',
@@ -77,7 +78,7 @@ test('package exports public entrypoints', async () => {
     const pkg = JSON.parse(raw)
 
     assert.equal(pkg.name, 'pcb-scene3d-viewer')
-    assert.equal(pkg.version, '1.3.1')
+    assert.equal(pkg.version, '1.3.2')
     assert.equal(pkg.type, 'module')
     assert.equal(pkg.exports['.'], './src/index.mjs')
     assert.equal(pkg.exports['./scene3d'], './src/scene3d.mjs')
@@ -89,7 +90,7 @@ test('package exports public entrypoints', async () => {
         pkg.repository.url,
         'git+https://github.com/SunboX/pcb-scene3d-viewer.git'
     )
-    assert.equal(pkg.dependencies['circuitjson-toolkit'], '^1.2.0')
+    assert.equal(pkg.dependencies['circuitjson-toolkit'], '^1.4.1')
     assert.equal(pkg.dependencies['@sunbox/occt-import-js'], '^0.0.28')
     assert.equal(pkg.dependencies.earcut, '3.0.2')
     assert.equal(pkg.files.includes('docs/circuitjson.md'), true)
@@ -98,6 +99,7 @@ test('package exports public entrypoints', async () => {
     assert.equal(pkg.files.includes('docs/release-notes-v1.2.2.md'), true)
     assert.equal(pkg.files.includes('docs/release-notes-v1.3.0.md'), true)
     assert.equal(pkg.files.includes('docs/release-notes-v1.3.1.md'), true)
+    assert.equal(pkg.files.includes('docs/release-notes-v1.3.2.md'), true)
     assert.equal(pkg.files.includes('REUSE.toml'), true)
     assert.equal(pkg.scripts.test, 'node --test')
     assert.equal(

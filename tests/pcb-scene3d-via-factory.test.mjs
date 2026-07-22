@@ -115,12 +115,46 @@ test('PcbScene3dViaFactory masks via faces while preserving copper drill walls',
     const surfaceMeshes = group.children.filter(
         (mesh) => mesh.geometry.type === 'ShapeGeometry'
     )
+    const barrelBounds = worldZBounds(barrelMesh)
 
     assert.equal(barrelMesh.material, copperMaterial)
+    assert.ok(barrelBounds.max <= 0.001)
+    assert.ok(barrelBounds.min < -31.5)
     assert.equal(surfaceMeshes.length, 1)
     assert.equal(surfaceMeshes[0].material, surfaceMaterial)
     assert.ok(surfaceMeshes[0].position.z > 0)
     assert.equal(surfaceMeshes[0].geometry.parameters.shapes.holes.length, 1)
+})
+
+test('PcbScene3dViaFactory hides copper barrels tented on both board sides', () => {
+    const copperMaterial = new THREE.MeshStandardMaterial({ color: 0xcaa24e })
+    const surfaceMaterial = new THREE.MeshStandardMaterial({ color: 0x2f6b2b })
+    const group = PcbScene3dViaFactory.buildGroup(
+        THREE,
+        [
+            {
+                x: 20,
+                y: 30,
+                diameter: 60,
+                holeDiameter: 40,
+                barrelOnly: true,
+                isTentingTop: true,
+                isTentingBottom: true
+            }
+        ],
+        63,
+        (x, y) => ({ x, y }),
+        { material: copperMaterial, surfaceMaterial }
+    )
+    const copperMeshes = group.children.filter(
+        (mesh) => mesh.material === copperMaterial
+    )
+    const surfaceMeshes = group.children.filter(
+        (mesh) => mesh.material === surfaceMaterial
+    )
+
+    assert.equal(copperMeshes.length, 0)
+    assert.equal(surfaceMeshes.length, 2)
 })
 
 test('PcbScene3dViaFactory respects blind, buried, and through via spans', () => {

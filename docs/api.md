@@ -165,9 +165,25 @@ traversal, absolute paths, and URL schemes are never attached implicitly.
 
 ## Runtime
 
+### `PcbScene3dVisibilityGraph`
+
+Applies render-group visibility and per-component visibility as two ordered
+self-adjusting computations. `apply(state, changedPaths)` starts at readers of
+the supplied toggle or revision roots, reuses unaffected effects, and returns
+the stage result map with each stage's `recomputed` flag. A null change set is
+conservative and repairs both stages. `clear()` reclaims stored traces.
+
+The public root and `/scene3d` entrypoint also re-export the canonical
+`SelfAdjustingComputation` identity from `circuitjson-toolkit`.
+
 ### `new PcbScene3dRuntime(viewportNode, sceneDescription, hooks?)`
 
 Creates the Three.js scene in a browser viewport.
+
+The persistent runtime routes toggle, selection, hidden-component, and model
+topology changes through `PcbScene3dVisibilityGraph`. Changes within mutable
+maps and sets use explicit structural revision roots so identity-stable
+containers cannot cause stale visibility reuse.
 
 Hooks:
 

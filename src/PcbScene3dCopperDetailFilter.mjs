@@ -140,7 +140,8 @@ export class PcbScene3dCopperDetailFilter {
 
         return PcbScene3dCopperDetailFilter.#appendPadBarrelSpecs(
             vias,
-            detail.pads
+            detail.pads,
+            detail.vias
         )
     }
 
@@ -322,12 +323,13 @@ export class PcbScene3dCopperDetailFilter {
      * Appends copper barrels for through-hole pads with copper annuli.
      * @param {any[]} vias Visible via list.
      * @param {any[] | undefined} pads Pad list.
+     * @param {any[] | undefined} sourceVias All parsed vias, including tented vias.
      * @returns {any[]}
      */
-    static #appendPadBarrelSpecs(vias, pads) {
+    static #appendPadBarrelSpecs(vias, pads, sourceVias) {
         const output = [...(vias || [])]
         const seen = new Set(
-            output.map((via) =>
+            [...(sourceVias || []), ...output].map((via) =>
                 PcbScene3dCopperDetailFilter.#platedHoleKey(via)
             )
         )

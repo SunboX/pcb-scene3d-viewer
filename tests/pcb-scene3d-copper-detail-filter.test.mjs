@@ -456,6 +456,62 @@ test('PcbScene3dCopperDetailFilter exposes Gerber mask-covered traces separately
     assert.deepEqual(covered.vias, [])
 })
 
+test('PcbScene3dCopperDetailFilter does not repaint tented Gerber vias as pad barrels', () => {
+    const standaloneVias = PcbScene3dCopperDetailFilter.resolveStandaloneVias({
+        sourceFormat: 'gerber',
+        detail: {
+            pads: [
+                {
+                    id: 'copper-flash-at-tented-via',
+                    x: 20,
+                    y: 30,
+                    sizeTopX: 70,
+                    sizeTopY: 70,
+                    holeDiameter: 40,
+                    hasTopSolderMaskOpening: true,
+                    hasBottomSolderMaskOpening: true
+                },
+                {
+                    id: 'separate-through-hole-pad',
+                    x: 90,
+                    y: 30,
+                    sizeTopX: 70,
+                    sizeTopY: 70,
+                    holeDiameter: 40,
+                    hasTopSolderMaskOpening: true,
+                    hasBottomSolderMaskOpening: true
+                }
+            ],
+            vias: [
+                {
+                    id: 'tented-via',
+                    x: 20,
+                    y: 30,
+                    diameter: 70,
+                    holeDiameter: 40,
+                    isTentingTop: true,
+                    isTentingBottom: true
+                },
+                {
+                    id: 'open-via',
+                    x: 50,
+                    y: 30,
+                    diameter: 70,
+                    holeDiameter: 40,
+                    isTentingTop: false,
+                    isTentingBottom: false
+                }
+            ]
+        }
+    })
+
+    assert.deepEqual(
+        standaloneVias.map((via) => via.id || 'pad-barrel'),
+        ['open-via', 'pad-barrel']
+    )
+    assert.equal(standaloneVias[1].x, 90)
+})
+
 test('PcbScene3dCopperDetailFilter keeps scenes without mask metadata unchanged', () => {
     const detail = {
         pads: [

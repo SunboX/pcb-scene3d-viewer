@@ -525,6 +525,67 @@ test('PcbScene3dCopperFillAreaClipper preserves generic context traversal withou
     assert.equal(queryCount, 1)
 })
 
+test('PcbScene3dCopperFillAreaClipper skips boundary vertices for uncovered non-subdividing triangles', () => {
+    const positions = [0, 0, 1, 5, 0, 2, 0, 5, 3]
+    const mesh = createTriangleMesh(positions)
+    const geometry = mesh.geometry
+    const rectanglePoints = [
+        { x: 10, y: 10 },
+        { x: 12, y: 10 },
+        { x: 12, y: 12 },
+        { x: 10, y: 12 }
+    ]
+    const rectangleSegments = rectanglePoints.map((start, index) => {
+        const end = rectanglePoints[(index + 1) % rectanglePoints.length]
+        return {
+            start,
+            end,
+            bounds: {
+                minX: Math.min(start.x, end.x),
+                maxX: Math.max(start.x, end.x),
+                minY: Math.min(start.y, end.y),
+                maxY: Math.max(start.y, end.y)
+            }
+        }
+    })
+    let vertexQueryCount = 0
+    const context = {
+        areaCount: 1,
+        queryAreas(_bounds, target) {
+            target.push({
+                bounds: { minX: -1, maxX: 6, minY: -1, maxY: 6 },
+                outer: {
+                    points: rectanglePoints,
+                    bounds: { minX: -1, maxX: 6, minY: -1, maxY: 6 },
+                    querySegments(_segmentBounds, segmentTarget) {
+                        segmentTarget.push(...rectangleSegments)
+                        return segmentTarget
+                    },
+                    queryVertices(_vertexBounds, vertexTarget) {
+                        vertexQueryCount += 1
+                        vertexTarget.push(...rectanglePoints)
+                        return vertexTarget
+                    }
+                },
+                holes: []
+            })
+            return target
+        }
+    }
+
+    const result = PcbScene3dCopperFillAreaClipper.filterPrepared(
+        THREE,
+        mesh,
+        context,
+        { subdividePartialTriangles: false }
+    )
+
+    assert.strictEqual(result, mesh)
+    assert.strictEqual(result.geometry, geometry)
+    assert.deepEqual(positionArray(result), positions)
+    assert.equal(vertexQueryCount, 0)
+})
+
 test('PcbScene3dCopperFillAreaClipper skips empty and invalid raw fill contexts', () => {
     const originalQueryAreas =
         PcbScene3dCopperFillCoverageContext.prototype.queryAreas

@@ -39,27 +39,30 @@ export class PcbScene3dViaFactory {
             const renderMode = PcbScene3dViaLayerSpan.renderMode(via)
             if (!renderMode) return
 
-            const geometry = PcbScene3dViaFactory.#resolveGeometry(
-                THREE,
-                geometryCache,
-                via,
-                thicknessMil,
-                renderMode
-            )
-            const mesh = new THREE.Mesh(geometry, copperMaterial)
             const point = normalizeBoardPoint(
                 Number(via?.x || 0),
                 Number(via?.y || 0)
             )
-            mesh.position.set(
-                point.x,
-                point.y,
-                PcbScene3dViaFactory.#centerZ(renderMode, thicknessMil)
+            const copperSpans = PcbScene3dViaFactory.#resolveCopperSpans(
+                via,
+                renderMode,
+                thicknessMil,
+                Boolean(options?.surfaceMaterial)
             )
-            if (geometry.type === 'CylinderGeometry') {
-                mesh.rotation.x = Math.PI / 2
+            for (const copperSpan of copperSpans) {
+                const geometry = PcbScene3dViaFactory.#resolveGeometry(
+                    THREE,
+                    geometryCache,
+                    via,
+                    copperSpan.depth
+                )
+                const mesh = new THREE.Mesh(geometry, copperMaterial)
+                mesh.position.set(point.x, point.y, copperSpan.centerZ)
+                if (geometry.type === 'CylinderGeometry') {
+                    mesh.rotation.x = Math.PI / 2
+                }
+                group.add(mesh)
             }
-            group.add(mesh)
             PcbScene3dViaFactory.#appendMaskSurfaceMeshes(
                 THREE,
                 group,
@@ -73,6 +76,57 @@ export class PcbScene3dViaFactory {
         })
 
         return group
+    }
+
+    /**
+     * Resolves visible copper spans without carrying an open-side barrel
+     * through a solder-mask-covered board face.
+     * @param {object} via Via primitive.
+     * @param {'through' | 'top' | 'bottom'} renderMode Via geometry mode.
+     * @param {number} thicknessMil Board thickness in mil.
+     * @param {boolean} hasSurfaceMask Whether mask surface geometry is rendered.
+     * @returns {{ depth: number, centerZ: number }[]}
+     */
+    static #resolveCopperSpans(via, renderMode, thicknessMil, hasSurfaceMask) {
+        const fullSpan = {
+            depth: PcbScene3dViaFactory.#geometryDepth(
+                renderMode,
+                thicknessMil
+            ),
+            centerZ: PcbScene3dViaFactory.#centerZ(renderMode, thicknessMil)
+        }
+        if (!hasSurfaceMask) {
+            return [fullSpan]
+        }
+
+        if (renderMode === 'top') {
+            return PcbScene3dViaFactory.#isSideTented(via, 'top')
+                ? []
+                : [fullSpan]
+        }
+        if (renderMode === 'bottom') {
+            return PcbScene3dViaFactory.#isSideTented(via, 'bottom')
+                ? []
+                : [fullSpan]
+        }
+
+        const isTopTented = PcbScene3dViaFactory.#isSideTented(via, 'top')
+        const isBottomTented = PcbScene3dViaFactory.#isSideTented(via, 'bottom')
+        if (isTopTented && isBottomTented) {
+            return []
+        }
+        if (!isTopTented && !isBottomTented) {
+            return [fullSpan]
+        }
+
+        const halfDepth = fullSpan.depth / 2
+        const centerDistance = halfDepth / 2
+        return [
+            {
+                depth: halfDepth,
+                centerZ: isTopTented ? -centerDistance : centerDistance
+            }
+        ]
     }
 
     /**
@@ -222,23 +276,12 @@ export class PcbScene3dViaFactory {
      * @param {any} THREE
      * @param {Map<string, any>} geometryCache
      * @param {{ diameter?: number, holeDiameter?: number, barrelOnly?: boolean }} via
-     * @param {number} thicknessMil
-     * @param {'through' | 'top' | 'bottom'} renderMode Via geometry mode.
+     * @param {number} depth Copper span depth in mil.
      * @returns {any}
      */
-    static #resolveGeometry(
-        THREE,
-        geometryCache,
-        via,
-        thicknessMil,
-        renderMode
-    ) {
+    static #resolveGeometry(THREE, geometryCache, via, depth) {
         const outerRadius = Math.max(Number(via?.diameter || 0) / 2, 1.2)
         const holeDiameter = Math.max(Number(via?.holeDiameter || 0), 0)
-        const depth = PcbScene3dViaFactory.#geometryDepth(
-            renderMode,
-            thicknessMil
-        )
         const isBarrelOnly = Boolean(via?.barrelOnly)
         const cacheKey = [
             isBarrelOnly ? 'barrel' : 'annulus',

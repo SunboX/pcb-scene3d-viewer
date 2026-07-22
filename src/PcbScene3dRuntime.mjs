@@ -18,7 +18,6 @@ import { PcbScene3dFallbackVisibility } from './PcbScene3dFallbackVisibility.mjs
 import { PcbScene3dInteractionHints } from './PcbScene3dInteractionHints.mjs'
 import { PcbScene3dModelSearchPlacement } from './PcbScene3dModelSearchPlacement.mjs'
 import { PcbScene3dPresetState } from './PcbScene3dPresetState.mjs'
-import { PcbScene3dRenderGroupVisibility } from './PcbScene3dRenderGroupVisibility.mjs'
 import { PcbScene3dRenderScheduler } from './PcbScene3dRenderScheduler.mjs'
 import { PcbScene3dRuntimeBoardMeshes } from './PcbScene3dRuntimeBoardMeshes.mjs'
 import { PcbScene3dRuntimeHelpers } from './PcbScene3dRuntimeHelpers.mjs'
@@ -29,6 +28,7 @@ import { PcbScene3dSelectionStyler } from './PcbScene3dSelectionStyler.mjs'
 import { PcbScene3dStaticBodyFactory } from './PcbScene3dStaticBodyFactory.mjs'
 import { PcbScene3dViewportResize } from './PcbScene3dViewportResize.mjs'
 import { PcbScene3dViewScale } from './PcbScene3dViewScale.mjs'
+import { PcbScene3dVisibilityGraph } from './PcbScene3dVisibilityGraph.mjs'
 const COPPER_HALF_MIL = PcbScene3dCopperFactory.visualHalfThicknessMil()
 const Z_MIL = {
     paste: COPPER_HALF_MIL + 0.28,
@@ -74,6 +74,7 @@ export class PcbScene3dRuntime {
     #resolveReadyPromise
     #hasSettledReady
     #renderScheduler
+    #visibilityGraph
     /**
      * @param {HTMLElement} viewportNode
      * @param {any} sceneDescription Scene description or CircuitJSON model.
@@ -127,6 +128,7 @@ export class PcbScene3dRuntime {
                 this.#render()
             }
         })
+        this.#visibilityGraph = new PcbScene3dVisibilityGraph()
         this.#resolveReadyPromise = null
         this.#readyPromise = new Promise((resolve) => {
             this.#resolveReadyPromise = resolve
@@ -165,7 +167,7 @@ export class PcbScene3dRuntime {
             return
         }
         this.#toggles[toggleName] = enabled
-        this.#applyToggleVisibility()
+        this.#applyToggleVisibility([['toggles', toggleName]])
         this.#render()
     }
     /** @param {string} designator */
@@ -183,7 +185,7 @@ export class PcbScene3dRuntime {
         ) {
             return
         }
-        this.#applyToggleVisibility()
+        this.#applyToggleVisibility([['componentRevision']])
         this.#updateSelectionMarker()
         this.#render()
     }
@@ -243,6 +245,7 @@ export class PcbScene3dRuntime {
         this.#selectionRoots.clear()
         this.#hiddenComponentDesignators.clear()
         this.#componentAdjustmentRegistry.clear()
+        this.#visibilityGraph.clear()
         this.#fallbackBodyRoots.clear()
         this.#loadedExternalModelDesignators.clear()
         this.#modelSearchExternalModelRoots.clear()
@@ -771,28 +774,24 @@ export class PcbScene3dRuntime {
         this.#render()
     }
 
-    /** @returns {void} */
-    #applyToggleVisibility() {
-        PcbScene3dRenderGroupVisibility.apply({
-            groups: this.#groups,
-            toggles: this.#toggles,
-            fallbackBodyRoots: this.#fallbackBodyRoots,
-            loadedExternalModelDesignators:
-                this.#loadedExternalModelDesignators,
-            modelSearchExternalModelRoots: this.#modelSearchExternalModelRoots,
-            hasLoadedBoardAssemblyModel: this.#hasLoadedBoardAssemblyModel
-        })
-        PcbScene3dComponentVisibility.apply({
-            selectionRoots: this.#selectionRoots,
-            selectedDesignator: this.#selectedDesignator,
-            hiddenDesignators: this.#hiddenComponentDesignators,
-            fallbackBodyRoots: this.#fallbackBodyRoots,
-            loadedExternalModelDesignators:
-                this.#loadedExternalModelDesignators,
-            modelSearchExternalModelRoots: this.#modelSearchExternalModelRoots,
-            toggles: this.#toggles,
-            hasLoadedBoardAssemblyModel: this.#hasLoadedBoardAssemblyModel
-        })
+    /** @param {PropertyKey[][] | null} [changedPaths] @returns {void} */
+    #applyToggleVisibility(changedPaths = null) {
+        this.#visibilityGraph.apply(
+            {
+                groups: this.#groups,
+                toggles: this.#toggles,
+                fallbackBodyRoots: this.#fallbackBodyRoots,
+                loadedExternalModelDesignators:
+                    this.#loadedExternalModelDesignators,
+                modelSearchExternalModelRoots:
+                    this.#modelSearchExternalModelRoots,
+                hasLoadedBoardAssemblyModel: this.#hasLoadedBoardAssemblyModel,
+                selectionRoots: this.#selectionRoots,
+                selectedDesignator: this.#selectedDesignator,
+                hiddenDesignators: this.#hiddenComponentDesignators
+            },
+            changedPaths
+        )
     }
 
     /**
@@ -949,7 +948,7 @@ export class PcbScene3dRuntime {
             SELECTION_HIGHLIGHT_COLOR
         )
         this.#selectedDesignator = normalizedDesignator
-        this.#applyToggleVisibility()
+        this.#applyToggleVisibility([['componentRevision']])
         this.#updateSelectionMarker()
         this.#render()
     }

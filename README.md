@@ -34,6 +34,14 @@ annulus, mixed top/bottom states remain independent, and fully open Gerber vias
 retain the exposed-copper path. See the
 [1.3.1 release notes](docs/release-notes-v1.3.1.md).
 
+Version 1.3.2 applies render-group and component visibility through a
+self-adjusting dependency graph, so persistent runtimes repair only the stage
+affected by a known toggle or structural revision. It also keeps tented copper
+below mask surfaces, avoids duplicate pad barrels for filtered vias, and
+short-circuits non-subdividing copper-fill clipping without changing its
+observable geometry. See the
+[1.3.2 release notes](docs/release-notes-v1.3.2.md).
+
 ## CircuitJSON 1.1 convergence
 
 Version 1.2.2 accepts the common document and prepared-context shapes returned
@@ -142,6 +150,7 @@ const controller = new PcbScene3dController(viewportNode, document)
 
 - [API](docs/api.md)
 - [CircuitJSON usage](docs/circuitjson.md)
+- [1.3.2 release notes](docs/release-notes-v1.3.2.md)
 - [1.3.1 release notes](docs/release-notes-v1.3.1.md)
 - [1.2.2 release notes](docs/release-notes-v1.2.2.md)
 - [1.3.0 release notes](docs/release-notes-v1.3.0.md)

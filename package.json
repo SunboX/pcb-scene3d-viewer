@@ -1,6 +1,6 @@
 {
     "name": "pcb-scene3d-viewer",
-    "version": "1.3.1",
+    "version": "1.3.2",
     "description": "Reusable Three.js PCB 3D scene viewer for normalized ECAD and CircuitJSON scene descriptions",
     "keywords": [
         "pcb",
@@ -38,6 +38,7 @@
         "docs/release-notes-v1.2.2.md",
         "docs/release-notes-v1.3.0.md",
         "docs/release-notes-v1.3.1.md",
+        "docs/release-notes-v1.3.2.md",
         "docs/model-format.md",
         "docs/testing.md",
         "spec",
@@ -59,7 +60,7 @@
     },
     "dependencies": {
         "@sunbox/occt-import-js": "^0.0.28",
-        "circuitjson-toolkit": "^1.2.0",
+        "circuitjson-toolkit": "^1.4.1",
         "earcut": "3.0.2",
         "fflate": "^0.8.2",
         "polygon-clipping": "^0.15.7",

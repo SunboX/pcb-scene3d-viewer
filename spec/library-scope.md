@@ -12,6 +12,8 @@ scene descriptions.
   from canonical bytes, session files, or explicitly enabled URLs.
 - Camera presets, view compensation, selection styling, picking, and visibility
   toggles.
+- Ordered self-adjusting render-group and per-component visibility propagation
+  backed by the canonical `circuitjson-toolkit` runtime.
 - Optional DOM shell/controller helpers for hosts that want ready-made scene
   chrome.
 - ZIP export of resolved component model assets.
