@@ -362,7 +362,16 @@ export class PcbScene3dExternalModels {
             viewCompensationGroup
         )
         const modelTransform = placement?.modelTransform || {}
-        const modelRotation = modelTransform.rotationDeg || {}
+        const authoredModelRotation = modelTransform.rotationDeg || {}
+        const modelRotation =
+            PcbScene3dExternalModels.#resolveEmbeddedModelRotation(
+                placement,
+                modelGroup,
+                authoredModelRotation
+            )
+        if (modelRotation !== authoredModelRotation) {
+            modelGroup.userData.scene3dEmbeddedAxisTiltRepair = true
+        }
         const modelOffset =
             PcbScene3dExternalModels.#resolveModelOffset(modelTransform)
         const sourceOriginAdjustment =
@@ -593,6 +602,73 @@ export class PcbScene3dExternalModels {
             offset: { x: 0, y: centerZ * 2, z: 0 },
             rotationDeg: { x: 0, y: 0, z: 0 }
         }
+    }
+
+    /**
+     * Removes a duplicated quarter-turn when the imported STEP assembly has
+     * already exchanged its authored depth and height axes. Native STEP point
+     * envelopes describe pre-assembly coordinates, while OCCT returns the
+     * fully placed mesh, so comparing both frames is required before applying
+     * the separate Altium body tilt.
+     * @param {{ externalModel?: { origin?: string }, projection?: { source?: string, boundsMil?: { depth?: number, height?: number } } }} placement Placement metadata.
+     * @param {{ userData?: { scene3dSourceBoundsMil?: { sizeY?: number, sizeZ?: number } } }} modelGroup Loaded model group.
+     * @param {{ x?: number, y?: number, z?: number }} modelRotation Authored model rotation.
+     * @returns {{ x?: number, y?: number, z?: number }}
+     */
+    static #resolveEmbeddedModelRotation(placement, modelGroup, modelRotation) {
+        const sourceBounds = modelGroup?.userData?.scene3dSourceBoundsMil || {}
+        const projectionBounds = placement?.projection?.boundsMil || {}
+        const sourceY = Math.abs(Number(sourceBounds.sizeY || 0))
+        const sourceZ = Math.abs(Number(sourceBounds.sizeZ || 0))
+        const projectedDepth = Math.abs(Number(projectionBounds.depth || 0))
+        const projectedHeight = Math.abs(Number(projectionBounds.height || 0))
+        const tilt = PcbScene3dExternalModels.#normalizeAngle(modelRotation?.x)
+        const directError =
+            PcbScene3dExternalModels.#relativeDimensionError(
+                sourceY,
+                projectedDepth
+            ) +
+            PcbScene3dExternalModels.#relativeDimensionError(
+                sourceZ,
+                projectedHeight
+            )
+        const exchangedError =
+            PcbScene3dExternalModels.#relativeDimensionError(
+                sourceY,
+                projectedHeight
+            ) +
+            PcbScene3dExternalModels.#relativeDimensionError(
+                sourceZ,
+                projectedDepth
+            )
+
+        if (
+            String(placement?.externalModel?.origin || '').toLowerCase() !==
+                'embedded' ||
+            String(placement?.projection?.source || '').toLowerCase() !==
+                'model-bounds' ||
+            (tilt !== 90 && tilt !== 270) ||
+            Math.min(sourceY, sourceZ, projectedDepth, projectedHeight) <= 0 ||
+            Math.max(projectedDepth, projectedHeight) /
+                Math.min(projectedDepth, projectedHeight) <
+                1.25 ||
+            exchangedError > 0.2 ||
+            directError - exchangedError < 0.5
+        ) {
+            return modelRotation
+        }
+
+        return { ...modelRotation, x: 0 }
+    }
+
+    /**
+     * Measures a scale-independent dimension mismatch.
+     * @param {number} actual Imported dimension.
+     * @param {number} expected Authored dimension.
+     * @returns {number}
+     */
+    static #relativeDimensionError(actual, expected) {
+        return Math.abs(actual - expected) / Math.max(actual, expected, 1)
     }
 
     /**

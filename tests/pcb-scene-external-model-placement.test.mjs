@@ -282,6 +282,151 @@ test('PcbScene3dExternalModels does not re-bias explicit owner-anchor offsets', 
     assert.equal(modelGroup.rotation.z, -0)
 })
 
+test('PcbScene3dExternalModels preserves an explicitly authored source anchor without owner centering', async () => {
+    const externalModelsGroup = new THREE.Group()
+
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            externalPlacements: [
+                {
+                    designator: 'J8',
+                    mountSide: 'top',
+                    rotationDeg: 90,
+                    positionMil: { x: -108, y: -146, z: 31.5 },
+                    projection: {
+                        source: 'model-bounds',
+                        boundsMil: {
+                            width: 1066,
+                            depth: 1578,
+                            height: 768
+                        }
+                    },
+                    modelTransform: {
+                        rotationDeg: { x: -90, y: 0, z: 0 },
+                        preserveSourceAnchor: true,
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'corner-origin-terminal.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/corner-origin-terminal'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [
+                                0, 0, -0.295, 0.433, 0, -0.295, 0.433, 0.197,
+                                0.077, 0, 0, -0.295, 0.433, 0.197, 0.077, 0,
+                                0.197, 0.077
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assert.equal(wrapperGroup.position.x, -108)
+    assert.equal(wrapperGroup.position.y, -146)
+    assert.equal(modelGroup.position.x, 0)
+    assert.equal(modelGroup.position.y, 0)
+    assert.ok(Math.abs(modelGroup.rotation.x - Math.PI / 2) < 0.000001)
+})
+
+test('PcbScene3dExternalModels removes a duplicated embedded STEP axis tilt', async () => {
+    const externalModelsGroup = new THREE.Group()
+
+    const diagnostics = await PcbScene3dExternalModels.loadIntoScene({
+        three: THREE,
+        sceneDescription: {
+            sourceFormat: 'altium',
+            externalPlacements: [
+                {
+                    designator: 'S8',
+                    mountSide: 'top',
+                    rotationDeg: 270,
+                    positionMil: { x: 0, y: 0, z: 31.5 },
+                    projection: {
+                        source: 'model-bounds',
+                        boundsMil: {
+                            width: 280,
+                            depth: 137,
+                            height: 260
+                        }
+                    },
+                    modelTransform: {
+                        rotationDeg: { x: -90, y: 0, z: 0 },
+                        scale: { x: 1, y: 1, z: 1 }
+                    },
+                    externalModel: {
+                        origin: 'embedded',
+                        name: 'preoriented-square-control.step',
+                        format: 'step',
+                        payloadText: 'ISO-10303-21;',
+                        sourceStream: 'Models/preoriented-square-control'
+                    }
+                }
+            ]
+        },
+        externalModelsGroup,
+        stepLoader: {
+            async loadModel() {
+                return {
+                    meshPayloads: [
+                        {
+                            name: 'body',
+                            color: [0.2, 0.2, 0.2],
+                            positions: [
+                                -0.14, -0.13, 0, 0.14, -0.13, 0, 0.14, 0.13,
+                                0.137, -0.14, -0.13, 0, 0.14, 0.13, 0.137,
+                                -0.14, 0.13, 0.137
+                            ],
+                            normals: [],
+                            indices: [0, 1, 2, 3, 4, 5],
+                            faceColors: []
+                        }
+                    ]
+                }
+            }
+        }
+    })
+
+    assert.deepEqual(diagnostics, [])
+
+    const wrapperGroup = externalModelsGroup.children[0]
+    const compensationGroup = wrapperGroup.children[0]
+    const orientationGroup = compensationGroup.children[0]
+    const sideGroup = orientationGroup.children[0]
+    const faceGroup = sideGroup.children[0]
+    const modelGroup = resolvePlacedModelGroup(faceGroup)
+
+    assert.ok(Math.abs(modelGroup.rotation.x) < 0.000001)
+})
+
 test('PcbScene3dExternalModels centers owner model-anchor fallbacks after load', async () => {
     const externalModelsGroup = new THREE.Group()
 

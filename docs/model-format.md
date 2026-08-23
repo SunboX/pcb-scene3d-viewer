@@ -186,6 +186,13 @@ Embedded STEP models can use:
 }
 ```
 
+For imported STEP assemblies, the runtime compares the fully assembled mesh
+envelope with an authored model-bounds projection before applying a separate
+quarter-turn around the model X axis. When the imported assembly has already
+exchanged its depth and height axes, the duplicate tilt is omitted. Toolkits
+can set `modelTransform.preserveSourceAnchor: true` when an authored body origin
+must remain fixed without requesting component-center recovery.
+
 ## Detail Primitives
 
 The runtime expects pre-normalized primitive lists for:

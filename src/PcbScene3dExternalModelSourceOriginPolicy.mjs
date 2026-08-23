@@ -6,12 +6,13 @@ export class PcbScene3dExternalModelSourceOriginPolicy {
      * Checks whether an explicit owner anchor should keep source-origin repair
      * disabled. Translucent cover-sized bodies use corner-origin STEP data, so
      * they still need the embedded source-origin correction.
-     * @param {{ bodyOpacity?: number | string, modelTransform?: { ownerAnchorOffsetMil?: object }, projection?: { boundsMil?: { width?: number, depth?: number } } }} placement Placement metadata.
+     * @param {{ bodyOpacity?: number | string, modelTransform?: { ownerAnchorOffsetMil?: object, preserveSourceAnchor?: boolean }, projection?: { boundsMil?: { width?: number, depth?: number } } }} placement Placement metadata.
      * @returns {boolean}
      */
     static shouldSkipOwnerAnchoredAdjustment(placement) {
         return (
-            Boolean(placement?.modelTransform?.ownerAnchorOffsetMil) &&
+            (Boolean(placement?.modelTransform?.ownerAnchorOffsetMil) ||
+                placement?.modelTransform?.preserveSourceAnchor === true) &&
             !PcbScene3dExternalModelSourceOriginPolicy.#isTransparentCoverSizedPlacement(
                 placement
             )
