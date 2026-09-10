@@ -31,23 +31,33 @@ export class PcbScene3dSilkscreenFactory {
      * @param {number} topZ
      * @param {number} bottomZ
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
+     * @param {{ top?: PcbScene3dSilkscreenCutoutContext, bottom?: PcbScene3dSilkscreenCutoutContext }} [cutoutContexts] Internal build-scoped side preparations.
      * @returns {any}
      */
-    static buildGroup(THREE, silkscreen, topZ, bottomZ, normalizeBoardPoint) {
+    static buildGroup(
+        THREE,
+        silkscreen,
+        topZ,
+        bottomZ,
+        normalizeBoardPoint,
+        cutoutContexts = {}
+    ) {
         const group = new THREE.Group()
         const topGroup = PcbScene3dSilkscreenFactory.#buildSideGroup(
             THREE,
             silkscreen?.top,
             Math.abs(Number(topZ || 0)),
             normalizeBoardPoint,
-            false
+            false,
+            cutoutContexts.top
         )
         const bottomGroup = PcbScene3dSilkscreenFactory.#buildSideGroup(
             THREE,
             silkscreen?.bottom,
             Math.abs(Number(bottomZ || 0)),
             normalizeBoardPoint,
-            true
+            true,
+            cutoutContexts.bottom
         )
 
         if (topGroup.children.length) {
@@ -61,15 +71,47 @@ export class PcbScene3dSilkscreenFactory {
     }
 
     /**
+     * Normalizes detached cutouts once for all batches on one board side.
+     * The returned context must not be reused across separate scene builds.
+     * @param {{ drillCutouts?: object[][], copperCutouts?: object[][] } | undefined} silkscreen Side artwork.
+     * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint Board normalizer.
+     * @param {boolean} mirrorY Whether the side is mirrored.
+     * @returns {PcbScene3dSilkscreenCutoutContext}
+     */
+    static prepareCutoutContext(silkscreen, normalizeBoardPoint, mirrorY) {
+        const drillCutouts = PcbScene3dSilkscreenFactory.#normalizeCutouts(
+            silkscreen?.drillCutouts,
+            normalizeBoardPoint,
+            mirrorY
+        )
+        const copperCutouts = PcbScene3dSilkscreenFactory.#normalizeCutouts(
+            silkscreen?.copperCutouts,
+            normalizeBoardPoint,
+            mirrorY
+        )
+        return new PcbScene3dSilkscreenCutoutContext(
+            drillCutouts.concat(copperCutouts)
+        )
+    }
+
+    /**
      * Builds one side-specific silkscreen group.
      * @param {any} THREE
      * @param {{ fills?: any[], tracks?: any[], arcs?: any[], texts?: any[], drillCutouts?: { x: number, y: number }[][], copperCutouts?: { x: number, y: number }[][], fillColor?: number, strokeColor?: number, knockoutColor?: number, nativeTextKnockouts?: boolean } | undefined} silkscreen
      * @param {number} z
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {boolean} mirrorY
+     * @param {PcbScene3dSilkscreenCutoutContext} [preparedCutoutContext] Shared side preparation.
      * @returns {any}
      */
-    static #buildSideGroup(THREE, silkscreen, z, normalizeBoardPoint, mirrorY) {
+    static #buildSideGroup(
+        THREE,
+        silkscreen,
+        z,
+        normalizeBoardPoint,
+        mirrorY,
+        preparedCutoutContext
+    ) {
         const group = new THREE.Group()
         const strokeColor = PcbScene3dSilkscreenFactory.#resolveMaterialColor(
             silkscreen?.strokeColor
@@ -89,18 +131,14 @@ export class PcbScene3dSilkscreenFactory {
               ? fillColor
               : textMaterialColor
         const strokeZ = z + PcbScene3dSilkscreenFactory.#STROKE_Z_OFFSET
-        const drillCutouts = PcbScene3dSilkscreenFactory.#normalizeCutouts(
-            silkscreen?.drillCutouts,
-            normalizeBoardPoint,
-            mirrorY
-        )
-        const copperCutouts = PcbScene3dSilkscreenFactory.#normalizeCutouts(
-            silkscreen?.copperCutouts,
-            normalizeBoardPoint,
-            mirrorY
-        )
-        const surfaceCutouts = drillCutouts.concat(copperCutouts)
-        const cutoutContext = new PcbScene3dSilkscreenCutoutContext()
+        const cutoutContext =
+            preparedCutoutContext ||
+            PcbScene3dSilkscreenFactory.prepareCutoutContext(
+                silkscreen,
+                normalizeBoardPoint,
+                mirrorY
+            )
+        const surfaceCutouts = cutoutContext.surfaceCutouts
         const strokeMaterial = PcbScene3dSilkscreenFactory.#buildMaterial(
             THREE,
             strokeColor
@@ -147,9 +185,7 @@ export class PcbScene3dSilkscreenFactory {
             mirrorY,
             fillMaterial,
             surfaceCutouts,
-            {
-                preparedPolygonCache: cutoutContext.preparedPolygonCache
-            }
+            cutoutContext.geometryFilterOptions
         )
         const texts = Array.isArray(silkscreen?.texts) ? silkscreen.texts : []
         const renderableTexts = texts.filter(
@@ -179,7 +215,7 @@ export class PcbScene3dSilkscreenFactory {
                     fog: false
                 },
                 mirrorY,
-                preparedPolygonCache: cutoutContext.preparedPolygonCache,
+                ...cutoutContext.geometryFilterOptions,
                 side: mirrorY ? 'bottom' : 'top'
             }
         )
@@ -534,7 +570,7 @@ export class PcbScene3dSilkscreenFactory {
                 maxDepth: 12,
                 maxEdgeLength:
                     PcbScene3dSilkscreenFactory.#CUTOUT_MAX_EDGE_LENGTH,
-                preparedPolygonCache: cutoutContext.preparedPolygonCache
+                ...cutoutContext.geometryFilterOptions
             }
         )
         const mesh = new THREE.Mesh(geometry, material)
@@ -823,7 +859,7 @@ export class PcbScene3dSilkscreenFactory {
                     maxDepth: 12,
                     maxEdgeLength:
                         PcbScene3dSilkscreenFactory.#CUTOUT_MAX_EDGE_LENGTH,
-                    preparedPolygonCache: cutoutContext?.preparedPolygonCache
+                    ...cutoutContext?.geometryFilterOptions
                 }
             ),
             material

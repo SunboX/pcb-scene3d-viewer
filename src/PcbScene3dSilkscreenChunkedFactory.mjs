@@ -41,6 +41,7 @@ export class PcbScene3dSilkscreenChunkedFactory {
         }
 
         const group = new THREE.Group()
+        const cutoutContexts = {}
         for (const side of ['top', 'bottom']) {
             for (const recordKey of PcbScene3dSilkscreenChunkedFactory
                 .#RECORD_KEYS) {
@@ -53,7 +54,8 @@ export class PcbScene3dSilkscreenChunkedFactory {
                     topZ,
                     bottomZ,
                     normalizeBoardPoint,
-                    options
+                    options,
+                    cutoutContexts
                 )
             }
         }
@@ -72,6 +74,7 @@ export class PcbScene3dSilkscreenChunkedFactory {
      * @param {number} bottomZ
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
      * @param {{ yieldToMain?: () => Promise<void> | void, shouldContinue?: () => boolean }} options
+     * @param {object} cutoutContexts Build-scoped side preparations.
      * @returns {Promise<void>}
      */
     static async #appendRecordChunks(
@@ -83,7 +86,8 @@ export class PcbScene3dSilkscreenChunkedFactory {
         topZ,
         bottomZ,
         normalizeBoardPoint,
-        options
+        options,
+        cutoutContexts
     ) {
         const sideSilkscreen = silkscreen?.[side] || {}
         const records = Array.isArray(sideSilkscreen[recordKey])
@@ -98,6 +102,13 @@ export class PcbScene3dSilkscreenChunkedFactory {
             PcbScene3dSilkscreenChunkedFactory.#shouldContinue(options);
             index += batchSize
         ) {
+            // Prepare lazily so cancelled or empty sides incur no cutout work.
+            cutoutContexts[side] ||=
+                PcbScene3dSilkscreenFactory.prepareCutoutContext(
+                    sideSilkscreen,
+                    normalizeBoardPoint,
+                    side === 'bottom'
+                )
             const chunkGroup = PcbScene3dSilkscreenFactory.buildGroup(
                 THREE,
                 PcbScene3dSilkscreenChunkedFactory.#buildChunkSilkscreen(
@@ -108,7 +119,8 @@ export class PcbScene3dSilkscreenChunkedFactory {
                 ),
                 topZ,
                 bottomZ,
-                normalizeBoardPoint
+                normalizeBoardPoint,
+                cutoutContexts
             )
             if (chunkGroup.children.length) {
                 group.add(chunkGroup)

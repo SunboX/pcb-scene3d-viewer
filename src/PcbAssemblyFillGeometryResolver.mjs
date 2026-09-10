@@ -378,6 +378,22 @@ export class PcbAssemblyFillGeometryResolver {
             return []
         }
 
+        // Segment x/y fields can denote arc centers. Do not reinterpret them
+        // as contour vertices before checking the segment's explicit shape.
+        if (
+            list.some(
+                (entry) =>
+                    ['line', 'arc'].includes(
+                        String(entry?.type || '').toLowerCase()
+                    ) ||
+                    (entry?.x1 != null && entry?.y1 != null) ||
+                    (entry?.startX != null && entry?.startY != null) ||
+                    entry?.start != null
+            )
+        ) {
+            return PcbAssemblyFillGeometryResolver.#segmentLoop(list)
+        }
+
         const pointLoop = PcbAssemblyFillGeometryResolver.#pointLoop(list)
         if (pointLoop.length >= 3) {
             return pointLoop

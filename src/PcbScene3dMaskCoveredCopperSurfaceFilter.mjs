@@ -52,7 +52,9 @@ export class PcbScene3dMaskCoveredCopperSurfaceFilter {
                     options
                 )
             ) {
-                filtered.push(...source.slice(index, index + 9))
+                for (let offset = 0; offset < 9; offset += 1) {
+                    filtered.push(source[index + offset])
+                }
             }
         }
 
@@ -83,32 +85,20 @@ export class PcbScene3dMaskCoveredCopperSurfaceFilter {
      * @returns {boolean}
      */
     static #keepsTriangle(source, index, zBounds, options) {
-        const zValues = [2, 5, 8].map((offset) => source[index + offset])
-        const hasTop = zValues.some((z) =>
-            PcbScene3dMaskCoveredCopperSurfaceFilter.#matchesZ(z, zBounds.maxZ)
-        )
-        const hasBottom = zValues.some((z) =>
-            PcbScene3dMaskCoveredCopperSurfaceFilter.#matchesZ(z, zBounds.minZ)
-        )
-
-        if (hasTop && !hasBottom) {
-            return true
-        }
-
-        return options?.keepSideWalls === true && hasTop && hasBottom
-    }
-
-    /**
-     * Checks whether a Z value matches one target plane.
-     * @param {number} value Candidate Z.
-     * @param {number} target Target Z.
-     * @returns {boolean}
-     */
-    static #matchesZ(value, target) {
-        return (
-            Math.abs(Number(value) - Number(target)) <=
-            PcbScene3dMaskCoveredCopperSurfaceFilter.#Z_EPSILON
-        )
+        const a = Number(source[index + 2])
+        const b = Number(source[index + 5])
+        const c = Number(source[index + 8])
+        const epsilon = PcbScene3dMaskCoveredCopperSurfaceFilter.#Z_EPSILON
+        const hasTop =
+            Math.abs(a - zBounds.maxZ) <= epsilon ||
+            Math.abs(b - zBounds.maxZ) <= epsilon ||
+            Math.abs(c - zBounds.maxZ) <= epsilon
+        if (!hasTop || options?.keepSideWalls === true) return hasTop
+        const hasBottom =
+            Math.abs(a - zBounds.minZ) <= epsilon ||
+            Math.abs(b - zBounds.minZ) <= epsilon ||
+            Math.abs(c - zBounds.minZ) <= epsilon
+        return !hasBottom
     }
 
     /**

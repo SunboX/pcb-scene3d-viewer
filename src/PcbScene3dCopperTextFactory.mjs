@@ -45,7 +45,7 @@ export class PcbScene3dCopperTextFactory {
      * @param {any[]} texts
      * @param {number} z
      * @param {(x: number, y: number) => { x: number, y: number }} normalizeBoardPoint
-     * @param {{ side?: 'top' | 'bottom', mirrorY?: boolean, materialColor?: number, materialProperties?: { materialKind?: 'basic' | 'standard', roughness?: number, metalness?: number, transparent?: boolean, opacity?: number, toneMapped?: boolean, fog?: boolean }, filterSide?: boolean, glyphYUp?: boolean, drillCutouts?: { x: number, y: number }[][], preparedPolygonCache?: Map }} [options]
+     * @param {{ side?: 'top' | 'bottom', mirrorY?: boolean, materialColor?: number, materialProperties?: { materialKind?: 'basic' | 'standard', roughness?: number, metalness?: number, transparent?: boolean, opacity?: number, toneMapped?: boolean, fog?: boolean }, filterSide?: boolean, glyphYUp?: boolean, drillCutouts?: { x: number, y: number }[][], preparedPolygonCache?: Map, preparedCutoutCache?: WeakMap }} [options]
      * @returns {any}
      */
     static buildGroup(THREE, texts, z, normalizeBoardPoint, options = {}) {
@@ -88,7 +88,7 @@ export class PcbScene3dCopperTextFactory {
                 THREE,
                 geometry,
                 options?.drillCutouts,
-                options?.preparedPolygonCache
+                options
             )
 
         if (
@@ -117,21 +117,19 @@ export class PcbScene3dCopperTextFactory {
      * @param {any} THREE
      * @param {any} geometry
      * @param {{ x: number, y: number }[][] | undefined} drillCutouts
-     * @param {Map | undefined} preparedPolygonCache Request-scoped prepared cache.
+     * @param {{ preparedPolygonCache?: Map, preparedCutoutCache?: WeakMap }} options Build-scoped cutout caches.
      * @returns {any}
      */
-    static #filterDrillCutouts(
-        THREE,
-        geometry,
-        drillCutouts,
-        preparedPolygonCache
-    ) {
+    static #filterDrillCutouts(THREE, geometry, drillCutouts, options) {
         return Array.isArray(drillCutouts) && drillCutouts.length
             ? PcbScene3dCutoutGeometryFilter.filter(
                   THREE,
                   geometry,
                   drillCutouts,
-                  { preparedPolygonCache }
+                  {
+                      preparedPolygonCache: options?.preparedPolygonCache,
+                      preparedCutoutCache: options?.preparedCutoutCache
+                  }
               )
             : geometry
     }

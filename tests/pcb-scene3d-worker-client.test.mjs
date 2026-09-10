@@ -114,3 +114,23 @@ test('PcbScene3dWorkerClient terminates the worker on dispose', () => {
 
     assert.equal(worker.terminated, true)
 })
+
+/** Verifies failed cloning rejects only that request and allows a later retry. */
+test('PcbScene3dWorkerClient recovers after a synchronous post failure', async () => {
+    const worker = new FakeWorker()
+    const postMessage = worker.postMessage.bind(worker)
+    worker.postMessage = (message) => postMessage(structuredClone(message))
+    const client = new PcbScene3dWorkerClient(() => worker)
+
+    await assert.rejects(client.prepareScene({}, new Proxy([], {})), {
+        name: 'DataCloneError'
+    })
+    const next = client.prepareScene({}, [])
+    worker.emitMessage({
+        type: 'scene3d:success',
+        requestId: worker.postedMessages[0].requestId,
+        sceneDescription: { components: [] }
+    })
+    assert.deepEqual(await next, { components: [] })
+    client.dispose()
+})

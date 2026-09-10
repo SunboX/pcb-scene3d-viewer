@@ -22,7 +22,7 @@ export class PcbScene3dSilkscreenFillSeamBuilder {
      * @param {boolean} mirrorY Whether the side is mirrored.
      * @param {any} material Shared fill material.
      * @param {{ x: number, y: number }[][]} [cutouts] Cutouts that should remain uncovered.
-     * @param {{ preparedPolygonCache?: Map }} [options] Request-scoped options.
+     * @param {{ preparedPolygonCache?: Map, preparedCutoutCache?: WeakMap }} [options] Request-scoped options.
      * @returns {any[]}
      */
     static buildMeshes(
@@ -117,7 +117,7 @@ export class PcbScene3dSilkscreenFillSeamBuilder {
      * @param {number[]} positions Position buffer.
      * @param {any} material Shared material.
      * @param {{ x: number, y: number }[][]} cutouts Cutout polygons.
-     * @param {{ preparedPolygonCache?: Map }} options Request-scoped options.
+     * @param {{ preparedPolygonCache?: Map, preparedCutoutCache?: WeakMap }} options Request-scoped options.
      * @returns {void}
      */
     static #appendMesh(meshes, THREE, positions, material, cutouts, options) {
@@ -139,7 +139,8 @@ export class PcbScene3dSilkscreenFillSeamBuilder {
             PcbScene3dCutoutGeometryFilter.filter(THREE, geometry, cutouts, {
                 maxDepth: 12,
                 maxEdgeLength: 2,
-                preparedPolygonCache: options?.preparedPolygonCache
+                preparedPolygonCache: options?.preparedPolygonCache,
+                preparedCutoutCache: options?.preparedCutoutCache
             }),
             material
         )

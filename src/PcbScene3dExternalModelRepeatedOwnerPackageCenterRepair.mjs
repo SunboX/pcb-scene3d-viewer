@@ -41,6 +41,10 @@ export class PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair {
                 sceneDescription,
                 placement
             )
+        if (siblingPlacements.length <= 1) {
+            return
+        }
+
         const packageRecords =
             PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#packageRecords(
                 sceneDescription,
@@ -117,11 +121,7 @@ export class PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair {
             String(placement?.projection?.source || '').toLowerCase() ===
                 'model-bounds' &&
             String(placement?.externalModel?.origin || '').toLowerCase() ===
-                'embedded' &&
-            PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#siblingPlacements(
-                sceneDescription,
-                placement
-            ).length > 1
+                'embedded'
         )
     }
 
@@ -191,18 +191,29 @@ export class PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair {
      * @returns {{ placement: object, padCenter: { x: number, y: number }, anchorOffset: { x: number, y: number } }[]}
      */
     static #packageRecords(sceneDescription, placements) {
+        // Reuse ownership indexes across the sibling group, while rebuilding
+        // them per application so edits to scene rows remain observable.
+        const componentsByDesignator =
+            PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#componentsByDesignator(
+                sceneDescription
+            )
+        const padsByComponent =
+            PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#padsByComponent(
+                sceneDescription
+            )
         return (Array.isArray(placements) ? placements : [])
             .map((placement) => {
                 const component =
                     PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#resolveComponent(
-                        sceneDescription,
+                        componentsByDesignator,
                         placement
                     )
                 const padCenter =
                     PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#ownedPackagePadCenter(
                         sceneDescription,
                         component,
-                        placement
+                        placement,
+                        padsByComponent
                     )
                 if (!padCenter) {
                     return null
@@ -225,9 +236,15 @@ export class PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair {
      * @param {object | null | undefined} sceneDescription Scene description.
      * @param {object | null} component Scene component.
      * @param {object | null | undefined} placement External placement.
+     * @param {Map<number, object[]>} padsByComponent Pads indexed by owner.
      * @returns {{ x: number, y: number } | null}
      */
-    static #ownedPackagePadCenter(sceneDescription, component, placement) {
+    static #ownedPackagePadCenter(
+        sceneDescription,
+        component,
+        placement,
+        padsByComponent
+    ) {
         if (
             !PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#isPackageComponent(
                 component
@@ -247,18 +264,12 @@ export class PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair {
             PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#isBottomPlacement(
                 placement
             )
-        const points = (
-            Array.isArray(sceneDescription?.detail?.pads)
-                ? sceneDescription.detail.pads
-                : []
-        )
-            .filter(
-                (pad) =>
-                    Number(pad?.componentIndex) === componentIndex &&
-                    PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#isSurfacePad(
-                        pad,
-                        isBottom
-                    )
+        const points = (padsByComponent.get(componentIndex) || [])
+            .filter((pad) =>
+                PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair.#isSurfacePad(
+                    pad,
+                    isBottom
+                )
             )
             .map((pad) => ({
                 x: Number(pad?.x || 0) - centerX,
@@ -482,23 +493,58 @@ export class PcbScene3dExternalModelRepeatedOwnerPackageCenterRepair {
     }
 
     /**
-     * Resolves the scene component for one placement.
+     * Indexes scene pads once for all owners in a repeated package group.
      * @param {object | null | undefined} sceneDescription Scene description.
+     * @returns {Map<number, object[]>}
+     */
+    static #padsByComponent(sceneDescription) {
+        const index = new Map()
+        const pads = Array.isArray(sceneDescription?.detail?.pads)
+            ? sceneDescription.detail.pads
+            : []
+        for (const pad of pads) {
+            const componentIndex = Number(pad?.componentIndex)
+            if (!Number.isFinite(componentIndex)) {
+                continue
+            }
+            let ownedPads = index.get(componentIndex)
+            if (!ownedPads) {
+                ownedPads = []
+                index.set(componentIndex, ownedPads)
+            }
+            ownedPads.push(pad)
+        }
+        return index
+    }
+
+    /**
+     * Indexes the first component for each normalized owner designator.
+     * @param {object | null | undefined} sceneDescription Scene description.
+     * @returns {Map<string, object>}
+     */
+    static #componentsByDesignator(sceneDescription) {
+        const index = new Map()
+        const components = Array.isArray(sceneDescription?.components)
+            ? sceneDescription.components
+            : []
+        for (const component of components) {
+            const designator = String(component?.designator || '').trim()
+            if (designator && !index.has(designator)) {
+                index.set(designator, component)
+            }
+        }
+        return index
+    }
+
+    /**
+     * Resolves the scene component for one placement.
+     * @param {Map<string, object>} componentsByDesignator Components indexed by owner.
      * @param {object | null | undefined} placement External placement.
      * @returns {object | null}
      */
-    static #resolveComponent(sceneDescription, placement) {
+    static #resolveComponent(componentsByDesignator, placement) {
         const designator = String(placement?.designator || '').trim()
-        if (!designator || !Array.isArray(sceneDescription?.components)) {
-            return null
-        }
-
-        return (
-            sceneDescription.components.find(
-                (component) =>
-                    String(component?.designator || '').trim() === designator
-            ) || null
-        )
+        return componentsByDesignator.get(designator) || null
     }
 
     /**

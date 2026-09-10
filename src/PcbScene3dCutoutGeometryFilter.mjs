@@ -16,7 +16,7 @@ export class PcbScene3dCutoutGeometryFilter {
      * @param {any} THREE
      * @param {any} geometry
      * @param {{ x: number, y: number }[][]} cutouts
-     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean, preparedPolygonCache?: Map }} [options]
+     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean, preparedPolygonCache?: Map, preparedCutoutCache?: WeakMap }} [options]
      * @returns {any}
      */
     static filter(THREE, geometry, cutouts, options = {}) {
@@ -36,10 +36,12 @@ export class PcbScene3dCutoutGeometryFilter {
         if (!position?.count) {
             return geometry
         }
-        const preparedCutouts = PcbScene3dCutoutGeometryFilter.#prepareCutouts(
-            cutouts,
-            PcbScene3dCutoutGeometryFilter.#resolvePreparedPolygonCache(options)
-        )
+        const queryContext =
+            PcbScene3dCutoutGeometryFilter.#resolveQueryContext(
+                cutouts,
+                options
+            )
+        const { preparedCutouts } = queryContext
         if (
             PcbScene3dGeometryBoundsResolver.missesAllPositionBounds(
                 position,
@@ -48,7 +50,8 @@ export class PcbScene3dCutoutGeometryFilter {
             )
         )
             return geometry
-        const cutoutIndex = new PcbScene3dCutoutGridIndex(preparedCutouts)
+        const cutoutIndex = (queryContext.cutoutIndex ||=
+            new PcbScene3dCutoutGridIndex(preparedCutouts))
         const settings =
             PcbScene3dCutoutGeometryFilter.#resolveSettings(options)
         const positions = []
@@ -81,8 +84,37 @@ export class PcbScene3dCutoutGeometryFilter {
         return filteredGeometry
     }
     /**
+     * Resolves preparation and a lazily built query index for an immutable
+     * cutout collection. Cache ownership belongs to one caller build; calls
+     * without a cache always observe the current source coordinates.
+     * @param {object[][]} cutouts Source cutout collection.
+     * @param {{ preparedPolygonCache?: Map, preparedCutoutCache?: WeakMap }} options Build-scoped options.
+     * @returns {{ preparedCutouts: PcbScene3dPreparedPolygon[], cutoutIndex: PcbScene3dCutoutGridIndex | null }}
+     */
+    static #resolveQueryContext(cutouts, options) {
+        const cache =
+            options?.preparedCutoutCache instanceof WeakMap
+                ? options.preparedCutoutCache
+                : null
+        const cached = cache?.get(cutouts)
+        if (cached) return cached
+
+        const context = {
+            preparedCutouts: PcbScene3dCutoutGeometryFilter.#prepareCutouts(
+                cutouts,
+                PcbScene3dCutoutGeometryFilter.#resolvePreparedPolygonCache(
+                    options
+                )
+            ),
+            cutoutIndex: null
+        }
+        cache?.set(cutouts, context)
+        return context
+    }
+
+    /**
      * Resolves clipping settings.
-     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean, preparedPolygonCache?: Map }} options
+     * @param {{ maxDepth?: number, maxEdgeLength?: number, discardTerminalOverlaps?: boolean, preparedPolygonCache?: Map, preparedCutoutCache?: WeakMap }} options
      * @returns {{ maxDepth: number, maxEdgeLength: number, maxEdgeLengthSquared: number, discardTerminalOverlaps: boolean }}
      */
     static #resolveSettings(options) {
@@ -106,7 +138,7 @@ export class PcbScene3dCutoutGeometryFilter {
     }
     /**
      * Resolves a supported request-scoped prepared polygon cache.
-     * @param {{ preparedPolygonCache?: Map }} options Request options.
+     * @param {{ preparedPolygonCache?: Map, preparedCutoutCache?: WeakMap }} options Request options.
      * @returns {Map | null}
      */
     static #resolvePreparedPolygonCache(options) {

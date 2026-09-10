@@ -66,6 +66,41 @@ export class PcbScene3dSilkscreenCutoutContext {
         this.#prepareNormalizedCutout(cutout)
     )
 
+    /** @type {{ x: number, y: number }[][]} */
+    #surfaceCutouts
+
+    /** @type {WeakMap<any[], object>} */
+    #preparedCutoutCache = new WeakMap()
+
+    /**
+     * Owns detached normalized cutouts for one side of a build. Callers must
+     * keep these coordinates unchanged for the lifetime of this context.
+     * @param {{ x: number, y: number }[][]} [surfaceCutouts] Normalized cutouts.
+     */
+    constructor(surfaceCutouts = []) {
+        this.#surfaceCutouts = surfaceCutouts
+    }
+
+    /**
+     * Returns the normalized surface cutouts shared by every side batch.
+     * @returns {{ x: number, y: number }[][]}
+     */
+    get surfaceCutouts() {
+        return this.#surfaceCutouts
+    }
+
+    /**
+     * Returns build-scoped caches for exact clipping consumers. Weak keys
+     * allow temporary fill-specific cutout lists to be released after use.
+     * @returns {{ preparedPolygonCache: Map, preparedCutoutCache: WeakMap }}
+     */
+    get geometryFilterOptions() {
+        return {
+            preparedPolygonCache: this.#preparedPolygonCache,
+            preparedCutoutCache: this.#preparedCutoutCache
+        }
+    }
+
     /**
      * Returns the lazy cache shared by exact geometry consumers.
      * @returns {Map<any, PcbScene3dPreparedPolygon>}

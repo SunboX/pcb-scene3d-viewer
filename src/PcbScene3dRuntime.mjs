@@ -1,15 +1,14 @@
-import { PcbScene3dBoardSolderMaskFactory } from './PcbScene3dBoardSolderMaskFactory.mjs'
 import { PcbScene3dCameraRig } from './PcbScene3dCameraRig.mjs'
 import { PcbScene3dCircuitJsonAdapter } from './PcbScene3dCircuitJsonAdapter.mjs'
 import { PcbScene3dComponentVisibility } from './PcbScene3dComponentVisibility.mjs'
 import { PcbScene3dComponentAdjustment } from './PcbScene3dComponentAdjustment.mjs'
 import { PcbScene3dComponentAdjustmentRegistry } from './PcbScene3dComponentAdjustmentRegistry.mjs'
 import { PcbScene3dCompanionBasePlacementAdjuster } from './PcbScene3dCompanionBasePlacementAdjuster.mjs'
-import { PcbScene3dCopperDetailGroupBuilder } from './PcbScene3dCopperDetailGroupBuilder.mjs'
 import { PcbScene3dCopperFactory } from './PcbScene3dCopperFactory.mjs'
 import { PcbScene3dDetailCoordinateNormalizer } from './PcbScene3dDetailCoordinateNormalizer.mjs'
 import { PcbScene3dDeferredModelFinalizer } from './PcbScene3dDeferredModelFinalizer.mjs'
-import { PcbScene3dDrillVoidFactory } from './PcbScene3dDrillVoidFactory.mjs'
+import { PcbScene3dGeometryTransfer } from './PcbScene3dGeometryTransfer.mjs'
+import { PcbScene3dGeometryWorkerClient } from './PcbScene3dGeometryWorkerClient.mjs'
 import { PcbScene3dExternalCompanionFallback } from './PcbScene3dExternalCompanionFallback.mjs'
 import { PcbScene3dExternalModels } from './PcbScene3dExternalModels.mjs'
 import { PcbScene3dExternalPlacementDefaults } from './PcbScene3dExternalPlacementDefaults.mjs'
@@ -75,10 +74,11 @@ export class PcbScene3dRuntime {
     #hasSettledReady
     #renderScheduler
     #visibilityGraph
+    #geometryWorker
     /**
      * @param {HTMLElement} viewportNode
      * @param {any} sceneDescription Scene description or CircuitJSON model.
-     * @param {{ setDiagnostics?: (messages: string[]) => void, setSelection?: (selection: any | null) => void, loadRuntimeModules?: () => Promise<{ THREE: any, OrbitControls: any }>, translate?: ((key: string) => string) | null, modelLoaderOptions?: object }} [hooks]
+     * @param {{ setDiagnostics?: (messages: string[]) => void, setSelection?: (selection: any | null) => void, loadRuntimeModules?: () => Promise<{ THREE: any, OrbitControls: any }>, translate?: ((key: string) => string) | null, modelLoaderOptions?: object, geometryWorkerOptions?: object }} [hooks]
      */
     constructor(viewportNode, sceneDescription, hooks = {}) {
         const renderModel =
@@ -129,6 +129,9 @@ export class PcbScene3dRuntime {
             }
         })
         this.#visibilityGraph = new PcbScene3dVisibilityGraph()
+        this.#geometryWorker = new PcbScene3dGeometryWorkerClient(
+            hooks.geometryWorkerOptions
+        )
         this.#resolveReadyPromise = null
         this.#readyPromise = new Promise((resolve) => {
             this.#resolveReadyPromise = resolve
@@ -218,6 +221,10 @@ export class PcbScene3dRuntime {
     /** @returns {void} */
     dispose() {
         this.#isDisposed = true
+        this.#geometryWorker.dispose()
+        ;['board', 'copper'].forEach((kind) =>
+            PcbScene3dGeometryTransfer.dispose(this.#groups.get(kind))
+        )
         this.#renderScheduler.cancel()
         this.#listeners.forEach(({ node, type, listener }) => {
             node.removeEventListener?.(type, listener)
@@ -283,9 +290,13 @@ export class PcbScene3dRuntime {
             this.#bindSelectionInteraction()
             this.#applyToggleVisibility()
             this.#render()
+            await this.#loadGeneratedGeometry('board')
+            if (this.#isDisposed) return
+            this.#render()
             await this.#loadDeferredDetail()
             this.#settleReady()
         } catch (error) {
+            if (this.#isDisposed) return
             this.#hooks.setDiagnostics?.([
                 '3D preview could not start: ' +
                     String(error?.message || error || 'Unknown error.')
@@ -342,44 +353,6 @@ export class PcbScene3dRuntime {
             .multiplyScalar(this.#initialRadius * 0.8)
         this.#scene.add(ambientLight, keyLight, fillLight)
         const boardGroup = new THREE.Group()
-        boardGroup.add(
-            PcbScene3dRuntimeBoardMeshes.buildBoardMesh(
-                THREE,
-                this.#sceneDescription,
-                (x, y) => this.#normalizeDetailPoint(x, y)
-            )
-        )
-        boardGroup.add(
-            PcbScene3dBoardSolderMaskFactory.buildGroup(
-                THREE,
-                this.#sceneDescription,
-                (x, y) => this.#normalizeDetailPoint(x, y)
-            )
-        )
-        boardGroup.add(
-            PcbScene3dDrillVoidFactory.buildGroup(
-                THREE,
-                this.#sceneDescription.detail,
-                board.thicknessMil / 2,
-                -board.thicknessMil / 2,
-                (x, y) => this.#normalizeDetailPoint(x, y),
-                {
-                    enabled: true,
-                    board,
-                    hasBoardAssemblyModel: Boolean(
-                        this.#sceneDescription.boardAssemblyModel
-                    ),
-                    sourceFormat: this.#sceneDescription.sourceFormat
-                }
-            )
-        )
-        boardGroup.add(
-            PcbScene3dRuntimeBoardMeshes.buildBoardOutline(
-                THREE,
-                this.#sceneDescription,
-                (x, y) => this.#normalizeDetailPoint(x, y)
-            )
-        )
         this.#groups.set('board', boardGroup)
         PcbScene3dRuntimeBoardMeshes.applyBoardFaceSide(
             this.#three,
@@ -536,7 +509,8 @@ export class PcbScene3dRuntime {
             if (this.#isDisposed) {
                 return
             }
-            this.#loadDeferredCopper()
+            await this.#loadGeneratedGeometry('copper')
+            if (this.#isDisposed) return
             this.#applyToggleVisibility()
             this.#render()
             this.#settleReady()
@@ -596,24 +570,29 @@ export class PcbScene3dRuntime {
     }
 
     /**
-     * Builds and attaches copper and via detail once after the first frame.
-     * @returns {void}
+     * Attaches exact worker-built geometry only while its runtime is alive.
+     * @param {'board' | 'copper'} kind Generated detail stage.
+     * @returns {Promise<void>}
      */
-    #loadDeferredCopper() {
-        const copperGroup = this.#groups.get('copper')
-        if (!copperGroup || copperGroup.children.length) {
+    async #loadGeneratedGeometry(kind) {
+        const group = this.#groups.get(kind)
+        if (!group || group.children.length || this.#isDisposed) {
             return
         }
-        const topZ = this.#sceneDescription.board.thicknessMil / 2 + 0.05
-        const detailGroup = PcbScene3dCopperDetailGroupBuilder.build(
+        const detailGroup = await this.#geometryWorker.build(
             this.#three,
-            this.#sceneDescription,
-            topZ,
-            (x, y) => this.#normalizeDetailPoint(x, y)
+            kind,
+            this.#sceneDescription
         )
+        if (this.#isDisposed) {
+            PcbScene3dGeometryTransfer.dispose(detailGroup)
+            return
+        }
         if (detailGroup.children.length) {
-            copperGroup.add(detailGroup)
+            if (kind === 'board') group.add(...[...detailGroup.children])
+            else group.add(detailGroup)
             this.#applyViewScale(this.#presetState.get())
+            this.#applyToggleVisibility()
         }
     }
     /**

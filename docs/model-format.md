@@ -233,3 +233,8 @@ truthy field adds a solder-mask ring on that board surface while the plated
 through-hole barrel remains copper. A mixed via therefore renders one covered
 annulus and one exposed annulus; a via with both fields explicitly false stays
 on the exposed-copper path. The source toolkit owns this classification.
+
+Filled `contours` may contain point loops or line/arc segment loops. Segment
+records are recognized by their type or start endpoint before point conversion;
+arc `x`/`y` fields describe centers, not vertices. Arc segments can provide an
+explicit signed `sweepAngle` to preserve direction and sweeps across zero.

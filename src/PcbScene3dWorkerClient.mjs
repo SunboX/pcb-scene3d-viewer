@@ -40,12 +40,18 @@ export class PcbScene3dWorkerClient {
 
             const requestId = 'scene3d-request-' + this.#requestSequence++
             this.#pendingRequests.set(requestId, { resolve, reject })
-            this.#worker.postMessage({
-                type: 'scene3d:prepare',
-                requestId,
-                documentModel,
-                sessionAssets
-            })
+            try {
+                this.#worker.postMessage({
+                    type: 'scene3d:prepare',
+                    requestId,
+                    documentModel,
+                    sessionAssets
+                })
+            } catch (error) {
+                // A synchronous clone failure will never receive a response.
+                this.#pendingRequests.delete(requestId)
+                reject(error)
+            }
         })
     }
 

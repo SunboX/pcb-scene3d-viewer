@@ -365,3 +365,18 @@ The package also exports focused factories used by the runtime:
 These factories accept Three.js constructors and normalized scene-detail
 objects. They are exported for tests and advanced hosts, but most applications
 should use `PcbScene3dRuntime` or `PcbScene3dController`.
+
+### Copper occlusion geometry
+
+Covered copper is clipped against vertical occlusion prisms at the contour
+boundaries. Convex contours are clipped directly; concave contours are
+triangulated into convex pieces. Intersection vertices interpolate all three
+coordinates, preserving sloped surfaces and vertical relief walls without
+recursive mesh subdivision. Sampled circular openings use tangent planes with
+at least 32 segments (or the source contour resolution when greater), preventing
+copper slivers inside the analytic circle. This keeps mesh growth tied to the
+opening boundaries rather than board dimensions or a subdivision depth.
+
+Repeated external-model package placement uses ownership indexes scoped to one
+repair invocation. Input scenes remain mutable: subsequent applications rebuild
+the indexes and observe edits to pad and component rows.

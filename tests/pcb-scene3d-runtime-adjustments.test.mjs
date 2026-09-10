@@ -643,9 +643,10 @@ test('PcbScene3dRuntime respects fallback toggle while slow external loading set
         readyResolved = true
     })
 
-    await flushAsyncTurns(8)
+    await readyPromise
 
     assert.ok(lastCreatedScene)
+    assert.equal(typeof resolveExternalModels, 'function')
     assert.equal(resolveFallbackBodiesGroup()?.visible, false)
     assert.equal(readyResolved, true)
 

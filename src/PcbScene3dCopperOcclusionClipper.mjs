@@ -1,4 +1,4 @@
-import { PcbScene3dCutoutGeometryFilter } from './PcbScene3dCutoutGeometryFilter.mjs'
+import { PcbScene3dCopperOcclusionGeometry } from './PcbScene3dCopperOcclusionGeometry.mjs'
 
 /**
  * Clips mask-covered copper relief where opaque overlay artwork covers it.
@@ -12,13 +12,12 @@ export class PcbScene3dCopperOcclusionClipper {
      * @returns {any | null}
      */
     static filter(THREE, geometry, cutouts) {
-        geometry.computeVertexNormals?.()
-        const clippedGeometry = PcbScene3dCutoutGeometryFilter.filter(
+        const clippedGeometry = PcbScene3dCopperOcclusionGeometry.filter(
             THREE,
             geometry,
-            cutouts,
-            { maxDepth: 12, maxEdgeLength: 2, discardTerminalOverlaps: true }
+            cutouts
         )
+        clippedGeometry.computeVertexNormals?.()
 
         return clippedGeometry.getAttribute?.('position')?.count
             ? clippedGeometry
