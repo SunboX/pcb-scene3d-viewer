@@ -79,7 +79,7 @@ test('package exports public entrypoints', async () => {
     const pkg = JSON.parse(raw)
 
     assert.equal(pkg.name, 'pcb-scene3d-viewer')
-    assert.equal(pkg.version, '1.3.4')
+    assert.equal(pkg.version, '1.3.5')
     assert.equal(pkg.type, 'module')
     assert.equal(pkg.exports['.'], './src/index.mjs')
     assert.equal(pkg.exports['./scene3d'], './src/scene3d.mjs')

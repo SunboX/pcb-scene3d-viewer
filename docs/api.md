@@ -212,6 +212,9 @@ are unavailable, the viewer dynamically imports the ESM factory directly; it
 does not inject a classic script or depend on a global factory. Worker transfer
 uses a loader-owned byte snapshot, and rejected ESM initialization is evicted
 so callers retain their input and can retry transient failures.
+Worker resource failures are returned to the loader as failed import results;
+the loader rejects the affected request with the reported cause and can retry
+the next load without an uncaught worker exception.
 
 Static `authHeaders` are sent only to the main model origin. A host that
 intentionally authorizes another origin can return headers from

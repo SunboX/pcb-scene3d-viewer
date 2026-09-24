@@ -234,6 +234,17 @@ export class PcbScene3dStepLoader {
     #handleWorkerMessage(event) {
         const activeRequest = this.#activeWorkerRequest
         this.#activeWorkerRequest = null
+        if (event?.data?.success === false && event.data.error) {
+            activeRequest?.reject(
+                new Error(
+                    String(
+                        event.data.error.message ||
+                            'STEP importer worker failed.'
+                    )
+                )
+            )
+            return
+        }
         activeRequest?.resolve(event?.data || {})
     }
 

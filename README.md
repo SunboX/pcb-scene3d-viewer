@@ -47,6 +47,10 @@ second quarter-turn when the imported assembly envelope proves that its depth
 and height axes are already exchanged. See the
 [1.3.3 release notes](docs/release-notes-v1.3.3.md).
 
+Version 1.3.5 reports OCCT worker resource failures to the current STEP load
+and permits a later retry. See the
+[1.3.5 release notes](docs/release-notes-v1.3.5.md).
+
 ## CircuitJSON 1.1 convergence
 
 Version 1.2.2 accepts the common document and prepared-context shapes returned
@@ -155,6 +159,7 @@ const controller = new PcbScene3dController(viewportNode, document)
 
 - [API](docs/api.md)
 - [CircuitJSON usage](docs/circuitjson.md)
+- [1.3.5 release notes](docs/release-notes-v1.3.5.md)
 - [1.3.3 release notes](docs/release-notes-v1.3.3.md)
 - [1.3.2 release notes](docs/release-notes-v1.3.2.md)
 - [1.3.1 release notes](docs/release-notes-v1.3.1.md)

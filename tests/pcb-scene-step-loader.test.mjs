@@ -19,14 +19,18 @@ class FakeStepWorker {
     /** @type {boolean} */
     #failNextPost
 
+    /** @type {boolean} */
+    #failNextMessage
+
     /**
-     * @param {{ failNextPost?: boolean }} [options]
+     * @param {{ failNextPost?: boolean, failNextMessage?: boolean }} [options]
      */
     constructor(options = {}) {
         this.#listeners = new Map()
         this.postedMessages = []
         this.terminateCalls = 0
         this.#failNextPost = options.failNextPost === true
+        this.#failNextMessage = options.failNextMessage === true
     }
 
     /**
@@ -63,6 +67,17 @@ class FakeStepWorker {
             if (this.#failNextPost) {
                 this.#failNextPost = false
                 this.#emitError('Synthetic STEP worker failure.')
+                return
+            }
+
+            if (this.#failNextMessage) {
+                this.#failNextMessage = false
+                this.#emitMessage({
+                    success: false,
+                    error: {
+                        message: 'Importer resource could not be fetched.'
+                    }
+                })
                 return
             }
 
@@ -608,6 +623,27 @@ test('PcbScene3dStepLoader preserves caller bytes across worker failure and retr
     assert.equal(retried.meshPayloads.length, 1)
     assert.equal(workerCreations, 2)
 
+    loader.dispose()
+})
+
+test('PcbScene3dStepLoader reports a worker resource failure and retries the next model load', async () => {
+    const worker = new FakeStepWorker({ failNextMessage: true })
+    const loader = new PcbScene3dStepLoader({ stepWorkerFactory: () => worker })
+    const model = {
+        origin: 'session',
+        name: 'fake-body.step',
+        format: 'step',
+        payloadBytes: new Uint8Array([1, 2, 3]),
+        relativePath: 'parts/fake-body.step'
+    }
+
+    await assert.rejects(
+        loader.loadModel(model),
+        /Importer resource could not be fetched/u
+    )
+    const retried = await loader.loadModel(model)
+    assert.equal(retried.meshPayloads.length, 1)
+    assert.equal(worker.postedMessages.length, 2)
     loader.dispose()
 })
 
