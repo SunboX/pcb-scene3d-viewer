@@ -79,7 +79,7 @@ test('package exports public entrypoints', async () => {
     const pkg = JSON.parse(raw)
 
     assert.equal(pkg.name, 'pcb-scene3d-viewer')
-    assert.equal(pkg.version, '1.3.5')
+    assert.equal(pkg.version, '1.3.6')
     assert.equal(pkg.type, 'module')
     assert.equal(pkg.exports['.'], './src/index.mjs')
     assert.equal(pkg.exports['./scene3d'], './src/scene3d.mjs')
@@ -92,7 +92,7 @@ test('package exports public entrypoints', async () => {
         'git+https://github.com/SunboX/pcb-scene3d-viewer.git'
     )
     assert.equal(pkg.dependencies['circuitjson-toolkit'], '^1.4.3')
-    assert.equal(pkg.dependencies['@sunbox/occt-import-js'], '^0.0.28')
+    assert.equal(pkg.dependencies['@sunbox/occt-import-js'], '^0.0.29')
     assert.equal(pkg.dependencies.earcut, '3.0.2')
     assert.equal(pkg.files.includes('docs/circuitjson.md'), true)
     assert.equal(pkg.files.includes('docs/release-notes-v1.2.0.md'), true)
